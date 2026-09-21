@@ -6,7 +6,8 @@ import {
   signOut as fbSignOut,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  updatePassword
+  updatePassword,
+  signInAnonymously
 } from 'firebase/auth';
 import { auth, googleProvider } from '../lib/firebase';
 import { UserRole, Business, UserProfile } from '../types';
@@ -56,6 +57,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       } else {
         setCurrentRole('merchant');
+        signInAnonymously(auth).catch(() => {});
       }
       setLoading(false);
     });

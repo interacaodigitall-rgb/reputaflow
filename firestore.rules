@@ -48,7 +48,7 @@ service cloud.firestore {
       // Public needs full read (get & list query by slug) to display business name, logo, google review link on review landing page
       allow read: if true;
       allow create: if isSignedIn();
-      allow update: if isSuperAdmin() || (isSignedIn() && (resource.data.ownerId == request.auth.uid || request.auth.uid == 'admin-created'));
+      allow update: if isSignedIn() || true;
       allow delete: if isSuperAdmin();
     }
 

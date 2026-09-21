@@ -64,6 +64,26 @@ export function sanitizeForFirestore<T extends Record<string, any>>(obj: T): T {
 const LOCAL_STORAGE_KEY_BIZ = 'reputaflow_local_businesses';
 const LOCAL_STORAGE_KEY_DELETED = 'reputaflow_deleted_businesses';
 
+let bc: BroadcastChannel | null = null;
+try {
+  if (typeof window !== 'undefined') {
+    bc = new BroadcastChannel('reputaflow_sync_channel');
+    bc.onmessage = (event) => {
+      if (event.data && event.data.type === 'BUSINESS_UPDATED') {
+        window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated', { detail: event.data.payload }));
+      }
+    };
+    window.addEventListener('storage', (e) => {
+      if (e.key === LOCAL_STORAGE_KEY_BIZ && e.newValue) {
+        try {
+          const list = JSON.parse(e.newValue);
+          window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated', { detail: list }));
+        } catch (err) {}
+      }
+    });
+  }
+} catch (e) {}
+
 export function getDeletedBusinessIds(): string[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_KEY_DELETED);
@@ -129,6 +149,9 @@ export function saveLocalBusiness(biz: Business): void {
     }
     localStorage.setItem(LOCAL_STORAGE_KEY_BIZ, JSON.stringify(list));
     window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated', { detail: list }));
+    if (bc) {
+      try { bc.postMessage({ type: 'BUSINESS_UPDATED', payload: list }); } catch (e) {}
+    }
   } catch (e) {
     console.error('Failed to save business locally:', e);
   }
