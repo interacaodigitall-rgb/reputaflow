@@ -48,8 +48,9 @@ function loadDb(): ServerDb {
     }
     if (fs.existsSync(DB_FILE)) {
       const data = JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
+      const businesses = (data.businesses && data.businesses.length > 0) ? data.businesses : DEFAULT_BUSINESSES;
       return {
-        businesses: data.businesses || [],
+        businesses,
         reviews: data.reviews || [],
         feedback: data.feedback || [],
         recoveryCases: data.recoveryCases || [],
@@ -61,7 +62,7 @@ function loadDb(): ServerDb {
   }
 
   const initialDb: ServerDb = {
-    businesses: [],
+    businesses: DEFAULT_BUSINESSES,
     reviews: [],
     feedback: [],
     recoveryCases: [],

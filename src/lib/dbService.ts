@@ -152,40 +152,57 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
   const norm = normalizeKey(slug);
   const deletedIds = new Set(getDeletedBusinessIds());
 
-  // 1. Check local storage first (instant response if available on this device)
-  const localList = getLocalBusinesses();
-  const localMatch = localList.find(b => {
-    if (deletedIds.has(b.id)) return false;
-    const bId = (b.id || '').toLowerCase();
-    const bSlug = (b.slug || '').toLowerCase();
-    const bName = (b.name || '').toLowerCase();
-    if (bSlug === cleanSlug || bId === cleanSlug || bName === cleanSlug) return true;
-    if (normalizeKey(bSlug) === norm || normalizeKey(bId) === norm || normalizeKey(bName) === norm) return true;
-    return false;
-  });
-  if (localMatch) return localMatch;
-
-  // 2. Check REGISTERED_BUSINESSES default list (essential for Vercel and first-time mobile visitors)
-  const registeredMatch = REGISTERED_BUSINESSES.find(b => {
-    if (deletedIds.has(b.id)) return false;
-    const bId = (b.id || '').toLowerCase();
-    const bSlug = (b.slug || '').toLowerCase();
-    const bName = (b.name || '').toLowerCase();
-    return (
-      bSlug === cleanSlug ||
-      bId === cleanSlug ||
-      bName === cleanSlug ||
-      normalizeKey(bSlug) === norm ||
-      normalizeKey(bId) === norm ||
-      normalizeKey(bName) === norm
-    );
-  });
-  if (registeredMatch) {
-    saveLocalBusiness(registeredMatch);
-    return registeredMatch;
+  // 1. Query Firestore FIRST (cloud-native source of truth for cross-device sync between PC and mobile)
+  try {
+    const q = query(collection(db, 'businesses'), where('slug', '==', cleanSlug), limit(1));
+    const snap = await Promise.race([
+      getDocs(q),
+      new Promise<null>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
+    ]);
+    if (snap && !snap.empty) {
+      const d = snap.docs[0];
+      const found = { id: d.id, ...d.data() } as Business;
+      if (!deletedIds.has(found.id)) {
+        saveLocalBusiness(found);
+        return found;
+      }
+    }
+  } catch (err) {
+    console.warn('Firestore query by slug warning:', err);
   }
 
-  // 3. Fetch from Backend Server API (shared across all devices, customer phones, tabs)
+  // 1b. Scan all Firestore docs if exact slug query didn't match (handles normalized slug/name)
+  try {
+    const allSnap = await Promise.race([
+      getDocs(collection(db, 'businesses')),
+      new Promise<null>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
+    ]);
+    if (allSnap) {
+      for (const d of allSnap.docs) {
+        const data = { id: d.id, ...d.data() } as Business;
+        if (!deletedIds.has(data.id)) {
+          const bId = (data.id || '').toLowerCase();
+          const bSlug = (data.slug || '').toLowerCase();
+          const bName = (data.name || '').toLowerCase();
+          if (
+            bSlug === cleanSlug ||
+            bId === cleanSlug ||
+            bName === cleanSlug ||
+            normalizeKey(bSlug) === norm ||
+            normalizeKey(bId) === norm ||
+            normalizeKey(bName) === norm
+          ) {
+            saveLocalBusiness(data);
+            return data;
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Firestore scan all warning:', err);
+  }
+
+  // 2. Fetch from Backend Server API
   try {
     const res = await fetch(`/api/businesses/${encodeURIComponent(cleanSlug)}`);
     if (res.ok) {
@@ -199,7 +216,7 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
     console.warn('API getBusinessBySlug warning:', apiErr);
   }
 
-  // 3b. Fetch all from Backend Server API and scan with normalized key
+  // 2b. Fetch all from Backend Server API and scan with normalized key
   try {
     const resAll = await fetch('/api/businesses');
     if (resAll.ok) {
@@ -227,23 +244,37 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
     console.warn('API getAllBusinesses warning:', apiAllErr);
   }
 
-  // 4. Firestore Query
-  try {
-    const q = query(collection(db, 'businesses'), where('slug', '==', cleanSlug), limit(1));
-    const snap = await Promise.race([
-      getDocs(q),
-      new Promise<null>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
-    ]);
-    if (snap && !snap.empty) {
-      const d = snap.docs[0];
-      const found = { id: d.id, ...d.data() } as Business;
-      if (!deletedIds.has(found.id)) {
-        saveLocalBusiness(found);
-        return found;
-      }
-    }
-  } catch (err) {
-    console.warn('Firestore query by slug warning:', err);
+  // 3. Check local storage (offline / fallback)
+  const localList = getLocalBusinesses();
+  const localMatch = localList.find(b => {
+    if (deletedIds.has(b.id)) return false;
+    const bId = (b.id || '').toLowerCase();
+    const bSlug = (b.slug || '').toLowerCase();
+    const bName = (b.name || '').toLowerCase();
+    if (bSlug === cleanSlug || bId === cleanSlug || bName === cleanSlug) return true;
+    if (normalizeKey(bSlug) === norm || normalizeKey(bId) === norm || normalizeKey(bName) === norm) return true;
+    return false;
+  });
+  if (localMatch) return localMatch;
+
+  // 4. Check REGISTERED_BUSINESSES default list fallback
+  const registeredMatch = REGISTERED_BUSINESSES.find(b => {
+    if (deletedIds.has(b.id)) return false;
+    const bId = (b.id || '').toLowerCase();
+    const bSlug = (b.slug || '').toLowerCase();
+    const bName = (b.name || '').toLowerCase();
+    return (
+      bSlug === cleanSlug ||
+      bId === cleanSlug ||
+      bName === cleanSlug ||
+      normalizeKey(bSlug) === norm ||
+      normalizeKey(bId) === norm ||
+      normalizeKey(bName) === norm
+    );
+  });
+  if (registeredMatch) {
+    saveLocalBusiness(registeredMatch);
+    return registeredMatch;
   }
 
   return null;
