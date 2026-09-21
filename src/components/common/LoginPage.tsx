@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { Mail, Lock, LogIn, Sparkles, AlertCircle, RefreshCw } from 'lucide-react';
+import { Mail, Lock, LogIn, AlertCircle, RefreshCw } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
   const { signInWithEmail, signInWithGoogle } = useAuth();
@@ -89,7 +89,7 @@ export const LoginPage: React.FC = () => {
         {/* Info Feedback Section */}
         {infoMessage && (
           <div className="p-3.5 bg-indigo-50 border border-indigo-100 text-indigo-800 rounded-2xl text-xs font-medium flex items-start gap-2.5 animate-fade-in">
-            <Sparkles className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5 animate-pulse" />
+            <AlertCircle className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
             <span>{infoMessage}</span>
           </div>
         )}

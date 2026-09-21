@@ -115,8 +115,13 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Auth status */}
         {currentUser ? (
           <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
-            <div className="w-7 h-7 rounded-full bg-indigo-600 text-white font-bold flex items-center justify-center text-xs">
-              {currentUser.displayName?.slice(0, 1) || currentUser.email?.slice(0, 1) || 'U'}
+            <div className="w-7 h-7 rounded-full overflow-hidden bg-slate-50 p-0.5 border border-slate-200 flex items-center justify-center shrink-0">
+              <img
+                src="https://i.postimg.cc/Y974HYRZ/logo-png.png"
+                alt="ReputaFlow Avatar"
+                className="w-full h-full object-contain"
+                referrerPolicy="no-referrer"
+              />
             </div>
             <button
               onClick={signOut}

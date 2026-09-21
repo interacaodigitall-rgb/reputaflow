@@ -10,7 +10,6 @@ import {
   ExternalLink,
   ChevronDown,
   LogOut,
-  Sparkles,
   QrCode
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -177,8 +176,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* User Card */}
         <div className="flex items-center justify-between pt-1">
           <div className="flex items-center gap-2 min-w-0">
-            <div className="w-7 h-7 rounded-full bg-indigo-600 text-white font-bold flex items-center justify-center text-xs shrink-0">
-              {currentUser?.email?.slice(0, 1).toUpperCase() || (currentRole === 'super_admin' ? 'A' : 'C')}
+            <div className="w-8 h-8 rounded-full overflow-hidden bg-slate-800 p-1 border border-slate-700 flex items-center justify-center shrink-0">
+              <img
+                src="https://i.postimg.cc/Y974HYRZ/logo-png.png"
+                alt="ReputaFlow Avatar"
+                className="w-full h-full object-contain filter invert brightness-200"
+                referrerPolicy="no-referrer"
+              />
             </div>
             <div className="min-w-0">
               <p className="text-xs font-bold text-white truncate">

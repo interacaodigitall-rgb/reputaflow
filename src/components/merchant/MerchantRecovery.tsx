@@ -10,8 +10,7 @@ import {
   ChevronRight,
   Filter,
   UserCheck,
-  RotateCcw,
-  Sparkles
+  RotateCcw
 } from 'lucide-react';
 import { RecoveryCase, RecoveryCaseStatus, Business } from '../../types';
 import { updateRecoveryCaseStatus } from '../../lib/dbService';
@@ -225,7 +224,7 @@ export const MerchantRecovery: React.FC<MerchantRecoveryProps> = ({
                     onClick={() => handleStatusChange(c.id, 'cliente_recuperado', c.customerId)}
                     className="inline-flex items-center gap-1 py-1.5 px-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs transition"
                   >
-                    <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                    <UserCheck className="w-3.5 h-3.5 text-indigo-600" />
                     <span>Marcar como Cliente Recuperado</span>
                   </button>
                 )}

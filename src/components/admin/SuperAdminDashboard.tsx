@@ -47,9 +47,10 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   settings,
   onImpersonateBusiness
 }) => {
-  const { changePassword } = useAuth();
+  const { changePassword, currentUser } = useAuth();
   const [activeTab, setActiveTab] = useState<'merchants' | 'plans' | 'settings'>('merchants');
   const [searchBiz, setSearchBiz] = useState('');
+  const [successBanner, setSuccessBanner] = useState<string | null>(null);
 
   // Admin Change Password States
   const [newAdminPassword, setNewAdminPassword] = useState('');
@@ -84,12 +85,14 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   const [newBizCategory, setNewBizCategory] = useState('');
   const [newBizPhone, setNewBizPhone] = useState('');
   const [newBizEmail, setNewBizEmail] = useState('');
+  const [newBizPassword, setNewBizPassword] = useState('');
   const [newBizAddress, setNewBizAddress] = useState('');
   const [newBizPlan, setNewBizPlan] = useState('plan_pro');
   const [newBizGoogleUrl, setNewBizGoogleUrl] = useState('');
   const [newBizLogoUrl, setNewBizLogoUrl] = useState('');
   const [newBizCurrency, setNewBizCurrency] = useState<'EUR' | 'BRL'>('EUR');
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   // Settings State
   const [platformName, setPlatformName] = useState(settings?.platformName || 'ReputaFlow');
@@ -141,30 +144,53 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
 
   const handleCreateBusiness = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newBizName.trim()) return;
+    if (!newBizName.trim()) {
+      setCreateError('Por favor, informe o nome do estabelecimento.');
+      return;
+    }
+    if (!newBizEmail.trim()) {
+      setCreateError('Por favor, informe o e-mail de login para o comerciante.');
+      return;
+    }
 
     setCreating(true);
+    setCreateError(null);
+
     try {
       const slugClean = (newBizSlug || newBizName)
         .toLowerCase()
         .trim()
-        .replace(/[^a-z0-9-]/g, '-');
+        .replace(/[^a-z0-9-]/g, '-')
+        .replace(/-+/g, '-');
 
-      await createBusiness({
-        name: newBizName,
+      const businessData: Omit<Business, 'id'> = {
+        name: newBizName.trim(),
         slug: slugClean,
-        category: newBizCategory,
-        phone: newBizPhone,
-        email: newBizEmail,
-        address: newBizAddress,
-        logoUrl: newBizLogoUrl || undefined,
-        googleReviewUrl: newBizGoogleUrl || undefined,
+        category: newBizCategory.trim() || 'Comércio & Serviços',
+        phone: newBizPhone.trim(),
+        email: newBizEmail.trim().toLowerCase(),
+        address: newBizAddress.trim(),
         status: 'active',
         planId: newBizPlan,
-        ownerId: 'admin-created',
+        ownerId: currentUser?.uid || 'admin-created',
         currency: newBizCurrency,
-        createdAt: new Date().toISOString()
-      });
+        createdAt: new Date().toISOString(),
+        password: newBizPassword.trim() || 'senha123'
+      };
+
+      if (newBizLogoUrl.trim()) {
+        businessData.logoUrl = newBizLogoUrl.trim();
+      }
+      if (newBizGoogleUrl.trim()) {
+        let cleanGoogleUrl = newBizGoogleUrl.trim();
+        if (!/^https?:\/\//i.test(cleanGoogleUrl)) {
+          cleanGoogleUrl = 'https://' + cleanGoogleUrl;
+        }
+        businessData.googleReviewUrl = cleanGoogleUrl;
+      }
+
+      const createdName = newBizName.trim();
+      await createBusiness(businessData);
 
       setShowCreateModal(false);
       setNewBizName('');
@@ -172,13 +198,21 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
       setNewBizCategory('');
       setNewBizPhone('');
       setNewBizEmail('');
+      setNewBizPassword('');
       setNewBizAddress('');
       setNewBizGoogleUrl('');
       setNewBizLogoUrl('');
       setNewBizCurrency('EUR');
-    } catch (err) {
+      setCreateError(null);
+      setSuccessBanner(`Estabelecimento "${createdName}" cadastrado com sucesso!`);
+      setTimeout(() => setSuccessBanner(null), 6000);
+    } catch (err: any) {
       console.error('Error creating business:', err);
-      alert('Erro ao criar estabelecimento.');
+      setCreateError(
+        err?.message?.includes('permission')
+          ? 'Erro de permissão no Firestore. Verifique se está autenticado como administrador.'
+          : 'Ocorreu um erro ao salvar o estabelecimento. Verifique os dados e tente novamente.'
+      );
     } finally {
       setCreating(false);
     }
@@ -248,6 +282,21 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
           </button>
         </div>
       </div>
+
+      {successBanner && (
+        <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl flex items-center justify-between text-xs font-semibold shadow-xs animate-in fade-in">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0" />
+            <span>{successBanner}</span>
+          </div>
+          <button
+            onClick={() => setSuccessBanner(null)}
+            className="text-emerald-700 hover:text-emerald-900 font-bold ml-4"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Global Metrics Cards (Section 7) */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
@@ -620,6 +669,14 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
           <div className="bg-white rounded-3xl border border-slate-200 max-w-lg w-full p-6 shadow-2xl space-y-4">
             <h2 className="text-base font-bold text-slate-900">Criar Novo Comerciante</h2>
+
+            {createError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-semibold flex items-center gap-2">
+                <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{createError}</span>
+              </div>
+            )}
+
             <form onSubmit={handleCreateBusiness} className="space-y-3">
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
@@ -685,21 +742,6 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    E-mail
-                  </label>
-                  <input
-                    type="email"
-                    placeholder="contato@empresa.com"
-                    value={newBizEmail}
-                    onChange={(e) => setNewBizEmail(e.target.value)}
-                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
                     Segmento / Categoria
                   </label>
                   <input
@@ -710,6 +752,44 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                     className="w-full text-xs p-2.5 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
+              </div>
+
+              {/* CRM Access Credentials Section */}
+              <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 space-y-2.5">
+                <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                  Credenciais de Acesso ao CRM
+                </span>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-700 mb-0.5">
+                      E-mail de Login *
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      placeholder="comercio@reputaflow.com"
+                      value={newBizEmail}
+                      onChange={(e) => setNewBizEmail(e.target.value)}
+                      className="w-full text-xs p-2.5 bg-white rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-700 mb-0.5">
+                      Senha Inicial *
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      placeholder="Mínimo 6 caracteres"
+                      value={newBizPassword}
+                      onChange={(e) => setNewBizPassword(e.target.value)}
+                      className="w-full text-xs p-2.5 bg-white rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
                     Endereço Completo
@@ -719,21 +799,6 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                     placeholder="Rua, Número, Cidade"
                     value={newBizAddress}
                     onChange={(e) => setNewBizAddress(e.target.value)}
-                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    URL do Logótipo (Imagem)
-                  </label>
-                  <input
-                    type="url"
-                    placeholder="https://exemplo.com/logo.png"
-                    value={newBizLogoUrl}
-                    onChange={(e) => setNewBizLogoUrl(e.target.value)}
                     className="w-full text-xs p-2.5 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
@@ -750,6 +815,19 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                     <option value="BRL">Real (R$)</option>
                   </select>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  URL do Logótipo (Imagem)
+                </label>
+                <input
+                  type="url"
+                  placeholder="https://exemplo.com/logo.png"
+                  value={newBizLogoUrl}
+                  onChange={(e) => setNewBizLogoUrl(e.target.value)}
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
+                />
               </div>
 
               <div>

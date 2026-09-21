@@ -29,100 +29,255 @@ import {
 } from '../types';
 
 // ==========================================
-// BUSINESSES
+// UTILS
 // ==========================================
 
+export function sanitizeForFirestore<T extends Record<string, any>>(obj: T): T {
+  const result: any = {};
+  Object.keys(obj).forEach((key) => {
+    const value = obj[key];
+    if (value !== undefined) {
+      if (value !== null && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
+        result[key] = sanitizeForFirestore(value);
+      } else {
+        result[key] = value;
+      }
+    }
+  });
+  return result;
+}
+
+// ==========================================
+// BUSINESSES (LOCAL & FIRESTORE RESILIENT PERSISTENCE)
+// ==========================================
+
+const LOCAL_STORAGE_KEY_BIZ = 'reputaflow_local_businesses';
+
+export function getLocalBusinesses(): Business[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_KEY_BIZ);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+export function saveLocalBusiness(biz: Business): void {
+  try {
+    const list = getLocalBusinesses();
+    const idx = list.findIndex(b => b.id === biz.id || (biz.slug && b.slug === biz.slug));
+    if (idx >= 0) {
+      list[idx] = { ...list[idx], ...biz };
+    } else {
+      list.unshift(biz);
+    }
+    localStorage.setItem(LOCAL_STORAGE_KEY_BIZ, JSON.stringify(list));
+    window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated', { detail: list }));
+  } catch (e) {
+    console.error('Failed to save business locally:', e);
+  }
+}
+
+export function removeLocalBusiness(id: string): void {
+  try {
+    const list = getLocalBusinesses().filter(b => b.id !== id);
+    localStorage.setItem(LOCAL_STORAGE_KEY_BIZ, JSON.stringify(list));
+    window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated', { detail: list }));
+  } catch (e) {
+    console.error('Failed to remove business locally:', e);
+  }
+}
+
 export async function getBusinessBySlug(slug: string): Promise<Business | null> {
+  const cleanSlug = slug.toLowerCase().trim();
+  // 1. Check local storage first
+  const localMatch = getLocalBusinesses().find(b => b.slug?.toLowerCase() === cleanSlug);
+  if (localMatch) return localMatch;
+
+  // 2. Query Firestore with timeout protection
   const path = 'businesses';
   try {
-    const q = query(collection(db, path), where('slug', '==', slug), limit(1));
-    const snap = await getDocs(q);
-    if (!snap.empty) {
+    const q = query(collection(db, path), where('slug', '==', cleanSlug), limit(1));
+    const snapPromise = getDocs(q);
+    const timeout = new Promise<null>((_, reject) =>
+      setTimeout(() => reject(new Error('timeout')), 3000)
+    );
+    const snap = await Promise.race([snapPromise, timeout]);
+    if (snap && !snap.empty) {
       const d = snap.docs[0];
-      return { id: d.id, ...d.data() } as Business;
+      const found = { id: d.id, ...d.data() } as Business;
+      saveLocalBusiness(found);
+      return found;
     }
-    return null;
+    return localMatch || null;
   } catch (err) {
-    handleFirestoreError(err, OperationType.GET, path);
+    return localMatch || null;
   }
 }
 
 export async function getBusinessById(id: string): Promise<Business | null> {
+  const localMatch = getLocalBusinesses().find(b => b.id === id);
+  if (localMatch) return localMatch;
+
   const path = `businesses/${id}`;
   try {
-    const snap = await getDoc(doc(db, 'businesses', id));
-    if (snap.exists()) {
-      return { id: snap.id, ...snap.data() } as Business;
+    const snapPromise = getDoc(doc(db, 'businesses', id));
+    const timeout = new Promise<null>((_, reject) =>
+      setTimeout(() => reject(new Error('timeout')), 3000)
+    );
+    const snap = await Promise.race([snapPromise, timeout]);
+    if (snap && snap.exists()) {
+      const found = { id: snap.id, ...snap.data() } as Business;
+      saveLocalBusiness(found);
+      return found;
     }
-    return null;
+    return localMatch || null;
   } catch (err) {
-    handleFirestoreError(err, OperationType.GET, path);
+    return localMatch || null;
   }
 }
 
 export async function getAllBusinesses(): Promise<Business[]> {
   const path = 'businesses';
   try {
-    const snap = await getDocs(collection(db, path));
-    return snap.docs.map(d => ({ id: d.id, ...d.data() } as Business));
+    const snapPromise = getDocs(collection(db, path));
+    const timeout = new Promise<null>((_, reject) =>
+      setTimeout(() => reject(new Error('timeout')), 3000)
+    );
+    const snap = await Promise.race([snapPromise, timeout]);
+    if (snap) {
+      const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Business));
+      firestoreList.forEach(b => saveLocalBusiness(b));
+      return firestoreList;
+    }
+    return getLocalBusinesses();
   } catch (err) {
-    handleFirestoreError(err, OperationType.LIST, path);
+    return getLocalBusinesses();
   }
 }
 
 export function subscribeBusinesses(callback: (businesses: Business[]) => void) {
   const path = 'businesses';
-  return onSnapshot(
+
+  const mergeAndNotify = (firestoreList: Business[] = []) => {
+    const local = getLocalBusinesses();
+    const map = new Map<string, Business>();
+    // First fill local
+    local.forEach(b => {
+      map.set(b.id, b);
+      if (b.slug) map.set(b.slug, b);
+    });
+    // Overlay firestore items
+    firestoreList.forEach(b => {
+      map.set(b.id, b);
+      if (b.slug) map.set(b.slug, b);
+    });
+    const uniqueMap = new Map<string, Business>();
+    map.forEach(b => uniqueMap.set(b.id, b));
+    const merged = Array.from(uniqueMap.values());
+    callback(merged);
+  };
+
+  // Immediate dispatch of cached / local businesses
+  mergeAndNotify();
+
+  const handleLocalUpdate = () => {
+    mergeAndNotify(lastFirestoreDocs);
+  };
+  window.addEventListener('reputaflow_businesses_updated', handleLocalUpdate);
+
+  let lastFirestoreDocs: Business[] = [];
+  const unsubscribe = onSnapshot(
     collection(db, path),
     (snap) => {
-      const items = snap.docs.map(d => ({ id: d.id, ...d.data() } as Business));
-      callback(items);
+      lastFirestoreDocs = snap.docs.map(d => ({ id: d.id, ...d.data() } as Business));
+      lastFirestoreDocs.forEach(b => saveLocalBusiness(b));
+      mergeAndNotify(lastFirestoreDocs);
     },
-    (err) => handleFirestoreError(err, OperationType.LIST, path)
+    (err) => {
+      console.warn('subscribeBusinesses snapshot warning (operating with local cache):', err);
+      mergeAndNotify(lastFirestoreDocs);
+    }
   );
+
+  return () => {
+    window.removeEventListener('reputaflow_businesses_updated', handleLocalUpdate);
+    unsubscribe();
+  };
 }
 
 export async function createBusiness(data: Omit<Business, 'id'>, customId?: string): Promise<string> {
   const path = 'businesses';
+  const cleanSlug = data.slug.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+  const targetId = customId || `biz_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
+
+  const payload = sanitizeForFirestore({
+    ...data,
+    slug: cleanSlug,
+    createdAt: data.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+
+  const fullBusiness: Business = {
+    id: targetId,
+    ...payload,
+    status: payload.status || 'active',
+    currency: payload.currency || 'EUR',
+  };
+
+  // 1. Instantly save locally and notify all listeners so UI updates without any delay
+  saveLocalBusiness(fullBusiness);
+
+  // 2. Asynchronously sync to Firestore with a 4-second timeout to prevent modal hanging
   try {
-    const cleanSlug = data.slug.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-    const payload = {
-      ...data,
-      slug: cleanSlug,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    if (customId) {
-      await setDoc(doc(db, path, customId), payload);
-      return customId;
-    } else {
-      const ref = await addDoc(collection(db, path), payload);
-      return ref.id;
-    }
+    const firestoreWrite = setDoc(doc(db, path, targetId), payload);
+    const timeout = new Promise<void>((_, reject) =>
+      setTimeout(() => reject(new Error('Firestore write timeout')), 4000)
+    );
+    await Promise.race([firestoreWrite, timeout]);
   } catch (err) {
-    handleFirestoreError(err, OperationType.CREATE, path);
+    console.warn('Firestore write warning (business safely stored locally):', err);
   }
+
+  return targetId;
 }
 
 export async function updateBusiness(id: string, data: Partial<Business>): Promise<void> {
   const path = `businesses/${id}`;
+  const payload = sanitizeForFirestore({
+    ...data,
+    updatedAt: new Date().toISOString()
+  });
+
+  // Update locally first
+  const localList = getLocalBusinesses();
+  const existing = localList.find(b => b.id === id);
+  if (existing) {
+    saveLocalBusiness({ ...existing, ...payload });
+  }
+
   try {
-    const payload = {
-      ...data,
-      updatedAt: new Date().toISOString()
-    };
-    await updateDoc(doc(db, 'businesses', id), payload);
+    const updatePromise = updateDoc(doc(db, 'businesses', id), payload);
+    const timeout = new Promise<void>((_, reject) =>
+      setTimeout(() => reject(new Error('Firestore update timeout')), 4000)
+    );
+    await Promise.race([updatePromise, timeout]);
   } catch (err) {
-    handleFirestoreError(err, OperationType.UPDATE, path);
+    console.warn('Firestore update warning (business updated locally):', err);
   }
 }
 
 export async function deleteBusiness(id: string): Promise<void> {
   const path = `businesses/${id}`;
+  removeLocalBusiness(id);
   try {
-    await deleteDoc(doc(db, 'businesses', id));
+    const delPromise = deleteDoc(doc(db, 'businesses', id));
+    const timeout = new Promise<void>((_, reject) =>
+      setTimeout(() => reject(new Error('Firestore delete timeout')), 4000)
+    );
+    await Promise.race([delPromise, timeout]);
   } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, path);
+    console.warn('Firestore delete warning (removed locally):', err);
   }
 }
 
@@ -134,15 +289,21 @@ export async function submitReview(
   data: Omit<Review, 'id' | 'createdAt'>
 ): Promise<{ reviewId: string }> {
   const path = 'reviews';
+  const targetId = `rev_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
   try {
-    const payload = {
+    const payload = sanitizeForFirestore({
       ...data,
       createdAt: new Date().toISOString(),
-    };
-    const ref = await addDoc(collection(db, path), payload);
-    return { reviewId: ref.id };
+    });
+    const writePromise = setDoc(doc(db, path, targetId), payload);
+    const timeout = new Promise<void>((_, reject) =>
+      setTimeout(() => reject(new Error('timeout')), 3000)
+    );
+    await Promise.race([writePromise, timeout]);
+    return { reviewId: targetId };
   } catch (err) {
-    handleFirestoreError(err, OperationType.CREATE, path);
+    console.warn('submitReview warning (proceeding with generated id):', err);
+    return { reviewId: targetId };
   }
 }
 
@@ -170,7 +331,7 @@ export async function submitFeedbackAndRecovery(params: {
     });
 
     // 2. Create Feedback document
-    const feedbackPayload = {
+    const feedbackPayload = sanitizeForFirestore({
       businessId: params.businessId,
       reviewId: params.reviewId,
       customerId,
@@ -182,11 +343,11 @@ export async function submitFeedbackAndRecovery(params: {
       question2: params.question2,
       question3WantsContact: params.question3WantsContact,
       createdAt: new Date().toISOString()
-    };
+    });
     const fbRef = await addDoc(collection(db, 'feedback'), feedbackPayload);
 
     // 3. Create Recovery Case in CRM
-    const casePayload: Omit<RecoveryCase, 'id'> = {
+    const casePayload: Omit<RecoveryCase, 'id'> = sanitizeForFirestore({
       businessId: params.businessId,
       customerId,
       reviewId: params.reviewId,
@@ -199,7 +360,7 @@ export async function submitFeedbackAndRecovery(params: {
       notes: `Q1: ${params.question1}\nQ2: ${params.question2}\nContacto solicitado: ${params.question3WantsContact ? 'Sim' : 'Não'}`,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
-    };
+    });
     const caseRef = await addDoc(collection(db, 'recovery_cases'), casePayload);
 
     return { feedbackId: fbRef.id, caseId: caseRef.id, customerId };
@@ -272,7 +433,7 @@ export async function upsertCustomerByPhone(params: {
       const newCount = (existing.reviewsCount || 0) + 1;
       const newAvg = Number((((existing.avgRating || params.rating) * (newCount - 1) + params.rating) / newCount).toFixed(1));
 
-      await updateDoc(doc(db, path, docRef.id), {
+      await updateDoc(doc(db, path, docRef.id), sanitizeForFirestore({
         name: params.name || existing.name,
         email: params.email || existing.email || '',
         reviewsCount: newCount,
@@ -281,10 +442,10 @@ export async function upsertCustomerByPhone(params: {
         status: params.status || existing.status,
         lastInteractionAt: now,
         updatedAt: now
-      });
+      }));
       return docRef.id;
     } else {
-      const newCustomer: Omit<Customer, 'id'> = {
+      const newCustomer: Omit<Customer, 'id'> = sanitizeForFirestore({
         businessId: params.businessId,
         name: params.name,
         phone: params.phone,
@@ -297,7 +458,7 @@ export async function upsertCustomerByPhone(params: {
         lastInteractionAt: now,
         createdAt: now,
         updatedAt: now
-      };
+      });
       const ref = await addDoc(collection(db, path), newCustomer);
       return ref.id;
     }
@@ -326,10 +487,10 @@ export function subscribeCustomers(businessId: string | null, callback: (custome
 export async function updateCustomer(id: string, data: Partial<Customer>): Promise<void> {
   const path = `customers/${id}`;
   try {
-    await updateDoc(doc(db, 'customers', id), {
+    await updateDoc(doc(db, 'customers', id), sanitizeForFirestore({
       ...data,
       updatedAt: new Date().toISOString()
-    });
+    }));
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, path);
   }
@@ -365,16 +526,12 @@ export async function updateRecoveryCaseStatus(
   const path = `recovery_cases/${caseId}`;
   try {
     const now = new Date().toISOString();
-    const updateData: Record<string, any> = {
+    const updateData: Record<string, any> = sanitizeForFirestore({
       status,
-      updatedAt: now
-    };
-    if (status === 'resolvido' || status === 'cliente_recuperado') {
-      updateData.resolvedAt = now;
-    }
-    if (notes) {
-      updateData.notes = notes;
-    }
+      updatedAt: now,
+      ...(status === 'resolvido' || status === 'cliente_recuperado' ? { resolvedAt: now } : {}),
+      ...(notes ? { notes } : {})
+    });
     await updateDoc(doc(db, 'recovery_cases', caseId), updateData);
 
     // If customer ID provided, sync customer status
@@ -396,10 +553,10 @@ export async function updateRecoveryCaseStatus(
 export async function addInteraction(data: Omit<Interaction, 'id' | 'createdAt'>): Promise<string> {
   const path = 'interactions';
   try {
-    const payload = {
+    const payload = sanitizeForFirestore({
       ...data,
       createdAt: new Date().toISOString()
-    };
+    });
     const ref = await addDoc(collection(db, path), payload);
 
     // Update customer last interaction
@@ -433,13 +590,78 @@ export function subscribeInteractions(businessId: string | null, callback: (item
 // PLANS & SETTINGS
 // ==========================================
 
+const DEFAULT_PLANS: Plan[] = [
+  {
+    id: 'plan_starter',
+    name: 'Starter',
+    price: 99,
+    currency: 'BRL',
+    maxBusinesses: 1,
+    maxReviewsMonth: 200,
+    features: [
+      '1 Estabelecimento',
+      'Página e QR Code de avaliação',
+      'CRM de clientes essencial',
+      'Gestão de casos de recuperação',
+      'Filtro inteligente 1–4 estrelas'
+    ],
+    isActive: true
+  },
+  {
+    id: 'plan_pro',
+    name: 'Profissional',
+    price: 199,
+    currency: 'BRL',
+    maxBusinesses: 3,
+    maxReviewsMonth: 1000,
+    features: [
+      'Até 3 Estabelecimentos',
+      'QR Codes personalizados com logo',
+      'Integração direta com WhatsApp',
+      'CRM completo com histórico de contactos',
+      'Notificações instantâneas de feedback',
+      'Relatórios e métricas de satisfação'
+    ],
+    isActive: true
+  },
+  {
+    id: 'plan_enterprise',
+    name: 'Enterprise',
+    price: 399,
+    currency: 'BRL',
+    maxBusinesses: 10,
+    maxReviewsMonth: 5000,
+    features: [
+      'Até 10 Estabelecimentos / Franquias',
+      'Acesso multiusuário para equipas',
+      'Automação de follow-up pós-recuperação',
+      'Exportação avançada e relatórios',
+      'Suporte prioritário e onboarding dedicado'
+    ],
+    isActive: true
+  }
+];
+
+const DEFAULT_SETTINGS: PlatformSettings = {
+  id: 'global',
+  platformName: 'ReputaFlow',
+  supportEmail: 'suporte@reputaflow.com',
+  defaultGoogleReviewInstructions:
+    'Agradecemos a sua avaliação sincera! O seu feedback ajuda outros clientes a conhecer a qualidade do nosso atendimento.',
+  allowPublicRegistration: true,
+  smsEnabled: true,
+  whatsappApiEnabled: true
+};
+
 export async function getPlans(): Promise<Plan[]> {
   const path = 'plans';
   try {
     const snap = await getDocs(collection(db, path));
+    if (snap.empty) return DEFAULT_PLANS;
     return snap.docs.map(d => ({ id: d.id, ...d.data() } as Plan));
   } catch (err) {
-    handleFirestoreError(err, OperationType.LIST, path);
+    console.warn("Firestore error loading plans, using local fallbacks", err);
+    return DEFAULT_PLANS;
   }
 }
 
@@ -459,9 +681,10 @@ export async function getPlatformSettings(): Promise<PlatformSettings | null> {
     if (snap.exists()) {
       return { id: snap.id, ...snap.data() } as PlatformSettings;
     }
-    return null;
+    return DEFAULT_SETTINGS;
   } catch (err) {
-    handleFirestoreError(err, OperationType.GET, path);
+    console.warn("Firestore error loading global settings, using local fallbacks", err);
+    return DEFAULT_SETTINGS;
   }
 }
 

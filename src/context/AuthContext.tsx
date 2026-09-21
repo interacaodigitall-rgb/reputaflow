@@ -10,7 +10,7 @@ import {
 } from 'firebase/auth';
 import { auth, googleProvider } from '../lib/firebase';
 import { UserRole, Business, UserProfile } from '../types';
-import { subscribeBusinesses } from '../lib/dbService';
+import { subscribeBusinesses, updateBusiness } from '../lib/dbService';
 import { bootstrapSeedData } from '../lib/seed';
 
 interface AuthContextType {
@@ -65,9 +65,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const unsubscribe = subscribeBusinesses((bizList) => {
       setBusinesses(bizList);
-      // If no business currently selected and businesses exist, pick the first one
       if (bizList.length > 0) {
         setSelectedBusiness((prev) => {
+          if (currentUser?.email && !ADMIN_EMAILS.includes(currentUser.email)) {
+            // It's a merchant! Find the exact business belonging to their registered email
+            const matched = bizList.find((b) => b.email?.toLowerCase() === currentUser.email?.toLowerCase());
+            return matched || null;
+          }
           if (!prev) return bizList[0];
           const found = bizList.find((b) => b.id === prev.id);
           return found || bizList[0];
@@ -91,19 +95,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await signInWithEmailAndPassword(auth, email, password);
     } catch (err: any) {
-      // If email is reputa@glowfyhub.com and account does not exist, auto-create it
+      // Check if email belongs to a registered merchant with a matching temporary password
+      const matchingBiz = businesses.find((b) => b.email?.toLowerCase() === email.toLowerCase());
+
       if (
-        email === 'reputa@glowfyhub.com' &&
+        (email === 'reputa@glowfyhub.com' || (matchingBiz && matchingBiz.password === password)) &&
         (err.code === 'auth/user-not-found' ||
           err.code === 'auth/invalid-credential' ||
-          err.code === 'auth/invalid-login-credentials')
+          err.code === 'auth/invalid-login-credentials' ||
+          err.code === 'auth/wrong-password')
       ) {
         try {
-          // Attempt automatic registration for convenience
+          // Auto register this credential on Firebase Auth for immediate seamless access
           await createUserWithEmailAndPassword(auth, email, password);
           return;
         } catch (signUpErr) {
-          console.error('Auto sign-up error:', signUpErr);
+          console.error('Auto register error:', signUpErr);
           throw err;
         }
       }
@@ -124,6 +131,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!auth.currentUser) throw new Error('Utilizador não autenticado');
     try {
       await updatePassword(auth.currentUser, newPassword);
+      // Synchronize in Firestore businesses if it's a merchant to allow mobile logins too
+      if (currentRole === 'merchant' && selectedBusiness?.id) {
+        await updateBusiness(selectedBusiness.id, { password: newPassword });
+      }
     } catch (err) {
       console.error('Change password error:', err);
       throw err;

@@ -29,6 +29,7 @@ export interface Business {
   createdAt: string;
   updatedAt?: string;
   currency?: 'EUR' | 'BRL';
+  password?: string;
 }
 
 export type CustomerStatus = 'active' | 'in_recovery' | 'recovered' | 'churned';

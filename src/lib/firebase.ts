@@ -9,6 +9,7 @@ import {
   signInAnonymously
 } from 'firebase/auth';
 import {
+  initializeFirestore,
   getFirestore,
   collection,
   doc,
@@ -38,7 +39,17 @@ export const firebaseConfig = {
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+
+// Use auto-detect long polling to prevent WebChannel / WebSocket hanging in iframes and sandboxed environments
+let dbInstance;
+try {
+  dbInstance = initializeFirestore(app, {
+    experimentalAutoDetectLongPolling: true,
+  });
+} catch {
+  dbInstance = getFirestore(app);
+}
+export const db = dbInstance;
 export const googleProvider = new GoogleAuthProvider();
 
 export enum OperationType {

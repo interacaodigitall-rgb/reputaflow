@@ -56,20 +56,37 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
     setSelectedRating(rating);
 
     if (rating === 5 && business) {
-      // 5-star direct submission
-      setSubmitting(true);
-      try {
-        const res = await submitReview({
-          businessId: business.id,
-          rating: 5,
-          channel: 'qr'
-        });
-        setCreatedReviewId(res.reviewId);
-        setIsCompleted(true);
-      } catch (err) {
-        console.error('Error submitting review:', err);
-      } finally {
-        setSubmitting(false);
+      // 5-star direct submission & instant redirect
+      setIsCompleted(true);
+
+      // Determine target redirect URL from business registration
+      let targetUrl = business.googleReviewUrl ? business.googleReviewUrl.trim() : '';
+      if (targetUrl && !/^https?:\/\//i.test(targetUrl)) {
+        targetUrl = 'https://' + targetUrl;
+      }
+
+      // Record review asynchronously in background without blocking redirection
+      submitReview({
+        businessId: business.id,
+        rating: 5,
+        channel: 'qr'
+      }).then((res) => {
+        if (res?.reviewId) setCreatedReviewId(res.reviewId);
+      }).catch((err) => {
+        console.warn('Review submission log:', err);
+      });
+
+      // If business has a registered review URL, send user directly to it immediately
+      if (targetUrl) {
+        try {
+          window.location.href = targetUrl;
+        } catch {
+          try {
+            window.open(targetUrl, '_blank');
+          } catch (err2) {
+            console.error('Redirection blocked by browser:', err2);
+          }
+        }
       }
     }
   };
@@ -217,29 +234,32 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
                   </div>
 
                   {selectedRating === 5 ? (
-                    <div className="space-y-3">
+                    <div className="space-y-4">
                       <h2 className="text-xl font-bold text-slate-900">
-                        Muito obrigado pela avaliação!
+                        {business.googleReviewUrl ? 'A redirecionar para a avaliação...' : 'Muito obrigado pela sua avaliação!'}
                       </h2>
                       <p className="text-sm text-slate-600 leading-relaxed">
-                        A sua opinião é fundamental para mantermos o padrão de excelência de toda a nossa equipa.
+                        {business.googleReviewUrl 
+                          ? 'Estamos a encaminhá-lo diretamente para a página de avaliação no Google. A sua opinião faz toda a diferença!'
+                          : 'A sua nota 5 estrelas foi registada com sucesso. Agradecemos a preferência!'}
                       </p>
 
                       {business.googleReviewUrl && (
-                        <div className="mt-6 p-4 rounded-2xl bg-indigo-50/60 border border-indigo-100 text-left">
-                          <p className="text-xs font-semibold text-indigo-900 mb-1">
-                            Partilhe com a nossa comunidade
-                          </p>
-                          <p className="text-xs text-slate-600 leading-relaxed mb-3">
-                            Se desejar, pode também deixar o seu comentário na nossa página pública no Google.
+                        <div className="mt-4 p-4 rounded-2xl bg-indigo-50/70 border border-indigo-100 text-center space-y-3">
+                          <p className="text-xs text-slate-600">
+                            Caso não seja redirecionado automaticamente, clique no botão abaixo:
                           </p>
                           <a
-                            href={business.googleReviewUrl}
+                            href={
+                              business.googleReviewUrl.startsWith('http')
+                                ? business.googleReviewUrl
+                                : `https://${business.googleReviewUrl}`
+                            }
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center justify-center w-full gap-2 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl text-sm shadow-md shadow-indigo-200 transition"
+                            className="inline-flex items-center justify-center w-full gap-2 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl text-sm shadow-md shadow-indigo-200 transition active:scale-[0.98]"
                           >
-                            <span>Avaliar também no Google</span>
+                            <span>Abrir Avaliação no Google</span>
                             <ExternalLink className="w-4 h-4" />
                           </a>
                         </div>
