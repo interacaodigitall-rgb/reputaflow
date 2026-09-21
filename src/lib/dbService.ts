@@ -507,51 +507,23 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
 
 export async function createBusiness(data: Omit<Business, 'id'>, customId?: string): Promise<string> {
   const path = 'businesses';
-  const cleanSlug = data.slug.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-  const targetId = customId || `biz_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
-
-  const payload = sanitizeForFirestore({
-    ...data,
-    slug: cleanSlug,
+  const targetId = customId || `biz_${Date.now().toString(36)}`;
+  const payload = sanitizeForFirestore({ 
+    ...data, 
     createdAt: data.createdAt || new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString() 
   });
 
-  const fullBusiness: Business = {
-    id: targetId,
-    ...payload,
-    status: payload.status || 'active',
-    currency: payload.currency || 'EUR',
-  };
-
-  // 1. Instantly save locally and notify all listeners so UI updates without any delay
-  saveLocalBusiness(fullBusiness);
-
-  // 2. Sync to Global Cloud Store (makes it instantly available across all devices, mobile, Vercel)
-  pushGlobalCloudData({ businesses: getLocalBusinesses() }).catch(() => {});
-
-  // 3. Sync to Backend API (makes it instantly available across all devices, customer phones, incognito)
+  // 1. Firestore (Authoritative)
   try {
-    await fetch('/api/businesses', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(fullBusiness)
-    });
-  } catch (apiErr) {
-    console.warn('Backend API business creation warning:', apiErr);
-  }
-
-  // 4. Asynchronously sync to Firestore with a 4-second timeout to prevent modal hanging
-  try {
-    const firestoreWrite = setDoc(doc(db, path, targetId), payload, { merge: true });
-    const timeout = new Promise<void>((_, reject) =>
-      setTimeout(() => reject(new Error('Firestore write timeout')), 4000)
-    );
-    await Promise.race([firestoreWrite, timeout]);
+    await setDoc(doc(db, path, targetId), payload);
   } catch (err) {
-    console.warn('Firestore write warning (business safely stored locally and on server):', err);
+    console.error('Failed to create business in Firestore', err);
+    throw err;
   }
-
+  
+  // 2. Local
+  saveLocalBusiness({ id: targetId, ...payload } as Business);
   return targetId;
 }
 

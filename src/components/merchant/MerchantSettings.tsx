@@ -56,8 +56,8 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
   const handleLogoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 3 * 1024 * 1024) {
-        alert('O ficheiro é demasiado grande. Por favor escolha uma imagem até 3MB.');
+      if (file.size > 800 * 1024) {
+        alert('A imagem é muito grande (máx 800KB). O Firestore tem um limite de tamanho. Por favor, redimensione ou use uma URL externa.');
         return;
       }
       const reader = new FileReader();
