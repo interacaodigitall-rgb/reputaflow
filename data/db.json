@@ -1,0 +1,122 @@
+{
+  "businesses": [
+    {
+      "id": "biz_mrnavalha",
+      "name": "Mr. Navalha",
+      "slug": "mrnavalha",
+      "category": "Barbearia & Estética",
+      "logoUrl": "https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=150&auto=format&fit=crop&q=80",
+      "phone": "+351 912 345 678",
+      "email": "mrnavalha@reputaflow.com",
+      "address": "Rua do Comércio, 120 - Lisboa",
+      "googleReviewUrl": "https://g.page/r/mrnavalha/review",
+      "status": "active",
+      "planId": "plan_pro",
+      "ownerId": "owner_mrnavalha",
+      "currency": "EUR",
+      "password": "reputa123",
+      "createdAt": "2026-08-22T10:40:37.506Z",
+      "updatedAt": "2026-09-21T10:40:37.506Z"
+    },
+    {
+      "id": "biz_bistro_paris",
+      "name": "Bistrô & Café Paris",
+      "slug": "bistro-paris",
+      "category": "Restaurante & Gastronomia",
+      "logoUrl": "https://images.unsplash.com/photo-1554118811-1e0d58224f24?w=150&auto=format&fit=crop&q=80",
+      "phone": "+55 11 98765-4321",
+      "email": "contato@bistroparis.com.br",
+      "address": "Av. Paulista, 1500 - Bela Vista, São Paulo - SP",
+      "googleReviewUrl": "https://g.page/r/bistro-paris/review",
+      "status": "active",
+      "planId": "plan_pro",
+      "ownerId": "owner_bistro",
+      "currency": "BRL",
+      "password": "reputa123",
+      "createdAt": "2026-09-06T10:40:37.506Z",
+      "updatedAt": "2026-09-21T10:40:37.506Z"
+    },
+    {
+      "id": "biz_clinica_estetica",
+      "name": "Clínica & Spa Estética",
+      "slug": "clinica-estetica",
+      "category": "Saúde & Beleza",
+      "logoUrl": "https://images.unsplash.com/photo-1540555700478-4be289fbecef?w=150&auto=format&fit=crop&q=80",
+      "phone": "+351 923 456 789",
+      "email": "comerciante@reputaflow.com",
+      "address": "Av. da Liberdade, 240 - Lisboa",
+      "googleReviewUrl": "https://g.page/r/clinica-estetica/review",
+      "status": "active",
+      "planId": "plan_pro",
+      "ownerId": "owner_clinica",
+      "currency": "EUR",
+      "password": "reputa123",
+      "createdAt": "2026-09-11T10:40:37.506Z",
+      "updatedAt": "2026-09-21T10:40:37.506Z"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "rev_mub46rl7_as6n",
+      "businessId": "biz_mrnavalha",
+      "customerName": "Cliente Teste",
+      "customerPhone": "+351 919999999",
+      "rating": 5,
+      "channel": "qr",
+      "createdAt": "2026-09-21T10:40:42.283Z"
+    },
+    {
+      "id": "rev_1",
+      "businessId": "biz_mrnavalha",
+      "customerName": "Tiago Santos",
+      "customerPhone": "+351 923 456 789",
+      "customerEmail": "tiago@email.pt",
+      "rating": 5,
+      "channel": "qr",
+      "createdAt": "2026-09-20T10:40:37.507Z"
+    },
+    {
+      "id": "rev_2",
+      "businessId": "biz_mrnavalha",
+      "customerName": "Diogo Ribeiro",
+      "customerPhone": "+351 934 567 890",
+      "customerEmail": "diogo@email.pt",
+      "rating": 3,
+      "channel": "qr",
+      "createdAt": "2026-09-18T10:40:37.507Z"
+    }
+  ],
+  "feedback": [
+    {
+      "id": "fb_1",
+      "businessId": "biz_mrnavalha",
+      "reviewId": "rev_2",
+      "customerName": "Diogo Ribeiro",
+      "customerPhone": "+351 934 567 890",
+      "customerEmail": "diogo@email.pt",
+      "rating": 3,
+      "question1": "O tempo de espera para a barba foi um pouco acima do agendado.",
+      "question2": "Avisar por mensagem se houver atrasos na cadeira.",
+      "question3WantsContact": true,
+      "createdAt": "2026-09-18T10:40:37.507Z"
+    }
+  ],
+  "recoveryCases": [
+    {
+      "id": "rec_1",
+      "businessId": "biz_mrnavalha",
+      "reviewId": "rev_2",
+      "feedbackId": "fb_1",
+      "customerName": "Diogo Ribeiro",
+      "customerPhone": "+351 934 567 890",
+      "customerEmail": "diogo@email.pt",
+      "rating": 3,
+      "complaint": "O tempo de espera para a barba foi um pouco acima do agendado.",
+      "status": "pending",
+      "priority": "high",
+      "createdAt": "2026-09-18T10:40:37.507Z",
+      "updatedAt": "2026-09-21T10:40:37.507Z"
+    }
+  ],
+  "interactions": []
+}

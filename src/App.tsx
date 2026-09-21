@@ -128,6 +128,13 @@ function MainAppContent() {
     };
   }, []);
 
+  // Safety guard: if not super admin, forbid activeTab from being super_admin
+  useEffect(() => {
+    if (activeTab === 'super_admin' && !isSuperAdmin) {
+      setActiveTab('dashboard');
+    }
+  }, [activeTab, isSuperAdmin]);
+
   // Pending cases for badge
   const pendingCasesCount = recoveryCases.filter(
     (c) => c.status === 'novo' || c.status === 'em_contacto'
@@ -177,7 +184,10 @@ function MainAppContent() {
       {/* Desktop Sidebar */}
       <Sidebar
         activeTab={activeTab}
-        onSelectTab={(tab) => setActiveTab(tab)}
+        onSelectTab={(tab) => {
+          if (tab === 'super_admin' && !isSuperAdmin) return;
+          setActiveTab(tab);
+        }}
         pendingCasesCount={pendingCasesCount}
         onOpenQrModal={() => setShowQrModal(true)}
         onOpenReviewPreview={() => setIsCustomerViewMode(true)}
@@ -189,11 +199,13 @@ function MainAppContent() {
         <Header
           onOpenQrModal={() => setShowQrModal(true)}
           onOpenReviewPreview={() => setIsCustomerViewMode(true)}
-          onNavigateToSuperAdmin={() => setActiveTab('super_admin')}
+          onNavigateToSuperAdmin={() => {
+            if (isSuperAdmin) setActiveTab('super_admin');
+          }}
         />
 
-        {/* Impersonation Banner if in Super Admin viewing a merchant */}
-        {activeTab !== 'super_admin' && (
+        {/* Impersonation Banner ONLY visible if Super Admin is inspecting a merchant */}
+        {isSuperAdmin && activeTab !== 'super_admin' && (
           <div className="bg-indigo-50/80 border-b border-indigo-100 px-4 sm:px-6 py-2 flex items-center justify-between text-xs text-indigo-900">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -201,7 +213,7 @@ function MainAppContent() {
                 Espaço: <strong>{selectedBusiness?.name || 'A carregar...'}</strong>
               </span>
               <span className="text-slate-400">•</span>
-              <span className="text-slate-600">Ambiente isolado do comerciante</span>
+              <span className="text-slate-600">Ambiente de teste do estabelecimento</span>
             </div>
 
             <button
@@ -216,17 +228,25 @@ function MainAppContent() {
 
         {/* Main Content Area */}
         <main className="p-4 sm:p-6 max-w-7xl w-full mx-auto flex-1">
-          {activeTab === 'dashboard' && selectedBusiness && (
-            <MerchantDashboard
-              business={selectedBusiness}
-              reviews={reviews}
-              customers={customers}
-              recoveryCases={recoveryCases}
-              feedbackList={feedbackList}
-              onNavigate={(tab) => setActiveTab(tab)}
-              onOpenQrModal={() => setShowQrModal(true)}
-              onOpenReviewPreview={() => setIsCustomerViewMode(true)}
-            />
+          {activeTab === 'dashboard' && (
+            selectedBusiness ? (
+              <MerchantDashboard
+                business={selectedBusiness}
+                reviews={reviews}
+                customers={customers}
+                recoveryCases={recoveryCases}
+                feedbackList={feedbackList}
+                onNavigate={(tab) => setActiveTab(tab)}
+                onOpenQrModal={() => setShowQrModal(true)}
+                onOpenReviewPreview={() => setIsCustomerViewMode(true)}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center p-12 text-center bg-white rounded-3xl border border-slate-200">
+                <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4"></div>
+                <h3 className="text-base font-bold text-slate-800">A carregar o seu comércio...</h3>
+                <p className="text-xs text-slate-500 mt-1">A sincronizar dados em tempo real.</p>
+              </div>
+            )
           )}
 
           {activeTab === 'crm' && selectedBusiness && (
@@ -263,7 +283,7 @@ function MainAppContent() {
             />
           )}
 
-          {activeTab === 'super_admin' && (
+          {activeTab === 'super_admin' && isSuperAdmin && (
             <SuperAdminDashboard
               businesses={businesses}
               allReviews={allReviews}

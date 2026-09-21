@@ -8,9 +8,7 @@ export const LoginPage: React.FC = () => {
   const [password, setPassword] = useState('reputa123');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [infoMessage, setInfoMessage] = useState<string | null>(
-    'Utilize o e-mail acima com a senha "reputa123" para o primeiro acesso como Administrador Geral. Poderá alterar a senha após entrar!'
-  );
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,7 +33,7 @@ export const LoginPage: React.FC = () => {
         setError('Esta conta foi desativada pelo administrador.');
       } else {
         setError(
-          'Erro ao autenticar. Verifique os dados ou tente novamente. (Se for o primeiro acesso de reputa@glowfyhub.com, certifique-se de que a senha está correta para auto-registo)'
+          'Erro ao autenticar. Verifique os dados introduzidos e tente novamente.'
         );
       }
     } finally {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Star, CheckCircle2, MessageSquare, Phone, User, Mail, ArrowRight, ExternalLink, ShieldCheck, HeartHandshake, RefreshCw, Store } from 'lucide-react';
+import { Star, CheckCircle2, MessageSquare, Phone, User, Mail, ArrowRight, ExternalLink, ShieldCheck, HeartHandshake, RefreshCw, Store, X } from 'lucide-react';
 import { Business } from '../../types';
 import { getBusinessBySlug, submitReview, submitFeedbackAndRecovery } from '../../lib/dbService';
 
@@ -33,6 +33,7 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
   const [createdReviewId, setCreatedReviewId] = useState<string | null>(null);
 
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [logoError, setLogoError] = useState(false);
 
   const fetchBusiness = async () => {
     if (businessOverride) {
@@ -206,21 +207,16 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-100/70 via-white to-slate-50 flex flex-col justify-between py-8 px-4 sm:px-6">
-      {/* Top Bar with back link if previewing */}
+    <div className="min-h-screen bg-gradient-to-b from-slate-100/70 via-white to-slate-50 flex flex-col justify-between py-8 px-4 sm:px-6 relative">
+      {/* Floating Close Button when previewing from admin/merchant app */}
       {onBackToApp && (
-        <div className="max-w-md mx-auto w-full mb-4 flex justify-between items-center text-xs text-slate-500">
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 text-amber-800 border border-amber-200 rounded-full font-medium">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
-            Modo de Pré-visualização do Cliente
-          </span>
-          <button
-            onClick={onBackToApp}
-            className="text-indigo-600 hover:text-indigo-800 font-semibold underline"
-          >
-            Sair da Pré-visualização
-          </button>
-        </div>
+        <button
+          onClick={onBackToApp}
+          className="fixed top-4 right-4 z-50 p-2 bg-slate-900/80 hover:bg-slate-900 text-white rounded-full shadow-lg transition"
+          title="Fechar Pré-visualização"
+        >
+          <X className="w-4 h-4" />
+        </button>
       )}
 
       <div className="max-w-md w-full mx-auto my-auto">
@@ -229,12 +225,14 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
           animate={{ opacity: 1, y: 0 }}
           className="bg-white rounded-3xl shadow-xl shadow-slate-200/60 border border-slate-100 overflow-hidden"
         >
-          {/* Business Header */}
+          {/* Business Header & Logo */}
           <div className="px-6 pt-8 pb-4 text-center">
-            {business.logoUrl ? (
+            {business.logoUrl && !logoError ? (
               <img
                 src={business.logoUrl}
                 alt={business.name}
+                onError={() => setLogoError(true)}
+                referrerPolicy="no-referrer"
                 className="w-20 h-20 mx-auto rounded-2xl object-cover shadow-md border-2 border-white ring-2 ring-slate-100"
               />
             ) : (

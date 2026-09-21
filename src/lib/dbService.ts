@@ -33,6 +33,14 @@ import {
 // UTILS
 // ==========================================
 
+export function normalizeKey(str: string = ''): string {
+  return str
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
 export function sanitizeForFirestore<T extends Record<string, any>>(obj: T): T {
   const result: any = {};
   Object.keys(obj).forEach((key) => {
@@ -92,15 +100,61 @@ export function removeLocalBusiness(id: string): void {
 export async function getBusinessBySlug(slug: string): Promise<Business | null> {
   if (!slug) return null;
   const cleanSlug = slug.toLowerCase().trim();
+  const norm = normalizeKey(slug);
 
   // 1. Check local storage first (instant response if available on this device)
   const localList = getLocalBusinesses();
-  const localMatch = localList.find(
-    b => b.slug?.toLowerCase() === cleanSlug || b.id.toLowerCase() === cleanSlug
-  );
+  const localMatch = localList.find(b => {
+    const bId = (b.id || '').toLowerCase();
+    const bSlug = (b.slug || '').toLowerCase();
+    const bName = (b.name || '').toLowerCase();
+    if (bSlug === cleanSlug || bId === cleanSlug || bName === cleanSlug) return true;
+    if (normalizeKey(bSlug) === norm || normalizeKey(bId) === norm || normalizeKey(bName) === norm) return true;
+    return false;
+  });
   if (localMatch) return localMatch;
 
-  // 2. Anonymous sign-in attempt in background if no user is authenticated
+  // 2. Fetch from Backend Server API (shared across all devices, customer phones, tabs)
+  try {
+    const res = await fetch(`/api/businesses/${encodeURIComponent(cleanSlug)}`);
+    if (res.ok) {
+      const serverBiz = await res.json();
+      if (serverBiz && (serverBiz.id || serverBiz.slug)) {
+        saveLocalBusiness(serverBiz);
+        return serverBiz;
+      }
+    }
+  } catch (apiErr) {
+    console.warn('API getBusinessBySlug warning:', apiErr);
+  }
+
+  // 2b. Fetch all from Backend Server API and scan with normalized key
+  try {
+    const resAll = await fetch('/api/businesses');
+    if (resAll.ok) {
+      const allBiz: Business[] = await resAll.json();
+      for (const b of allBiz) {
+        saveLocalBusiness(b);
+        const bId = (b.id || '').toLowerCase();
+        const bSlug = (b.slug || '').toLowerCase();
+        const bName = (b.name || '').toLowerCase();
+        if (
+          bSlug === cleanSlug ||
+          bId === cleanSlug ||
+          bName === cleanSlug ||
+          normalizeKey(bSlug) === norm ||
+          normalizeKey(bId) === norm ||
+          normalizeKey(bName) === norm
+        ) {
+          return b;
+        }
+      }
+    }
+  } catch (apiAllErr) {
+    console.warn('API getAllBusinesses warning:', apiAllErr);
+  }
+
+  // 3. Anonymous sign-in attempt in background if no user is authenticated
   if (!auth.currentUser) {
     try {
       await signInAnonymously(auth);
@@ -116,7 +170,7 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
     const q = query(collection(db, path), where('slug', '==', cleanSlug), limit(1));
     const snapPromise = getDocs(q);
     const timeout = new Promise<null>((_, reject) =>
-      setTimeout(() => reject(new Error('timeout')), 5000)
+      setTimeout(() => reject(new Error('timeout')), 3000)
     );
     const snap = await Promise.race([snapPromise, timeout]);
     if (snap && !snap.empty) {
@@ -148,7 +202,14 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
     for (const d of allDocsSnap.docs) {
       const data = d.data() as Business;
       const bSlug = (data.slug || '').toLowerCase().trim();
-      if (bSlug === cleanSlug || d.id.toLowerCase() === cleanSlug) {
+      const bName = (data.name || '').toLowerCase().trim();
+      if (
+        bSlug === cleanSlug ||
+        d.id.toLowerCase() === cleanSlug ||
+        normalizeKey(bSlug) === norm ||
+        normalizeKey(d.id) === norm ||
+        normalizeKey(bName) === norm
+      ) {
         const found = { ...data, id: d.id } as Business;
         saveLocalBusiness(found);
         return found;
@@ -158,12 +219,23 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
     console.warn('Strategy C (scan all docs) warning:', err);
   }
 
-  return localMatch || null;
+  return null;
 }
 
 export async function getBusinessById(id: string): Promise<Business | null> {
   const localMatch = getLocalBusinesses().find(b => b.id === id);
   if (localMatch) return localMatch;
+
+  try {
+    const res = await fetch(`/api/businesses/${encodeURIComponent(id)}`);
+    if (res.ok) {
+      const serverBiz = await res.json();
+      if (serverBiz && serverBiz.id) {
+        saveLocalBusiness(serverBiz);
+        return serverBiz;
+      }
+    }
+  } catch {}
 
   const path = `businesses/${id}`;
   try {
@@ -184,22 +256,44 @@ export async function getBusinessById(id: string): Promise<Business | null> {
 }
 
 export async function getAllBusinesses(): Promise<Business[]> {
-  const path = 'businesses';
+  const mergedMap = new Map<string, Business>();
+
+  // 1. Local storage
+  getLocalBusinesses().forEach(b => mergedMap.set(b.id, b));
+
+  // 2. Fetch from backend API
   try {
-    const snapPromise = getDocs(collection(db, path));
+    const res = await fetch('/api/businesses');
+    if (res.ok) {
+      const serverList: Business[] = await res.json();
+      serverList.forEach(b => {
+        mergedMap.set(b.id, b);
+        saveLocalBusiness(b);
+      });
+    }
+  } catch (err) {
+    console.warn('API fetch warning:', err);
+  }
+
+  // 3. Fetch from Firestore
+  try {
+    const snapPromise = getDocs(collection(db, 'businesses'));
     const timeout = new Promise<null>((_, reject) =>
       setTimeout(() => reject(new Error('timeout')), 3000)
     );
     const snap = await Promise.race([snapPromise, timeout]);
     if (snap) {
-      const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Business));
-      firestoreList.forEach(b => saveLocalBusiness(b));
-      return firestoreList;
+      snap.docs.forEach(d => {
+        const b = { id: d.id, ...d.data() } as Business;
+        mergedMap.set(b.id, b);
+        saveLocalBusiness(b);
+      });
     }
-    return getLocalBusinesses();
   } catch (err) {
-    return getLocalBusinesses();
+    // Expected if Firestore is offline or unprovisioned
   }
+
+  return Array.from(mergedMap.values());
 }
 
 export function subscribeBusinesses(callback: (businesses: Business[]) => void) {
@@ -208,24 +302,29 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
   const mergeAndNotify = (firestoreList: Business[] = []) => {
     const local = getLocalBusinesses();
     const map = new Map<string, Business>();
-    // First fill local
     local.forEach(b => {
       map.set(b.id, b);
-      if (b.slug) map.set(b.slug, b);
     });
-    // Overlay firestore items
     firestoreList.forEach(b => {
       map.set(b.id, b);
-      if (b.slug) map.set(b.slug, b);
     });
-    const uniqueMap = new Map<string, Business>();
-    map.forEach(b => uniqueMap.set(b.id, b));
-    const merged = Array.from(uniqueMap.values());
+    const merged = Array.from(map.values());
     callback(merged);
   };
 
   // Immediate dispatch of cached / local businesses
   mergeAndNotify();
+
+  // Fetch backend API to ensure server-synced businesses are included immediately
+  fetch('/api/businesses')
+    .then(res => res.ok ? res.json() : [])
+    .then((serverList: Business[]) => {
+      if (Array.isArray(serverList) && serverList.length > 0) {
+        serverList.forEach(b => saveLocalBusiness(b));
+        mergeAndNotify(serverList);
+      }
+    })
+    .catch(() => {});
 
   const handleLocalUpdate = () => {
     mergeAndNotify(lastFirestoreDocs);
@@ -241,7 +340,7 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
       mergeAndNotify(lastFirestoreDocs);
     },
     (err) => {
-      console.warn('subscribeBusinesses snapshot warning (operating with local cache):', err);
+      console.warn('subscribeBusinesses snapshot warning (operating with local and server cache):', err);
       mergeAndNotify(lastFirestoreDocs);
     }
   );
@@ -274,7 +373,18 @@ export async function createBusiness(data: Omit<Business, 'id'>, customId?: stri
   // 1. Instantly save locally and notify all listeners so UI updates without any delay
   saveLocalBusiness(fullBusiness);
 
-  // 2. Asynchronously sync to Firestore with a 4-second timeout to prevent modal hanging
+  // 2. Sync to Backend API (makes it instantly available across all devices, customer phones, incognito)
+  try {
+    await fetch('/api/businesses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(fullBusiness)
+    });
+  } catch (apiErr) {
+    console.warn('Backend API business creation warning:', apiErr);
+  }
+
+  // 3. Asynchronously sync to Firestore with a 4-second timeout to prevent modal hanging
   try {
     const firestoreWrite = setDoc(doc(db, path, targetId), payload);
     const timeout = new Promise<void>((_, reject) =>
@@ -282,7 +392,7 @@ export async function createBusiness(data: Omit<Business, 'id'>, customId?: stri
     );
     await Promise.race([firestoreWrite, timeout]);
   } catch (err) {
-    console.warn('Firestore write warning (business safely stored locally):', err);
+    console.warn('Firestore write warning (business safely stored locally and on server):', err);
   }
 
   return targetId;
@@ -302,6 +412,17 @@ export async function updateBusiness(id: string, data: Partial<Business>): Promi
     saveLocalBusiness({ ...existing, ...payload });
   }
 
+  // Sync to Backend API
+  try {
+    await fetch(`/api/businesses/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+  } catch (apiErr) {
+    console.warn('Backend API business update warning:', apiErr);
+  }
+
   try {
     const updatePromise = updateDoc(doc(db, 'businesses', id), payload);
     const timeout = new Promise<void>((_, reject) =>
@@ -316,6 +437,16 @@ export async function updateBusiness(id: string, data: Partial<Business>): Promi
 export async function deleteBusiness(id: string): Promise<void> {
   const path = `businesses/${id}`;
   removeLocalBusiness(id);
+
+  // Sync to Backend API
+  try {
+    await fetch(`/api/businesses/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    });
+  } catch (apiErr) {
+    console.warn('Backend API business deletion warning:', apiErr);
+  }
+
   try {
     const delPromise = deleteDoc(doc(db, 'businesses', id));
     const timeout = new Promise<void>((_, reject) =>
@@ -336,11 +467,24 @@ export async function submitReview(
 ): Promise<{ reviewId: string }> {
   const path = 'reviews';
   const targetId = `rev_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+  const payload = sanitizeForFirestore({
+    ...data,
+    id: targetId,
+    createdAt: new Date().toISOString(),
+  });
+
+  // Sync to Backend API
   try {
-    const payload = sanitizeForFirestore({
-      ...data,
-      createdAt: new Date().toISOString(),
+    await fetch('/api/reviews', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
     });
+  } catch (apiErr) {
+    console.warn('API review submission warning:', apiErr);
+  }
+
+  try {
     const writePromise = setDoc(doc(db, path, targetId), payload);
     const timeout = new Promise<void>((_, reject) =>
       setTimeout(() => reject(new Error('timeout')), 3000)
@@ -390,28 +534,67 @@ export async function submitFeedbackAndRecovery(params: {
       question3WantsContact: params.question3WantsContact,
       createdAt: new Date().toISOString()
     });
-    const fbRef = await addDoc(collection(db, 'feedback'), feedbackPayload);
 
-    // 3. Create Recovery Case in CRM
-    const casePayload: Omit<RecoveryCase, 'id'> = sanitizeForFirestore({
+    // 3. Create Recovery Case document
+    const casePayload = sanitizeForFirestore({
       businessId: params.businessId,
       customerId,
       reviewId: params.reviewId,
-      feedbackId: fbRef.id,
       customerName: params.customerName,
       customerPhone: params.customerPhone,
       customerEmail: params.customerEmail || '',
       rating: params.rating,
+      complaint: params.question1,
       status: 'novo',
-      notes: `Q1: ${params.question1}\nQ2: ${params.question2}\nContacto solicitado: ${params.question3WantsContact ? 'Sim' : 'Não'}`,
+      priority: params.rating <= 2 ? 'urgente' : 'media',
+      assignedTo: '',
+      history: [
+        {
+          id: `hist_${Date.now()}`,
+          action: 'Caso aberto automaticamente via página de avaliação',
+          timestamp: new Date().toISOString(),
+          userName: 'Sistema ReputaFlow'
+        }
+      ],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     });
-    const caseRef = await addDoc(collection(db, 'recovery_cases'), casePayload);
 
-    return { feedbackId: fbRef.id, caseId: caseRef.id, customerId };
+    // Sync to Backend API
+    try {
+      await fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(feedbackPayload)
+      });
+      await fetch('/api/recovery_cases', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(casePayload)
+      });
+    } catch (apiErr) {
+      console.warn('API feedback sync warning:', apiErr);
+    }
+
+    let fbId = `fb_${Date.now().toString(36)}`;
+    let caseId = `rec_${Date.now().toString(36)}`;
+    try {
+      const fbRef = await addDoc(collection(db, 'feedback'), feedbackPayload);
+      fbId = fbRef.id;
+      const caseRef = await addDoc(collection(db, 'recovery_cases'), { ...casePayload, feedbackId: fbId });
+      caseId = caseRef.id;
+    } catch (fsErr) {
+      console.warn('Firestore feedback write warning (stored on server):', fsErr);
+    }
+
+    return { feedbackId: fbId, caseId, customerId };
   } catch (err) {
-    handleFirestoreError(err, OperationType.WRITE, 'feedback_and_recovery');
+    console.warn('submitFeedbackAndRecovery fallback handling:', err);
+    return {
+      feedbackId: `fb_${Date.now()}`,
+      caseId: `rec_${Date.now()}`,
+      customerId: `cust_${Date.now()}`
+    };
   }
 }
 

@@ -51,24 +51,38 @@ export const Header: React.FC<HeaderProps> = ({
           </span>
         </div>
 
-        {/* Business Selector (Mobile & Top status) */}
+        {/* Business Selector (or Merchant Business Badge) */}
         <div className="flex items-center gap-2">
-          <div className="relative">
-            <select
-              value={selectedBusiness?.id || ''}
-              onChange={(e) => {
-                const b = businesses.find((item) => item.id === e.target.value);
-                if (b) setSelectedBusiness(b);
-              }}
-              className="text-xs font-bold py-1.5 px-3 bg-slate-50 hover:bg-slate-100 text-slate-800 rounded-xl border border-slate-200 outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer max-w-[200px] truncate"
-            >
-              {businesses.map((biz) => (
-                <option key={biz.id} value={biz.id}>
-                  {biz.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          {isSuperAdmin ? (
+            <div className="relative">
+              <select
+                value={selectedBusiness?.id || ''}
+                onChange={(e) => {
+                  const b = businesses.find((item) => item.id === e.target.value);
+                  if (b) setSelectedBusiness(b);
+                }}
+                className="text-xs font-bold py-1.5 px-3 bg-slate-50 hover:bg-slate-100 text-slate-800 rounded-xl border border-slate-200 outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer max-w-[200px] truncate"
+              >
+                {businesses.map((biz) => (
+                  <option key={biz.id} value={biz.id}>
+                    {biz.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <div className="py-1.5 px-3 bg-slate-100 text-slate-900 rounded-xl border border-slate-200 text-xs font-bold truncate max-w-[200px] flex items-center gap-1.5">
+              {selectedBusiness?.logoUrl && (
+                <img
+                  src={selectedBusiness.logoUrl}
+                  alt={selectedBusiness.name}
+                  className="w-4 h-4 rounded-md object-cover shrink-0"
+                  referrerPolicy="no-referrer"
+                />
+              )}
+              <span className="truncate">{selectedBusiness?.name || 'A carregar...'}</span>
+            </div>
+          )}
 
           {selectedBusiness?.googleReviewUrl && (
             <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
@@ -102,15 +116,17 @@ export const Header: React.FC<HeaderProps> = ({
           <span className="hidden sm:inline">QR Code</span>
         </button>
 
-        {/* Super Admin Switch Shortcut (For Evaluation & Multi-role testing) */}
-        <button
-          onClick={onNavigateToSuperAdmin}
-          className="hidden sm:flex items-center gap-1.5 py-1.5 px-3 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl text-xs font-bold border border-rose-200/60 transition"
-          title="Super Admin"
-        >
-          <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />
-          <span>Super Admin</span>
-        </button>
+        {/* Super Admin Switch Shortcut (ONLY for Super Admin) */}
+        {isSuperAdmin && (
+          <button
+            onClick={onNavigateToSuperAdmin}
+            className="hidden sm:flex items-center gap-1.5 py-1.5 px-3 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl text-xs font-bold border border-rose-200/60 transition"
+            title="Super Admin"
+          >
+            <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />
+            <span>Super Admin</span>
+          </button>
+        )}
 
         {/* Auth status */}
         {currentUser ? (

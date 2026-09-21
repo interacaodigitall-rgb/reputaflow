@@ -82,27 +82,44 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        {/* Business Selector dropdown */}
+        {/* Business Selector or Merchant Badge */}
         <div className="space-y-1">
           <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-            Estabelecimento Ativo
+            {isSuperAdmin ? 'Estabelecimento Ativo' : 'O Seu Comércio'}
           </label>
-          <div className="relative">
-            <select
-              value={selectedBusiness?.id || ''}
-              onChange={(e) => {
-                const b = businesses.find((item) => item.id === e.target.value);
-                if (b) setSelectedBusiness(b);
-              }}
-              className="w-full text-xs font-semibold py-2 px-2.5 bg-slate-800 text-white rounded-xl border border-slate-700 outline-none focus:ring-1 focus:ring-indigo-500 truncate pr-6 cursor-pointer"
-            >
-              {businesses.map((biz) => (
-                <option key={biz.id} value={biz.id}>
-                  {biz.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          {isSuperAdmin ? (
+            <div className="relative">
+              <select
+                value={selectedBusiness?.id || ''}
+                onChange={(e) => {
+                  const b = businesses.find((item) => item.id === e.target.value);
+                  if (b) setSelectedBusiness(b);
+                }}
+                className="w-full text-xs font-semibold py-2 px-2.5 bg-slate-800 text-white rounded-xl border border-slate-700 outline-none focus:ring-1 focus:ring-indigo-500 truncate pr-6 cursor-pointer"
+              >
+                {businesses.map((biz) => (
+                  <option key={biz.id} value={biz.id}>
+                    {biz.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <div className="py-2 px-3 bg-slate-800/90 text-white rounded-xl border border-slate-700/80 text-xs font-bold truncate flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 truncate min-w-0">
+                {selectedBusiness?.logoUrl && (
+                  <img
+                    src={selectedBusiness.logoUrl}
+                    alt={selectedBusiness.name}
+                    className="w-6 h-6 rounded-lg object-cover shrink-0 border border-slate-600"
+                    referrerPolicy="no-referrer"
+                  />
+                )}
+                <span className="truncate">{selectedBusiness?.name || 'A carregar comércio...'}</span>
+              </div>
+              <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0 ml-1 animate-pulse"></span>
+            </div>
+          )}
         </div>
 
         {/* Navigation Items */}
@@ -133,20 +150,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
             );
           })}
 
-          {/* Super Admin Special Entry */}
-          <div className="pt-3 border-t border-slate-800/80">
-            <button
-              onClick={() => onSelectTab('super_admin')}
-              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold transition ${
-                activeTab === 'super_admin'
-                  ? 'bg-rose-600 text-white shadow-sm shadow-rose-900/50'
-                  : 'text-rose-300 hover:text-white hover:bg-rose-950/40 border border-rose-500/20'
-              }`}
-            >
-              <ShieldAlert className="w-4 h-4 text-rose-400" />
-              <span>Painel Super Admin</span>
-            </button>
-          </div>
+          {/* Super Admin Special Entry (ONLY visible to Super Admin) */}
+          {isSuperAdmin && (
+            <div className="pt-3 border-t border-slate-800/80">
+              <button
+                onClick={() => onSelectTab('super_admin')}
+                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold transition ${
+                  activeTab === 'super_admin'
+                    ? 'bg-rose-600 text-white shadow-sm shadow-rose-900/50'
+                    : 'text-rose-300 hover:text-white hover:bg-rose-950/40 border border-rose-500/20'
+                }`}
+              >
+                <ShieldAlert className="w-4 h-4 text-rose-400" />
+                <span>Painel Super Admin</span>
+              </button>
+            </div>
+          )}
         </nav>
       </div>
 
