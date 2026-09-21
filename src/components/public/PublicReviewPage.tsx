@@ -11,7 +11,7 @@ interface PublicReviewPageProps {
 }
 
 export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
-  slug = 'bistro-paris',
+  slug = 'mrnavalha',
   businessOverride,
   onBackToApp
 }) => {

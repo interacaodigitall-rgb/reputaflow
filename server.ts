@@ -38,42 +38,6 @@ const DEFAULT_BUSINESSES = [
     password: 'reputa123',
     createdAt: new Date(Date.now() - 30 * 86400000).toISOString(),
     updatedAt: new Date().toISOString()
-  },
-  {
-    id: 'biz_bistro_paris',
-    name: 'Bistrô & Café Paris',
-    slug: 'bistro-paris',
-    category: 'Restaurante & Gastronomia',
-    logoUrl: 'https://images.unsplash.com/photo-1554118811-1e0d58224f24?w=150&auto=format&fit=crop&q=80',
-    phone: '+55 11 98765-4321',
-    email: 'contato@bistroparis.com.br',
-    address: 'Av. Paulista, 1500 - Bela Vista, São Paulo - SP',
-    googleReviewUrl: 'https://g.page/r/bistro-paris/review',
-    status: 'active',
-    planId: 'plan_pro',
-    ownerId: 'owner_bistro',
-    currency: 'BRL',
-    password: 'reputa123',
-    createdAt: new Date(Date.now() - 15 * 86400000).toISOString(),
-    updatedAt: new Date().toISOString()
-  },
-  {
-    id: 'biz_clinica_estetica',
-    name: 'Clínica & Spa Estética',
-    slug: 'clinica-estetica',
-    category: 'Saúde & Beleza',
-    logoUrl: 'https://images.unsplash.com/photo-1540555700478-4be289fbecef?w=150&auto=format&fit=crop&q=80',
-    phone: '+351 923 456 789',
-    email: 'comerciante@reputaflow.com',
-    address: 'Av. da Liberdade, 240 - Lisboa',
-    googleReviewUrl: 'https://g.page/r/clinica-estetica/review',
-    status: 'active',
-    planId: 'plan_pro',
-    ownerId: 'owner_clinica',
-    currency: 'EUR',
-    password: 'reputa123',
-    createdAt: new Date(Date.now() - 10 * 86400000).toISOString(),
-    updatedAt: new Date().toISOString()
   }
 ];
 
@@ -84,16 +48,8 @@ function loadDb(): ServerDb {
     }
     if (fs.existsSync(DB_FILE)) {
       const data = JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
-      // Ensure DEFAULT_BUSINESSES are always included
-      const existingBizIds = new Set(data.businesses?.map((b: any) => b.id) || []);
-      for (const defBiz of DEFAULT_BUSINESSES) {
-        if (!existingBizIds.has(defBiz.id)) {
-          data.businesses = data.businesses || [];
-          data.businesses.push(defBiz);
-        }
-      }
       return {
-        businesses: data.businesses || DEFAULT_BUSINESSES,
+        businesses: data.businesses || [],
         reviews: data.reviews || [],
         feedback: data.feedback || [],
         recoveryCases: data.recoveryCases || [],
@@ -101,65 +57,14 @@ function loadDb(): ServerDb {
       };
     }
   } catch (err) {
-    console.error('Error reading db.json, using defaults:', err);
+    console.error('Error reading db.json:', err);
   }
 
   const initialDb: ServerDb = {
-    businesses: DEFAULT_BUSINESSES,
-    reviews: [
-      {
-        id: 'rev_1',
-        businessId: 'biz_mrnavalha',
-        customerName: 'Tiago Santos',
-        customerPhone: '+351 923 456 789',
-        customerEmail: 'tiago@email.pt',
-        rating: 5,
-        channel: 'qr',
-        createdAt: new Date(Date.now() - 1 * 86400000).toISOString()
-      },
-      {
-        id: 'rev_2',
-        businessId: 'biz_mrnavalha',
-        customerName: 'Diogo Ribeiro',
-        customerPhone: '+351 934 567 890',
-        customerEmail: 'diogo@email.pt',
-        rating: 3,
-        channel: 'qr',
-        createdAt: new Date(Date.now() - 3 * 86400000).toISOString()
-      }
-    ],
-    feedback: [
-      {
-        id: 'fb_1',
-        businessId: 'biz_mrnavalha',
-        reviewId: 'rev_2',
-        customerName: 'Diogo Ribeiro',
-        customerPhone: '+351 934 567 890',
-        customerEmail: 'diogo@email.pt',
-        rating: 3,
-        question1: 'O tempo de espera para a barba foi um pouco acima do agendado.',
-        question2: 'Avisar por mensagem se houver atrasos na cadeira.',
-        question3WantsContact: true,
-        createdAt: new Date(Date.now() - 3 * 86400000).toISOString()
-      }
-    ],
-    recoveryCases: [
-      {
-        id: 'rec_1',
-        businessId: 'biz_mrnavalha',
-        reviewId: 'rev_2',
-        feedbackId: 'fb_1',
-        customerName: 'Diogo Ribeiro',
-        customerPhone: '+351 934 567 890',
-        customerEmail: 'diogo@email.pt',
-        rating: 3,
-        complaint: 'O tempo de espera para a barba foi um pouco acima do agendado.',
-        status: 'pending',
-        priority: 'high',
-        createdAt: new Date(Date.now() - 3 * 86400000).toISOString(),
-        updatedAt: new Date().toISOString()
-      }
-    ],
+    businesses: [],
+    reviews: [],
+    feedback: [],
+    recoveryCases: [],
     interactions: []
   };
 

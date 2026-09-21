@@ -150,7 +150,7 @@ function MainAppContent() {
   if (isCustomerViewMode) {
     return (
       <PublicReviewPage
-        slug={reviewSlugFromUrl || selectedBusiness?.slug || 'bistro-paris'}
+        slug={reviewSlugFromUrl || selectedBusiness?.slug || 'mrnavalha'}
         businessOverride={!reviewSlugFromUrl ? selectedBusiness : null}
         onBackToApp={() => {
           setIsCustomerViewMode(false);

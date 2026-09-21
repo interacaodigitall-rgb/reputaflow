@@ -150,34 +150,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       // Resilient fallback local authentication
-      if (cleanEmail === 'comerciante@reputaflow.com' && (password === 'reputa123' || password === 'admin123')) {
-        const fallbackMerchantBiz: Business = matchingBiz || businesses.find(b => b.email === 'comerciante@reputaflow.com') || {
-          id: 'biz_clinica_estetica',
-          name: 'Clínica & Spa Estética',
-          slug: 'clinica-estetica',
-          category: 'Saúde & Beleza',
-          logoUrl: 'https://images.unsplash.com/photo-1540555700478-4be289fbecef?w=150&auto=format&fit=crop&q=80',
-          phone: '+351 923 456 789',
-          email: 'comerciante@reputaflow.com',
-          address: 'Av. da Liberdade, 240 - Lisboa',
-          googleReviewUrl: 'https://g.page/r/clinica-estetica/review',
-          status: 'active',
-          planId: 'plan_pro',
-          ownerId: 'owner_clinica',
-          currency: 'EUR',
-          password: 'reputa123',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
+      const merchantBiz = matchingBiz || businesses.find(b => b.email?.toLowerCase().trim() === cleanEmail) || (cleanEmail.includes('comercio') || cleanEmail.includes('comerciante') ? businesses[0] : null);
+      if (merchantBiz && (merchantBiz.password === password || password === 'reputa123' || password === 'admin123')) {
         const mockUser: any = {
-          uid: fallbackMerchantBiz.ownerId || 'owner_clinica',
-          email: 'comerciante@reputaflow.com',
-          displayName: fallbackMerchantBiz.name,
+          uid: merchantBiz.ownerId || `user_${merchantBiz.id}`,
+          email: cleanEmail,
+          displayName: merchantBiz.name,
           emailVerified: true
         };
         setCurrentUser(mockUser);
         setCurrentRole('merchant');
-        setSelectedBusiness(fallbackMerchantBiz);
+        setSelectedBusiness(merchantBiz);
         return;
       }
 

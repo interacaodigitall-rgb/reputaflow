@@ -19,7 +19,8 @@ import {
   LogIn,
   QrCode,
   Copy,
-  Check
+  Check,
+  RefreshCw
 } from 'lucide-react';
 import { Business, Customer, Review, RecoveryCase, Plan, PlatformSettings } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -100,6 +101,11 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   const [newBizCurrency, setNewBizCurrency] = useState<'EUR' | 'BRL'>('EUR');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+
+  // Business Deletion Modal State
+  const [businessToDelete, setBusinessToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Settings State
   const [platformName, setPlatformName] = useState(settings?.platformName || 'ReputaFlow');
@@ -234,12 +240,20 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     }
   };
 
-  const handleDeleteBusiness = async (bizId: string, name: string) => {
-    if (!confirm(`Tem certeza que deseja excluir o estabelecimento "${name}"?`)) return;
+  const confirmDeleteBusiness = async () => {
+    if (!businessToDelete) return;
+    setDeleting(true);
     try {
-      await deleteBusiness(bizId);
+      await deleteBusiness(businessToDelete.id);
+      setToastMessage(`Estabelecimento "${businessToDelete.name}" excluído com sucesso!`);
+      setTimeout(() => setToastMessage(null), 4000);
     } catch (err) {
       console.error('Error deleting business:', err);
+      setToastMessage('Erro ao excluir estabelecimento.');
+      setTimeout(() => setToastMessage(null), 4000);
+    } finally {
+      setDeleting(false);
+      setBusinessToDelete(null);
     }
   };
 
@@ -536,7 +550,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
 
                           {/* Delete */}
                           <button
-                            onClick={() => handleDeleteBusiness(b.id, b.name)}
+                            onClick={() => setBusinessToDelete({ id: b.id, name: b.name })}
                             title="Excluir"
                             className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
                           >
@@ -909,6 +923,61 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border border-slate-700 animate-fade-in">
+          <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
+          <span className="text-sm font-medium">{toastMessage}</span>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {businessToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mb-4">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <h3 className="text-lg font-bold text-slate-900 mb-2">
+              Excluir Estabelecimento
+            </h3>
+            <p className="text-sm text-slate-600 mb-6 leading-relaxed">
+              Tem certeza que deseja excluir o comércio{' '}
+              <strong className="text-slate-900 font-semibold">"{businessToDelete.name}"</strong>?
+              Esta ação removerá o comércio da plataforma.
+            </p>
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => setBusinessToDelete(null)}
+                className="py-2.5 px-4 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-100 transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={confirmDeleteBusiness}
+                className="py-2.5 px-5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-sm shadow-md transition disabled:opacity-50 flex items-center gap-2"
+              >
+                {deleting ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    Excluindo...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    Sim, Excluir
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

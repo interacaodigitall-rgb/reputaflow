@@ -16,6 +16,7 @@ import {
 } from 'firebase/firestore';
 import { signInAnonymously } from 'firebase/auth';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
+import { REGISTERED_BUSINESSES } from './initialData';
 import {
   Business,
   Customer,
@@ -61,17 +62,63 @@ export function sanitizeForFirestore<T extends Record<string, any>>(obj: T): T {
 // ==========================================
 
 const LOCAL_STORAGE_KEY_BIZ = 'reputaflow_local_businesses';
+const LOCAL_STORAGE_KEY_DELETED = 'reputaflow_deleted_businesses';
+
+export function getDeletedBusinessIds(): string[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_KEY_DELETED);
+    const list: string[] = raw ? JSON.parse(raw) : [];
+    const permanentDeleted = ['biz_bistro_paris', 'biz_clinica_estetica'];
+    return Array.from(new Set([...list, ...permanentDeleted]));
+  } catch {
+    return ['biz_bistro_paris', 'biz_clinica_estetica'];
+  }
+}
+
+export function markBusinessAsDeleted(id: string): void {
+  try {
+    const deleted = getDeletedBusinessIds();
+    if (!deleted.includes(id)) {
+      deleted.push(id);
+      localStorage.setItem(LOCAL_STORAGE_KEY_DELETED, JSON.stringify(deleted));
+    }
+  } catch (e) {
+    console.error('Failed to mark business as deleted:', e);
+  }
+}
 
 export function getLocalBusinesses(): Business[] {
+  const deletedIds = new Set(getDeletedBusinessIds());
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_KEY_BIZ);
-    return raw ? JSON.parse(raw) : [];
+    let list: Business[] = raw ? JSON.parse(raw) : [];
+
+    // Filter out deleted businesses and fantasy demo businesses
+    list = list.filter(b => 
+      b && 
+      !deletedIds.has(b.id) && 
+      b.slug !== 'bistro-paris' && 
+      b.slug !== 'clinica-estetica'
+    );
+
+    // If local storage is empty, initialize with official registered businesses
+    if (list.length === 0) {
+      list = REGISTERED_BUSINESSES.filter(b => !deletedIds.has(b.id));
+      localStorage.setItem(LOCAL_STORAGE_KEY_BIZ, JSON.stringify(list));
+    }
+
+    return list;
   } catch (e) {
-    return [];
+    return REGISTERED_BUSINESSES.filter(b => !deletedIds.has(b.id));
   }
 }
 
 export function saveLocalBusiness(biz: Business): void {
+  if (!biz || !biz.id) return;
+  const deletedIds = new Set(getDeletedBusinessIds());
+  if (deletedIds.has(biz.id) || biz.slug === 'bistro-paris' || biz.slug === 'clinica-estetica') {
+    return;
+  }
   try {
     const list = getLocalBusinesses();
     const idx = list.findIndex(b => b.id === biz.id || (biz.slug && b.slug === biz.slug));
@@ -88,8 +135,10 @@ export function saveLocalBusiness(biz: Business): void {
 }
 
 export function removeLocalBusiness(id: string): void {
+  markBusinessAsDeleted(id);
   try {
-    const list = getLocalBusinesses().filter(b => b.id !== id);
+    const current = getLocalBusinesses();
+    const list = current.filter(b => b.id !== id);
     localStorage.setItem(LOCAL_STORAGE_KEY_BIZ, JSON.stringify(list));
     window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated', { detail: list }));
   } catch (e) {
@@ -101,10 +150,12 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
   if (!slug) return null;
   const cleanSlug = slug.toLowerCase().trim();
   const norm = normalizeKey(slug);
+  const deletedIds = new Set(getDeletedBusinessIds());
 
   // 1. Check local storage first (instant response if available on this device)
   const localList = getLocalBusinesses();
   const localMatch = localList.find(b => {
+    if (deletedIds.has(b.id)) return false;
     const bId = (b.id || '').toLowerCase();
     const bSlug = (b.slug || '').toLowerCase();
     const bName = (b.name || '').toLowerCase();
@@ -114,12 +165,32 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
   });
   if (localMatch) return localMatch;
 
-  // 2. Fetch from Backend Server API (shared across all devices, customer phones, tabs)
+  // 2. Check REGISTERED_BUSINESSES default list (essential for Vercel and first-time mobile visitors)
+  const registeredMatch = REGISTERED_BUSINESSES.find(b => {
+    if (deletedIds.has(b.id)) return false;
+    const bId = (b.id || '').toLowerCase();
+    const bSlug = (b.slug || '').toLowerCase();
+    const bName = (b.name || '').toLowerCase();
+    return (
+      bSlug === cleanSlug ||
+      bId === cleanSlug ||
+      bName === cleanSlug ||
+      normalizeKey(bSlug) === norm ||
+      normalizeKey(bId) === norm ||
+      normalizeKey(bName) === norm
+    );
+  });
+  if (registeredMatch) {
+    saveLocalBusiness(registeredMatch);
+    return registeredMatch;
+  }
+
+  // 3. Fetch from Backend Server API (shared across all devices, customer phones, tabs)
   try {
     const res = await fetch(`/api/businesses/${encodeURIComponent(cleanSlug)}`);
     if (res.ok) {
       const serverBiz = await res.json();
-      if (serverBiz && (serverBiz.id || serverBiz.slug)) {
+      if (serverBiz && (serverBiz.id || serverBiz.slug) && !deletedIds.has(serverBiz.id)) {
         saveLocalBusiness(serverBiz);
         return serverBiz;
       }
@@ -128,25 +199,27 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
     console.warn('API getBusinessBySlug warning:', apiErr);
   }
 
-  // 2b. Fetch all from Backend Server API and scan with normalized key
+  // 3b. Fetch all from Backend Server API and scan with normalized key
   try {
     const resAll = await fetch('/api/businesses');
     if (resAll.ok) {
       const allBiz: Business[] = await resAll.json();
       for (const b of allBiz) {
-        saveLocalBusiness(b);
-        const bId = (b.id || '').toLowerCase();
-        const bSlug = (b.slug || '').toLowerCase();
-        const bName = (b.name || '').toLowerCase();
-        if (
-          bSlug === cleanSlug ||
-          bId === cleanSlug ||
-          bName === cleanSlug ||
-          normalizeKey(bSlug) === norm ||
-          normalizeKey(bId) === norm ||
-          normalizeKey(bName) === norm
-        ) {
-          return b;
+        if (!deletedIds.has(b.id) && b.slug !== 'bistro-paris' && b.slug !== 'clinica-estetica') {
+          saveLocalBusiness(b);
+          const bId = (b.id || '').toLowerCase();
+          const bSlug = (b.slug || '').toLowerCase();
+          const bName = (b.name || '').toLowerCase();
+          if (
+            bSlug === cleanSlug ||
+            bId === cleanSlug ||
+            bName === cleanSlug ||
+            normalizeKey(bSlug) === norm ||
+            normalizeKey(bId) === norm ||
+            normalizeKey(bName) === norm
+          ) {
+            return b;
+          }
         }
       }
     }
@@ -154,69 +227,23 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
     console.warn('API getAllBusinesses warning:', apiAllErr);
   }
 
-  // 3. Anonymous sign-in attempt in background if no user is authenticated
-  if (!auth.currentUser) {
-    try {
-      await signInAnonymously(auth);
-    } catch {
-      // Ignored if anonymous auth disabled
-    }
-  }
-
-  const path = 'businesses';
-
-  // Strategy A: Query Firestore by slug field
+  // 4. Firestore Query
   try {
-    const q = query(collection(db, path), where('slug', '==', cleanSlug), limit(1));
-    const snapPromise = getDocs(q);
-    const timeout = new Promise<null>((_, reject) =>
-      setTimeout(() => reject(new Error('timeout')), 3000)
-    );
-    const snap = await Promise.race([snapPromise, timeout]);
+    const q = query(collection(db, 'businesses'), where('slug', '==', cleanSlug), limit(1));
+    const snap = await Promise.race([
+      getDocs(q),
+      new Promise<null>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
+    ]);
     if (snap && !snap.empty) {
       const d = snap.docs[0];
       const found = { id: d.id, ...d.data() } as Business;
-      saveLocalBusiness(found);
-      return found;
-    }
-  } catch (err) {
-    console.warn('Strategy A (query by slug) warning:', err);
-  }
-
-  // Strategy B: Direct fetch by document ID
-  try {
-    const docRef = doc(db, path, slug);
-    const docSnap = await getDoc(docRef);
-    if (docSnap.exists()) {
-      const found = { id: docSnap.id, ...docSnap.data() } as Business;
-      saveLocalBusiness(found);
-      return found;
-    }
-  } catch (err) {
-    console.warn('Strategy B (doc by id) warning:', err);
-  }
-
-  // Strategy C: Scan all businesses in Firestore
-  try {
-    const allDocsSnap = await getDocs(collection(db, path));
-    for (const d of allDocsSnap.docs) {
-      const data = d.data() as Business;
-      const bSlug = (data.slug || '').toLowerCase().trim();
-      const bName = (data.name || '').toLowerCase().trim();
-      if (
-        bSlug === cleanSlug ||
-        d.id.toLowerCase() === cleanSlug ||
-        normalizeKey(bSlug) === norm ||
-        normalizeKey(d.id) === norm ||
-        normalizeKey(bName) === norm
-      ) {
-        const found = { ...data, id: d.id } as Business;
+      if (!deletedIds.has(found.id)) {
         saveLocalBusiness(found);
         return found;
       }
     }
   } catch (err) {
-    console.warn('Strategy C (scan all docs) warning:', err);
+    console.warn('Firestore query by slug warning:', err);
   }
 
   return null;
@@ -256,10 +283,15 @@ export async function getBusinessById(id: string): Promise<Business | null> {
 }
 
 export async function getAllBusinesses(): Promise<Business[]> {
+  const deletedIds = new Set(getDeletedBusinessIds());
   const mergedMap = new Map<string, Business>();
 
   // 1. Local storage
-  getLocalBusinesses().forEach(b => mergedMap.set(b.id, b));
+  getLocalBusinesses().forEach(b => {
+    if (b && !deletedIds.has(b.id) && b.slug !== 'bistro-paris' && b.slug !== 'clinica-estetica') {
+      mergedMap.set(b.id, b);
+    }
+  });
 
   // 2. Fetch from backend API
   try {
@@ -267,8 +299,10 @@ export async function getAllBusinesses(): Promise<Business[]> {
     if (res.ok) {
       const serverList: Business[] = await res.json();
       serverList.forEach(b => {
-        mergedMap.set(b.id, b);
-        saveLocalBusiness(b);
+        if (b && !deletedIds.has(b.id) && b.slug !== 'bistro-paris' && b.slug !== 'clinica-estetica') {
+          mergedMap.set(b.id, b);
+          saveLocalBusiness(b);
+        }
       });
     }
   } catch (err) {
@@ -285,8 +319,10 @@ export async function getAllBusinesses(): Promise<Business[]> {
     if (snap) {
       snap.docs.forEach(d => {
         const b = { id: d.id, ...d.data() } as Business;
-        mergedMap.set(b.id, b);
-        saveLocalBusiness(b);
+        if (b && !deletedIds.has(b.id) && b.slug !== 'bistro-paris' && b.slug !== 'clinica-estetica') {
+          mergedMap.set(b.id, b);
+          saveLocalBusiness(b);
+        }
       });
     }
   } catch (err) {
@@ -300,13 +336,18 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
   const path = 'businesses';
 
   const mergeAndNotify = (firestoreList: Business[] = []) => {
+    const deletedIds = new Set(getDeletedBusinessIds());
     const local = getLocalBusinesses();
     const map = new Map<string, Business>();
     local.forEach(b => {
-      map.set(b.id, b);
+      if (b && !deletedIds.has(b.id) && b.slug !== 'bistro-paris' && b.slug !== 'clinica-estetica') {
+        map.set(b.id, b);
+      }
     });
     firestoreList.forEach(b => {
-      map.set(b.id, b);
+      if (b && !deletedIds.has(b.id) && b.slug !== 'bistro-paris' && b.slug !== 'clinica-estetica') {
+        map.set(b.id, b);
+      }
     });
     const merged = Array.from(map.values());
     callback(merged);
@@ -320,8 +361,15 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
     .then(res => res.ok ? res.json() : [])
     .then((serverList: Business[]) => {
       if (Array.isArray(serverList) && serverList.length > 0) {
-        serverList.forEach(b => saveLocalBusiness(b));
-        mergeAndNotify(serverList);
+        const deletedIds = new Set(getDeletedBusinessIds());
+        const validList = serverList.filter(b => 
+          b && 
+          !deletedIds.has(b.id) && 
+          b.slug !== 'bistro-paris' && 
+          b.slug !== 'clinica-estetica'
+        );
+        validList.forEach(b => saveLocalBusiness(b));
+        mergeAndNotify(validList);
       }
     })
     .catch(() => {});
@@ -335,7 +383,10 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
   const unsubscribe = onSnapshot(
     collection(db, path),
     (snap) => {
-      lastFirestoreDocs = snap.docs.map(d => ({ id: d.id, ...d.data() } as Business));
+      const deletedIds = new Set(getDeletedBusinessIds());
+      lastFirestoreDocs = snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as Business))
+        .filter(b => b && !deletedIds.has(b.id) && b.slug !== 'bistro-paris' && b.slug !== 'clinica-estetica');
       lastFirestoreDocs.forEach(b => saveLocalBusiness(b));
       mergeAndNotify(lastFirestoreDocs);
     },
@@ -435,10 +486,10 @@ export async function updateBusiness(id: string, data: Partial<Business>): Promi
 }
 
 export async function deleteBusiness(id: string): Promise<void> {
-  const path = `businesses/${id}`;
+  // 1. Mark as permanently deleted and remove locally
   removeLocalBusiness(id);
 
-  // Sync to Backend API
+  // 2. Sync to Backend API
   try {
     await fetch(`/api/businesses/${encodeURIComponent(id)}`, {
       method: 'DELETE'
@@ -447,14 +498,15 @@ export async function deleteBusiness(id: string): Promise<void> {
     console.warn('Backend API business deletion warning:', apiErr);
   }
 
+  // 3. Attempt Firestore deletion (non-blocking, timeout guarded)
   try {
     const delPromise = deleteDoc(doc(db, 'businesses', id));
     const timeout = new Promise<void>((_, reject) =>
-      setTimeout(() => reject(new Error('Firestore delete timeout')), 4000)
+      setTimeout(() => reject(new Error('Firestore delete timeout')), 2500)
     );
     await Promise.race([delPromise, timeout]);
   } catch (err) {
-    console.warn('Firestore delete warning (removed locally):', err);
+    console.warn('Firestore delete warning (removed locally and on server):', err);
   }
 }
 
