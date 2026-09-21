@@ -14,7 +14,8 @@ import {
   serverTimestamp,
   limit
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from './firebase';
+import { signInAnonymously } from 'firebase/auth';
+import { db, auth, handleFirestoreError, OperationType } from './firebase';
 import {
   Business,
   Customer,
@@ -89,18 +90,33 @@ export function removeLocalBusiness(id: string): void {
 }
 
 export async function getBusinessBySlug(slug: string): Promise<Business | null> {
+  if (!slug) return null;
   const cleanSlug = slug.toLowerCase().trim();
-  // 1. Check local storage first
-  const localMatch = getLocalBusinesses().find(b => b.slug?.toLowerCase() === cleanSlug);
+
+  // 1. Check local storage first (instant response if available on this device)
+  const localList = getLocalBusinesses();
+  const localMatch = localList.find(
+    b => b.slug?.toLowerCase() === cleanSlug || b.id.toLowerCase() === cleanSlug
+  );
   if (localMatch) return localMatch;
 
-  // 2. Query Firestore with timeout protection
+  // 2. Anonymous sign-in attempt in background if no user is authenticated
+  if (!auth.currentUser) {
+    try {
+      await signInAnonymously(auth);
+    } catch {
+      // Ignored if anonymous auth disabled
+    }
+  }
+
   const path = 'businesses';
+
+  // Strategy A: Query Firestore by slug field
   try {
     const q = query(collection(db, path), where('slug', '==', cleanSlug), limit(1));
     const snapPromise = getDocs(q);
     const timeout = new Promise<null>((_, reject) =>
-      setTimeout(() => reject(new Error('timeout')), 3000)
+      setTimeout(() => reject(new Error('timeout')), 5000)
     );
     const snap = await Promise.race([snapPromise, timeout]);
     if (snap && !snap.empty) {
@@ -109,10 +125,40 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
       saveLocalBusiness(found);
       return found;
     }
-    return localMatch || null;
   } catch (err) {
-    return localMatch || null;
+    console.warn('Strategy A (query by slug) warning:', err);
   }
+
+  // Strategy B: Direct fetch by document ID
+  try {
+    const docRef = doc(db, path, slug);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      const found = { id: docSnap.id, ...docSnap.data() } as Business;
+      saveLocalBusiness(found);
+      return found;
+    }
+  } catch (err) {
+    console.warn('Strategy B (doc by id) warning:', err);
+  }
+
+  // Strategy C: Scan all businesses in Firestore
+  try {
+    const allDocsSnap = await getDocs(collection(db, path));
+    for (const d of allDocsSnap.docs) {
+      const data = d.data() as Business;
+      const bSlug = (data.slug || '').toLowerCase().trim();
+      if (bSlug === cleanSlug || d.id.toLowerCase() === cleanSlug) {
+        const found = { ...data, id: d.id } as Business;
+        saveLocalBusiness(found);
+        return found;
+      }
+    }
+  } catch (err) {
+    console.warn('Strategy C (scan all docs) warning:', err);
+  }
+
+  return localMatch || null;
 }
 
 export async function getBusinessById(id: string): Promise<Business | null> {
@@ -417,6 +463,11 @@ export async function upsertCustomerByPhone(params: {
   internalNotes?: string;
 }): Promise<string> {
   const path = 'customers';
+  const now = new Date().toISOString();
+
+  let docRef: any = null;
+  let existing: Customer | null = null;
+
   try {
     const q = query(
       collection(db, path),
@@ -425,11 +476,16 @@ export async function upsertCustomerByPhone(params: {
       limit(1)
     );
     const snap = await getDocs(q);
-    const now = new Date().toISOString();
-
     if (!snap.empty) {
-      const docRef = snap.docs[0];
-      const existing = docRef.data() as Customer;
+      docRef = snap.docs[0];
+      existing = docRef.data() as Customer;
+    }
+  } catch (lookupErr) {
+    console.warn('Customer lookup skipped or not permitted (creating new record):', lookupErr);
+  }
+
+  if (docRef && existing) {
+    try {
       const newCount = (existing.reviewsCount || 0) + 1;
       const newAvg = Number((((existing.avgRating || params.rating) * (newCount - 1) + params.rating) / newCount).toFixed(1));
 
@@ -444,26 +500,32 @@ export async function upsertCustomerByPhone(params: {
         updatedAt: now
       }));
       return docRef.id;
-    } else {
-      const newCustomer: Omit<Customer, 'id'> = sanitizeForFirestore({
-        businessId: params.businessId,
-        name: params.name,
-        phone: params.phone,
-        email: params.email || '',
-        reviewsCount: 1,
-        lastReviewAt: now,
-        avgRating: params.rating,
-        status: params.status,
-        internalNotes: params.internalNotes || '',
-        lastInteractionAt: now,
-        createdAt: now,
-        updatedAt: now
-      });
-      const ref = await addDoc(collection(db, path), newCustomer);
-      return ref.id;
+    } catch (updErr) {
+      console.warn('Customer update warning (falling back to new record):', updErr);
     }
-  } catch (err) {
-    handleFirestoreError(err, OperationType.WRITE, path);
+  }
+
+  // Create new customer
+  try {
+    const newCustomer: Omit<Customer, 'id'> = sanitizeForFirestore({
+      businessId: params.businessId,
+      name: params.name,
+      phone: params.phone,
+      email: params.email || '',
+      reviewsCount: 1,
+      lastReviewAt: now,
+      avgRating: params.rating,
+      status: params.status || 'in_recovery',
+      internalNotes: params.internalNotes || '',
+      lastInteractionAt: now,
+      createdAt: now,
+      updatedAt: now
+    });
+    const ref = await addDoc(collection(db, path), newCustomer);
+    return ref.id;
+  } catch (createErr) {
+    console.warn('Customer addDoc warning:', createErr);
+    return `cust_${Date.now().toString(36)}`;
   }
 }
 

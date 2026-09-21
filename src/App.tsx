@@ -31,6 +31,7 @@ import {
   getPlans,
   getPlatformSettings
 } from './lib/dbService';
+import { extractReviewSlug } from './lib/urlHelper';
 import { ArrowLeft, ShieldAlert } from 'lucide-react';
 
 function MainAppContent() {
@@ -64,14 +65,24 @@ function MainAppContent() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [settings, setSettings] = useState<PlatformSettings | null>(null);
 
-  // Check URL parameters on mount (?b=slug or ?review=slug)
+  // Check URL parameters on mount and when history changes (?b=slug or ?review=slug)
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const bSlug = params.get('b') || params.get('review');
-    if (bSlug) {
-      setReviewSlugFromUrl(bSlug);
-      setIsCustomerViewMode(true);
-    }
+    const handleUrlChange = () => {
+      const bSlug = extractReviewSlug();
+      if (bSlug) {
+        setReviewSlugFromUrl(bSlug);
+        setIsCustomerViewMode(true);
+      }
+    };
+
+    handleUrlChange();
+    window.addEventListener('popstate', handleUrlChange);
+    window.addEventListener('hashchange', handleUrlChange);
+
+    return () => {
+      window.removeEventListener('popstate', handleUrlChange);
+      window.removeEventListener('hashchange', handleUrlChange);
+    };
   }, []);
 
   // Subscribe to Business-specific data from Firestore

@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { X, Download, Copy, ExternalLink, QrCode } from 'lucide-react';
+import { X, Download, Copy, ExternalLink, QrCode, Check } from 'lucide-react';
 import { Business } from '../../types';
+import { getPublicReviewUrl } from '../../lib/urlHelper';
 
 interface QrCodeModalProps {
   business: Business | null;
@@ -14,13 +15,16 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({
   onClose,
   onOpenReviewPreview
 }) => {
+  const [copied, setCopied] = useState(false);
+
   if (!business) return null;
 
-  const publicReviewUrl = `${window.location.origin}?b=${business.slug}`;
+  const publicReviewUrl = getPublicReviewUrl(business.slug || business.id);
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(publicReviewUrl);
-    alert('Link de avaliação copiado para a área de transferência!');
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
   };
 
   const handleDownloadPng = () => {
@@ -105,6 +109,33 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({
           />
         </div>
 
+        {/* URL Box */}
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-2 flex items-center justify-between gap-2 text-left">
+          <div className="font-mono text-[11px] text-slate-600 truncate flex-1 select-all px-1">
+            {publicReviewUrl}
+          </div>
+          <button
+            onClick={handleCopyLink}
+            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition shrink-0 flex items-center gap-1 ${
+              copied
+                ? 'bg-emerald-600 text-white'
+                : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+            }`}
+          >
+            {copied ? (
+              <>
+                <Check className="w-3.5 h-3.5" />
+                <span>Copiado!</span>
+              </>
+            ) : (
+              <>
+                <Copy className="w-3.5 h-3.5" />
+                <span>Copiar</span>
+              </>
+            )}
+          </button>
+        </div>
+
         <div className="space-y-2">
           <button
             onClick={handleDownloadPng}
@@ -114,13 +145,15 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({
             <span>Descarregar Placa em Imagem</span>
           </button>
 
-          <button
-            onClick={handleCopyLink}
+          <a
+            href={publicReviewUrl}
+            target="_blank"
+            rel="noopener noreferrer"
             className="w-full py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition flex items-center justify-center gap-2"
           >
-            <Copy className="w-3.5 h-3.5" />
-            <span>Copiar Link de Avaliação</span>
-          </button>
+            <ExternalLink className="w-3.5 h-3.5" />
+            <span>Abrir Link em Nova Aba</span>
+          </a>
         </div>
 
         <div className="pt-2 border-t border-slate-100">
@@ -131,7 +164,7 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({
             }}
             className="text-xs text-indigo-600 hover:text-indigo-800 font-bold inline-flex items-center gap-1"
           >
-            <span>Testar página de avaliação agora</span>
+            <span>Testar nesta janela</span>
             <ExternalLink className="w-3 h-3" />
           </button>
         </div>

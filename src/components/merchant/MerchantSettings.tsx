@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { Business } from '../../types';
 import { updateBusiness } from '../../lib/dbService';
+import { getPublicReviewUrl } from '../../lib/urlHelper';
 
 interface MerchantSettingsProps {
   business: Business;
@@ -49,7 +50,7 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
   const [passwordStatus, setPasswordStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [passwordError, setPasswordError] = useState('');
 
-  const publicReviewUrl = `${window.location.origin}?b=${slug || business.slug}`;
+  const publicReviewUrl = getPublicReviewUrl(slug || business.slug);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();

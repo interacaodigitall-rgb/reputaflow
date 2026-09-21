@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Star, CheckCircle2, MessageSquare, Phone, User, Mail, ArrowRight, ExternalLink, ShieldCheck, HeartHandshake } from 'lucide-react';
+import { Star, CheckCircle2, MessageSquare, Phone, User, Mail, ArrowRight, ExternalLink, ShieldCheck, HeartHandshake, RefreshCw, Store } from 'lucide-react';
 import { Business } from '../../types';
 import { getBusinessBySlug, submitReview, submitFeedbackAndRecovery } from '../../lib/dbService';
 
@@ -32,24 +32,38 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
   const [isCompleted, setIsCompleted] = useState(false);
   const [createdReviewId, setCreatedReviewId] = useState<string | null>(null);
 
-  useEffect(() => {
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const fetchBusiness = async () => {
     if (businessOverride) {
       setBusiness(businessOverride);
       setLoading(false);
       return;
     }
-    async function loadBiz() {
-      setLoading(true);
-      try {
-        const found = await getBusinessBySlug(slug);
-        setBusiness(found);
-      } catch (err) {
-        console.error('Error loading business for review:', err);
-      } finally {
-        setLoading(false);
+    setLoading(true);
+    setLoadError(null);
+    try {
+      let found = await getBusinessBySlug(slug);
+      // If not found on immediate first tick (e.g. mobile handshake), retry once after short delay
+      if (!found) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        found = await getBusinessBySlug(slug);
       }
+      if (found) {
+        setBusiness(found);
+      } else {
+        setLoadError(`Não foi possível carregar os dados para o identificador "${slug}".`);
+      }
+    } catch (err: any) {
+      console.error('Error loading business for review:', err);
+      setLoadError('Erro de conexão ao carregar os dados do estabelecimento.');
+    } finally {
+      setLoading(false);
     }
-    loadBiz();
+  };
+
+  useEffect(() => {
+    fetchBusiness();
   }, [slug, businessOverride]);
 
   const handleSelectStar = async (rating: number) => {
@@ -152,19 +166,40 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
   if (!business) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-6 text-center">
-        <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 max-w-md w-full">
-          <h2 className="text-xl font-bold text-slate-800 mb-2">Estabelecimento não encontrado</h2>
-          <p className="text-slate-600 text-sm mb-6">
-            O link de avaliação fornecido não corresponde a nenhum comerciante ativo no momento.
-          </p>
-          {onBackToApp && (
+        <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200 max-w-md w-full space-y-5">
+          <div className="w-14 h-14 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto">
+            <Store className="w-7 h-7" />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-slate-900">Estabelecimento não encontrado</h2>
+            <p className="text-slate-600 text-xs mt-1.5 leading-relaxed">
+              O link de avaliação fornecido não foi localizado ou o estabelecimento ainda está a sincronizar.
+            </p>
+            {slug && (
+              <div className="mt-3 p-2 bg-slate-50 border border-slate-200 rounded-xl font-mono text-[11px] text-slate-500 break-all">
+                Identificador: ?b={slug}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-2 pt-2">
             <button
-              onClick={onBackToApp}
-              className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl text-sm transition"
+              onClick={() => fetchBusiness()}
+              className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-sm"
             >
-              Voltar ao ReputaFlow
+              <RefreshCw className="w-4 h-4" />
+              <span>Tentar carregar novamente</span>
             </button>
-          )}
+
+            {onBackToApp && (
+              <button
+                onClick={onBackToApp}
+                className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition"
+              >
+                Voltar à Plataforma
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );

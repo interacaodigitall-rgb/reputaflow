@@ -16,7 +16,10 @@ import {
   DollarSign,
   Search,
   Save,
-  LogIn
+  LogIn,
+  QrCode,
+  Copy,
+  Check
 } from 'lucide-react';
 import { Business, Customer, Review, RecoveryCase, Plan, PlatformSettings } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -27,6 +30,8 @@ import {
   savePlan,
   savePlatformSettings
 } from '../../lib/dbService';
+import { getPublicReviewUrl } from '../../lib/urlHelper';
+import { QrCodeModal } from '../common/QrCodeModal';
 
 interface SuperAdminDashboardProps {
   businesses: Business[];
@@ -51,6 +56,8 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   const [activeTab, setActiveTab] = useState<'merchants' | 'plans' | 'settings'>('merchants');
   const [searchBiz, setSearchBiz] = useState('');
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
+  const [qrModalBiz, setQrModalBiz] = useState<Business | null>(null);
+  const [copiedBizId, setCopiedBizId] = useState<string | null>(null);
 
   // Admin Change Password States
   const [newAdminPassword, setNewAdminPassword] = useState('');
@@ -461,12 +468,54 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                         </span>
                       </td>
                       <td className="py-3.5 px-4 text-right">
-                        <div className="flex items-center justify-end gap-2">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {/* Copiar Link de Avaliação */}
+                          <button
+                            onClick={() => {
+                              const url = getPublicReviewUrl(b.slug || b.id);
+                              navigator.clipboard.writeText(url);
+                              setCopiedBizId(b.id);
+                              setTimeout(() => setCopiedBizId(null), 2500);
+                            }}
+                            title="Copiar link de avaliação pública"
+                            className={`p-1.5 rounded-lg text-xs transition flex items-center gap-1 ${
+                              copiedBizId === b.id
+                                ? 'bg-emerald-50 text-emerald-700 font-bold border border-emerald-200'
+                                : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'
+                            }`}
+                          >
+                            {copiedBizId === b.id ? (
+                              <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+
+                          {/* Ver QR Code */}
+                          <button
+                            onClick={() => setQrModalBiz(b)}
+                            title="Ver e descarregar QR Code deste estabelecimento"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition"
+                          >
+                            <QrCode className="w-3.5 h-3.5" />
+                          </button>
+
+                          {/* Abrir Link em Nova Aba */}
+                          <a
+                            href={getPublicReviewUrl(b.slug || b.id)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Abrir página de avaliação em nova aba"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+
                           {/* Aceder ao CRM (Section 1 requirement) */}
                           <button
                             onClick={() => onImpersonateBusiness(b)}
                             title="Aceder ao CRM deste estabelecimento"
-                            className="py-1 px-2.5 rounded-lg text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 transition flex items-center gap-1"
+                            className="py-1 px-2.5 rounded-lg text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 transition flex items-center gap-1 ml-1"
                           >
                             <LogIn className="w-3.5 h-3.5" />
                             <span>Aceder ao CRM</span>
@@ -862,6 +911,18 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* QR Code Modal for Selected Business */}
+      {qrModalBiz && (
+        <QrCodeModal
+          business={qrModalBiz}
+          onClose={() => setQrModalBiz(null)}
+          onOpenReviewPreview={() => {
+            window.open(getPublicReviewUrl(qrModalBiz.slug || qrModalBiz.id), '_blank');
+            setQrModalBiz(null);
+          }}
+        />
       )}
     </div>
   );

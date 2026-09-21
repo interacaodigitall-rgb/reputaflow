@@ -16,6 +16,7 @@ import {
   Building
 } from 'lucide-react';
 import { Business, Review, Customer, RecoveryCase, Feedback } from '../../types';
+import { getPublicReviewUrl } from '../../lib/urlHelper';
 
 interface MerchantDashboardProps {
   business: Business;
@@ -84,7 +85,7 @@ export const MerchantDashboard: React.FC<MerchantDashboardProps> = ({
     };
   }, [reviews, recoveryCases]);
 
-  const publicReviewUrl = `${window.location.origin}?b=${business.slug}`;
+  const publicReviewUrl = getPublicReviewUrl(business.slug || business.id);
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(publicReviewUrl);
