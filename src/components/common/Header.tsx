@@ -135,7 +135,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Auth status */}
         {currentUser ? (
           <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
-            <div className="w-7 h-7 rounded-full overflow-hidden bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0 text-slate-800 font-bold text-xs">
+            <div className="w-7 h-7 rounded-full overflow-hidden bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
               {currentUser?.photoURL && !avatarError ? (
                 <img
                   src={currentUser.photoURL}
@@ -145,9 +145,12 @@ export const Header: React.FC<HeaderProps> = ({
                   referrerPolicy="no-referrer"
                 />
               ) : (
-                <div className="w-full h-full bg-indigo-600 flex items-center justify-center text-white font-bold text-xs">
-                  {currentUser?.email ? currentUser.email[0].toUpperCase() : 'U'}
-                </div>
+                <img
+                  src="https://i.postimg.cc/2ScRmDwy/logo-02-png.png"
+                  alt="ReputaFlow Avatar"
+                  className="w-full h-full object-cover p-0.5"
+                  referrerPolicy="no-referrer"
+                />
               )}
             </div>
             <button

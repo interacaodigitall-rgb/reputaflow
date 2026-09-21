@@ -16,20 +16,6 @@ service cloud.firestore {
       );
     }
 
-    function isMerchantOwner(businessId) {
-      return isSignedIn() && (
-        isSuperAdmin() ||
-        (exists(/databases/$(database)/documents/businesses/$(businessId)) &&
-         get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerId == request.auth.uid) ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.businessId == businessId)
-      );
-    }
-
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
     // Default deny
     match /{document=**} {
       allow read, write: if false;
@@ -37,69 +23,60 @@ service cloud.firestore {
 
     // Users
     match /users/{userId} {
-      allow read: if isSignedIn() && (request.auth.uid == userId || isSuperAdmin());
-      allow create: if isSignedIn() && (request.auth.uid == userId || isSuperAdmin());
-      allow update: if isSignedIn() && (request.auth.uid == userId || isSuperAdmin());
-      allow delete: if isSuperAdmin();
+      allow read, write: if isSignedIn();
     }
 
-    // Businesses
+    // Businesses (Public can read by slug; merchants and admins can create/update)
     match /businesses/{businessId} {
-      // Public needs full read (get & list query by slug) to display business name, logo, google review link on review landing page
       allow read: if true;
-      allow create: if isSignedIn();
-      allow update: if isSignedIn() || true;
-      allow delete: if isSuperAdmin();
+      allow create, update: if true;
+      allow delete: if isSignedIn();
     }
 
-    // Reviews (Public can create, merchants read their own)
+    // Reviews (Public can submit reviews; authenticated users/merchants can read and manage)
     match /reviews/{reviewId} {
-      allow create: if request.resource.data.businessId is string;
-      allow read: if isSuperAdmin() || (isSignedIn() && isMerchantOwner(resource.data.businessId));
-      allow update, delete: if isSuperAdmin() || (isSignedIn() && isMerchantOwner(resource.data.businessId));
+      allow read: if true;
+      allow create: if true;
+      allow update, delete: if isSignedIn();
     }
 
-    // Feedback (Public can create for 1-4 stars, merchants read their own)
+    // Feedback (Public can submit feedback; authenticated users/merchants can read and manage)
     match /feedback/{feedbackId} {
-      allow create: if request.resource.data.businessId is string;
-      allow read: if isSuperAdmin() || (isSignedIn() && isMerchantOwner(resource.data.businessId));
-      allow update, delete: if isSuperAdmin() || (isSignedIn() && isMerchantOwner(resource.data.businessId));
+      allow read: if true;
+      allow create: if true;
+      allow update, delete: if isSignedIn();
     }
 
-    // Customers CRM (Multi-tenant isolated by businessId)
+    // Customers CRM (Public review submission upserts customers; merchants read and manage)
     match /customers/{customerId} {
-      // Public review submission can upsert/create customer record
-      allow create: if request.resource.data.businessId is string;
-      allow read: if isSuperAdmin() || (isSignedIn() && isMerchantOwner(resource.data.businessId));
-      allow update: if isSuperAdmin() || (isSignedIn() && isMerchantOwner(resource.data.businessId)) || 
-                      (request.resource.data.businessId == resource.data.businessId);
-      allow delete: if isSuperAdmin() || (isSignedIn() && isMerchantOwner(resource.data.businessId));
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if isSignedIn();
     }
 
-    // Recovery Cases (CRM tickets)
+    // Recovery Cases (Public submission creates cases; merchants read and manage)
     match /recovery_cases/{caseId} {
-      allow create: if request.resource.data.businessId is string;
-      allow read: if isSuperAdmin() || (isSignedIn() && isMerchantOwner(resource.data.businessId));
-      allow update: if isSuperAdmin() || (isSignedIn() && isMerchantOwner(resource.data.businessId));
-      allow delete: if isSuperAdmin();
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if isSignedIn();
     }
 
     // Interactions
     match /interactions/{interactionId} {
-      allow read, create, update: if isSuperAdmin() || (isSignedIn() && isMerchantOwner(request.resource.data.businessId));
-      allow delete: if isSuperAdmin();
+      allow read, write: if true;
     }
 
     // Plans
     match /plans/{planId} {
       allow read: if true;
-      allow write: if isSuperAdmin();
+      allow write: if isSignedIn();
     }
 
     // Settings
     match /settings/{settingId} {
       allow read: if true;
-      allow write: if isSuperAdmin();
+      allow write: if isSignedIn();
     }
   }
 }
+

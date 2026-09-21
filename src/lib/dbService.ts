@@ -64,14 +64,23 @@ export function sanitizeForFirestore<T extends Record<string, any>>(obj: T): T {
 
 const LOCAL_STORAGE_KEY_BIZ = 'reputaflow_local_businesses';
 const LOCAL_STORAGE_KEY_DELETED = 'reputaflow_deleted_businesses';
+const LOCAL_STORAGE_KEY_REVIEWS = 'reputaflow_local_reviews';
+const LOCAL_STORAGE_KEY_FEEDBACK = 'reputaflow_local_feedback';
+const LOCAL_STORAGE_KEY_CUSTOMERS = 'reputaflow_local_customers';
+const LOCAL_STORAGE_KEY_RECOVERY = 'reputaflow_local_recovery_cases';
+const LOCAL_STORAGE_KEY_INTERACTIONS = 'reputaflow_local_interactions';
 
 let bc: BroadcastChannel | null = null;
 try {
   if (typeof window !== 'undefined') {
     bc = new BroadcastChannel('reputaflow_sync_channel');
     bc.onmessage = (event) => {
-      if (event.data && event.data.type === 'BUSINESS_UPDATED') {
-        window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated', { detail: event.data.payload }));
+      if (event.data) {
+        if (event.data.type === 'BUSINESS_UPDATED') {
+          window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated', { detail: event.data.payload }));
+        } else if (event.data.type === 'DATA_UPDATED') {
+          window.dispatchEvent(new CustomEvent('reputaflow_data_updated'));
+        }
       }
     };
     window.addEventListener('storage', (e) => {
@@ -80,10 +89,156 @@ try {
           const list = JSON.parse(e.newValue);
           window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated', { detail: list }));
         } catch (err) {}
+      } else if (
+        e.key === LOCAL_STORAGE_KEY_REVIEWS ||
+        e.key === LOCAL_STORAGE_KEY_FEEDBACK ||
+        e.key === LOCAL_STORAGE_KEY_CUSTOMERS ||
+        e.key === LOCAL_STORAGE_KEY_RECOVERY
+      ) {
+        window.dispatchEvent(new CustomEvent('reputaflow_data_updated'));
       }
     });
   }
 } catch (e) {}
+
+export function notifyDataChanged() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('reputaflow_data_updated'));
+    if (bc) {
+      try { bc.postMessage({ type: 'DATA_UPDATED' }); } catch (e) {}
+    }
+  }
+}
+
+// ---------------- LOCAL REVIEWS ----------------
+export function getLocalReviews(): Review[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_KEY_REVIEWS);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveLocalReview(review: Review): void {
+  try {
+    const list = getLocalReviews();
+    const idx = list.findIndex(r => r.id === review.id);
+    if (idx >= 0) {
+      list[idx] = { ...list[idx], ...review };
+    } else {
+      list.unshift(review);
+    }
+    localStorage.setItem(LOCAL_STORAGE_KEY_REVIEWS, JSON.stringify(list));
+    notifyDataChanged();
+  } catch (e) {
+    console.warn('saveLocalReview error:', e);
+  }
+}
+
+// ---------------- LOCAL FEEDBACK ----------------
+export function getLocalFeedback(): Feedback[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_KEY_FEEDBACK);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveLocalFeedback(fb: Feedback): void {
+  try {
+    const list = getLocalFeedback();
+    const idx = list.findIndex(f => f.id === fb.id);
+    if (idx >= 0) {
+      list[idx] = { ...list[idx], ...fb };
+    } else {
+      list.unshift(fb);
+    }
+    localStorage.setItem(LOCAL_STORAGE_KEY_FEEDBACK, JSON.stringify(list));
+    notifyDataChanged();
+  } catch (e) {
+    console.warn('saveLocalFeedback error:', e);
+  }
+}
+
+// ---------------- LOCAL CUSTOMERS ----------------
+export function getLocalCustomers(): Customer[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_KEY_CUSTOMERS);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveLocalCustomer(cust: Customer): void {
+  try {
+    const list = getLocalCustomers();
+    const idx = list.findIndex(c => c.id === cust.id || (cust.phone && c.phone === cust.phone && c.businessId === cust.businessId));
+    if (idx >= 0) {
+      list[idx] = { ...list[idx], ...cust };
+    } else {
+      list.unshift(cust);
+    }
+    localStorage.setItem(LOCAL_STORAGE_KEY_CUSTOMERS, JSON.stringify(list));
+    notifyDataChanged();
+  } catch (e) {
+    console.warn('saveLocalCustomer error:', e);
+  }
+}
+
+// ---------------- LOCAL RECOVERY CASES ----------------
+export function getLocalRecoveryCases(): RecoveryCase[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_KEY_RECOVERY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveLocalRecoveryCase(rc: RecoveryCase): void {
+  try {
+    const list = getLocalRecoveryCases();
+    const idx = list.findIndex(c => c.id === rc.id);
+    if (idx >= 0) {
+      list[idx] = { ...list[idx], ...rc };
+    } else {
+      list.unshift(rc);
+    }
+    localStorage.setItem(LOCAL_STORAGE_KEY_RECOVERY, JSON.stringify(list));
+    notifyDataChanged();
+  } catch (e) {
+    console.warn('saveLocalRecoveryCase error:', e);
+  }
+}
+
+// ---------------- LOCAL INTERACTIONS ----------------
+export function getLocalInteractions(): Interaction[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_KEY_INTERACTIONS);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveLocalInteraction(item: Interaction): void {
+  try {
+    const list = getLocalInteractions();
+    const idx = list.findIndex(i => i.id === item.id);
+    if (idx >= 0) {
+      list[idx] = { ...list[idx], ...item };
+    } else {
+      list.unshift(item);
+    }
+    localStorage.setItem(LOCAL_STORAGE_KEY_INTERACTIONS, JSON.stringify(list));
+    notifyDataChanged();
+  } catch (e) {
+    console.warn('saveLocalInteraction error:', e);
+  }
+}
 
 export function getDeletedBusinessIds(): string[] {
   try {
@@ -176,10 +331,9 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
   const norm = normalizeKey(slug);
   const deletedIds = new Set(getDeletedBusinessIds());
 
-  // 1. FAST PATH: Check memory & local storage first (sub-millisecond instant load for QR codes)
-  const localList = getLocalBusinesses();
-  const localMatch = localList.find(b => {
-    if (deletedIds.has(b.id)) return false;
+  // Function to check if a business matches the query slug
+  const matches = (b: Business | null | undefined) => {
+    if (!b || deletedIds.has(b.id)) return false;
     const bId = (b.id || '').toLowerCase();
     const bSlug = (b.slug || '').toLowerCase();
     const bName = (b.name || '').toLowerCase();
@@ -191,92 +345,79 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
       normalizeKey(bId) === norm ||
       normalizeKey(bName) === norm
     );
-  });
-  if (localMatch) return localMatch;
+  };
 
-  // 1b. Check REGISTERED_BUSINESSES default list
-  const registeredMatch = REGISTERED_BUSINESSES.find(b => {
-    if (deletedIds.has(b.id)) return false;
-    const bId = (b.id || '').toLowerCase();
-    const bSlug = (b.slug || '').toLowerCase();
-    const bName = (b.name || '').toLowerCase();
-    return (
-      bSlug === cleanSlug ||
-      bId === cleanSlug ||
-      bName === cleanSlug ||
-      normalizeKey(bSlug) === norm ||
-      normalizeKey(bId) === norm ||
-      normalizeKey(bName) === norm
-    );
-  });
+  // 1. FAST LOCAL RETRIEVAL
+  const localList = getLocalBusinesses();
+  const localMatch = localList.find(matches);
+
+  // Trigger background remote fetch to pull the latest updated logo & details
+  const remoteFetchPromise = (async (): Promise<Business | null> => {
+    // A. Check Global Cloud Sync Store (fast cross-device synchronization)
+    try {
+      const cloudData = await fetchGlobalCloudData();
+      if (cloudData && Array.isArray(cloudData.businesses)) {
+        const found = cloudData.businesses.find(matches);
+        if (found) {
+          saveLocalBusiness(found);
+          return found;
+        }
+      }
+    } catch (e) {}
+
+    // B. Check Firestore query by slug
+    try {
+      const q = query(collection(db, 'businesses'), where('slug', '==', cleanSlug), limit(1));
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        const found = { id: snap.docs[0].id, ...snap.docs[0].data() } as Business;
+        if (!deletedIds.has(found.id)) {
+          saveLocalBusiness(found);
+          return found;
+        }
+      }
+    } catch (e) {}
+
+    // C. Check Backend Server API
+    try {
+      const res = await fetch(`/api/businesses/${encodeURIComponent(cleanSlug)}`);
+      if (res.ok) {
+        const serverBiz = await res.json();
+        if (serverBiz && !deletedIds.has(serverBiz.id)) {
+          saveLocalBusiness(serverBiz);
+          return serverBiz;
+        }
+      }
+    } catch (e) {}
+
+    return null;
+  })();
+
+  // If we already have a local match, return it immediately so the screen is never blank,
+  // and when the remote fetch finishes, if there is updated data (e.g. logoUrl changed), it will update via saveLocalBusiness.
+  if (localMatch) {
+    remoteFetchPromise.then(remoteBiz => {
+      if (remoteBiz && (remoteBiz.logoUrl !== localMatch.logoUrl || remoteBiz.name !== localMatch.name)) {
+        saveLocalBusiness(remoteBiz);
+      }
+    });
+    return localMatch;
+  }
+
+  // If not found in local storage, wait up to 1.5s for remote fetch
+  try {
+    const remoteBiz = await Promise.race([
+      remoteFetchPromise,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500))
+    ]);
+    if (remoteBiz) return remoteBiz;
+  } catch (e) {}
+
+  // Fallback to REGISTERED_BUSINESSES default list
+  const registeredMatch = REGISTERED_BUSINESSES.find(matches);
   if (registeredMatch) {
     saveLocalBusiness(registeredMatch);
     return registeredMatch;
-  }
-
-  // 2. Query Firestore with indexed query and strict timeout (prevents hanging on mobile QR reads)
-  try {
-    const q = query(collection(db, 'businesses'), where('slug', '==', cleanSlug), limit(1));
-    const snap = await Promise.race([
-      getDocs(q),
-      new Promise<null>((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000))
-    ]);
-    if (snap && !snap.empty) {
-      const d = snap.docs[0];
-      const found = { id: d.id, ...d.data() } as Business;
-      if (!deletedIds.has(found.id)) {
-        saveLocalBusiness(found);
-        return found;
-      }
-    }
-  } catch (err) {
-    console.warn('Firestore query by slug warning:', err);
-  }
-
-  // 3. Fetch from Backend Server API with quick timeout
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000);
-    const res = await fetch(`/api/businesses/${encodeURIComponent(cleanSlug)}`, {
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    if (res.ok) {
-      const serverBiz = await res.json();
-      if (serverBiz && (serverBiz.id || serverBiz.slug) && !deletedIds.has(serverBiz.id)) {
-        saveLocalBusiness(serverBiz);
-        return serverBiz;
-      }
-    }
-  } catch (apiErr) {
-    console.warn('API getBusinessBySlug warning:', apiErr);
-  }
-
-  // 4. Check Global Cloud Sync Store
-  try {
-    const cloudData = await fetchGlobalCloudData();
-    if (cloudData && Array.isArray(cloudData.businesses)) {
-      for (const b of cloudData.businesses) {
-        if (!deletedIds.has(b.id)) {
-          saveLocalBusiness(b);
-          const bId = (b.id || '').toLowerCase();
-          const bSlug = (b.slug || '').toLowerCase();
-          const bName = (b.name || '').toLowerCase();
-          if (
-            bSlug === cleanSlug ||
-            bId === cleanSlug ||
-            bName === cleanSlug ||
-            normalizeKey(bSlug) === norm ||
-            normalizeKey(bId) === norm ||
-            normalizeKey(bName) === norm
-          ) {
-            return b;
-          }
-        }
-      }
-    }
-  } catch (cloudErr) {
-    console.warn('Cloud sync getBusinessBySlug warning:', cloudErr);
   }
 
   return null;
@@ -555,13 +696,39 @@ export async function submitReview(
 ): Promise<{ reviewId: string }> {
   const path = 'reviews';
   const targetId = `rev_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
-  const payload = sanitizeForFirestore({
+  const payload: Review = sanitizeForFirestore({
     ...data,
     id: targetId,
     createdAt: new Date().toISOString(),
   });
 
-  // Sync to Backend API
+  // 1. Save Locally
+  saveLocalReview(payload);
+
+  // 2. If customer info was provided, upsert Customer in CRM
+  if (data.customerName || data.customerPhone) {
+    try {
+      await upsertCustomerByPhone({
+        businessId: data.businessId,
+        name: data.customerName || 'Cliente',
+        phone: data.customerPhone || '',
+        email: data.customerEmail || '',
+        rating: data.rating,
+        status: data.rating >= 4 ? 'active' : 'in_recovery',
+        internalNotes: `Avaliação de ${data.rating} estrelas via ${data.channel || 'QR'}`
+      });
+    } catch (custErr) {
+      console.warn('Customer auto-creation warning in submitReview:', custErr);
+    }
+  }
+
+  // 3. Sync to Global Cloud Store
+  pushGlobalCloudData({
+    reviews: getLocalReviews(),
+    customers: getLocalCustomers()
+  }).catch(() => {});
+
+  // 4. Sync to Backend API
   try {
     await fetch('/api/reviews', {
       method: 'POST',
@@ -572,17 +739,19 @@ export async function submitReview(
     console.warn('API review submission warning:', apiErr);
   }
 
+  // 5. Upsert to Firestore
   try {
     const writePromise = setDoc(doc(db, path, targetId), payload);
     const timeout = new Promise<void>((_, reject) =>
       setTimeout(() => reject(new Error('timeout')), 3000)
     );
     await Promise.race([writePromise, timeout]);
-    return { reviewId: targetId };
   } catch (err) {
-    console.warn('submitReview warning (proceeding with generated id):', err);
-    return { reviewId: targetId };
+    console.warn('submitReview warning (stored locally and in cloud):', err);
   }
+
+  notifyDataChanged();
+  return { reviewId: targetId };
 }
 
 export async function submitFeedbackAndRecovery(params: {
@@ -608,8 +777,13 @@ export async function submitFeedbackAndRecovery(params: {
       internalNotes: `Feedback negativo (${params.rating} estrelas): ${params.question1.slice(0, 100)}`
     });
 
+    const now = new Date().toISOString();
+    const fbId = `fb_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+    const caseId = `rec_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+
     // 2. Create Feedback document
-    const feedbackPayload = sanitizeForFirestore({
+    const feedbackPayload: Feedback = sanitizeForFirestore({
+      id: fbId,
       businessId: params.businessId,
       reviewId: params.reviewId,
       customerId,
@@ -620,14 +794,17 @@ export async function submitFeedbackAndRecovery(params: {
       question1: params.question1,
       question2: params.question2,
       question3WantsContact: params.question3WantsContact,
-      createdAt: new Date().toISOString()
+      createdAt: now
     });
+    saveLocalFeedback(feedbackPayload);
 
     // 3. Create Recovery Case document
-    const casePayload = sanitizeForFirestore({
+    const casePayload: RecoveryCase = sanitizeForFirestore({
+      id: caseId,
       businessId: params.businessId,
       customerId,
       reviewId: params.reviewId,
+      feedbackId: fbId,
       customerName: params.customerName,
       customerPhone: params.customerPhone,
       customerEmail: params.customerEmail || '',
@@ -640,15 +817,23 @@ export async function submitFeedbackAndRecovery(params: {
         {
           id: `hist_${Date.now()}`,
           action: 'Caso aberto automaticamente via página de avaliação',
-          timestamp: new Date().toISOString(),
+          timestamp: now,
           userName: 'Sistema ReputaFlow'
         }
       ],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      createdAt: now,
+      updatedAt: now
     });
+    saveLocalRecoveryCase(casePayload);
 
-    // Sync to Backend API
+    // 4. Sync to Global Cloud Store
+    pushGlobalCloudData({
+      feedback: getLocalFeedback(),
+      recoveryCases: getLocalRecoveryCases(),
+      customers: getLocalCustomers()
+    }).catch(() => {});
+
+    // 5. Sync to Backend API
     try {
       await fetch('/api/feedback', {
         method: 'POST',
@@ -664,17 +849,17 @@ export async function submitFeedbackAndRecovery(params: {
       console.warn('API feedback sync warning:', apiErr);
     }
 
-    let fbId = `fb_${Date.now().toString(36)}`;
-    let caseId = `rec_${Date.now().toString(36)}`;
+    // 6. Write to Firestore
     try {
-      const fbRef = await addDoc(collection(db, 'feedback'), feedbackPayload);
-      fbId = fbRef.id;
-      const caseRef = await addDoc(collection(db, 'recovery_cases'), { ...casePayload, feedbackId: fbId });
-      caseId = caseRef.id;
+      await Promise.all([
+        setDoc(doc(db, 'feedback', fbId), feedbackPayload),
+        setDoc(doc(db, 'recovery_cases', caseId), casePayload)
+      ]);
     } catch (fsErr) {
-      console.warn('Firestore feedback write warning (stored on server):', fsErr);
+      console.warn('Firestore feedback write warning (stored locally and in cloud):', fsErr);
     }
 
+    notifyDataChanged();
     return { feedbackId: fbId, caseId, customerId };
   } catch (err) {
     console.warn('submitFeedbackAndRecovery fallback handling:', err);
@@ -687,37 +872,107 @@ export async function submitFeedbackAndRecovery(params: {
 }
 
 export function subscribeReviews(businessId: string | null, callback: (reviews: Review[]) => void) {
+  const filterAndSort = (list: Review[]) => {
+    const filtered = businessId ? list.filter(r => r.businessId === businessId) : list;
+    return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  };
+
+  // Immediate callback from local cache
+  callback(filterAndSort(getLocalReviews()));
+
+  const emitMerged = () => {
+    callback(filterAndSort(getLocalReviews()));
+  };
+
+  const handleUpdate = () => emitMerged();
+  window.addEventListener('reputaflow_data_updated', handleUpdate);
+
+  // Background Cloud Sync poller (pulls reviews submitted on mobile Vercel into CRM)
+  const poller = setInterval(async () => {
+    try {
+      const cloudData = await fetchGlobalCloudData();
+      if (cloudData && Array.isArray(cloudData.reviews)) {
+        cloudData.reviews.forEach(r => saveLocalReview(r));
+        emitMerged();
+      }
+    } catch (e) {}
+  }, 3500);
+
+  // Firestore onSnapshot
   const path = 'reviews';
   let q = query(collection(db, path));
   if (businessId) {
     q = query(collection(db, path), where('businessId', '==', businessId));
   }
-  return onSnapshot(
+  const unFs = onSnapshot(
     q,
     (snap) => {
-      const items = snap.docs.map(d => ({ id: d.id, ...d.data() } as Review));
-      items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      callback(items);
+      snap.docs.forEach(d => {
+        saveLocalReview({ id: d.id, ...d.data() } as Review);
+      });
+      emitMerged();
     },
-    (err) => handleFirestoreError(err, OperationType.LIST, path)
+    (err) => {
+      // If Firestore subscription throws error, fallback silently to local/cloud store
+      emitMerged();
+    }
   );
+
+  return () => {
+    window.removeEventListener('reputaflow_data_updated', handleUpdate);
+    clearInterval(poller);
+    unFs();
+  };
 }
 
 export function subscribeFeedback(businessId: string | null, callback: (feedbackList: Feedback[]) => void) {
+  const filterAndSort = (list: Feedback[]) => {
+    const filtered = businessId ? list.filter(f => f.businessId === businessId) : list;
+    return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  };
+
+  callback(filterAndSort(getLocalFeedback()));
+
+  const emitMerged = () => {
+    callback(filterAndSort(getLocalFeedback()));
+  };
+
+  const handleUpdate = () => emitMerged();
+  window.addEventListener('reputaflow_data_updated', handleUpdate);
+
+  const poller = setInterval(async () => {
+    try {
+      const cloudData = await fetchGlobalCloudData();
+      if (cloudData && Array.isArray(cloudData.feedback)) {
+        cloudData.feedback.forEach(f => saveLocalFeedback(f));
+        emitMerged();
+      }
+    } catch (e) {}
+  }, 3500);
+
   const path = 'feedback';
   let q = query(collection(db, path));
   if (businessId) {
     q = query(collection(db, path), where('businessId', '==', businessId));
   }
-  return onSnapshot(
+  const unFs = onSnapshot(
     q,
     (snap) => {
-      const items = snap.docs.map(d => ({ id: d.id, ...d.data() } as Feedback));
-      items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      callback(items);
+      snap.docs.forEach(d => {
+        saveLocalFeedback({ id: d.id, ...d.data() } as Feedback);
+      });
+      emitMerged();
     },
-    (err) => handleFirestoreError(err, OperationType.LIST, path)
+    (err) => {
+      emitMerged();
+    }
   );
+
+  return () => {
+    window.removeEventListener('reputaflow_data_updated', handleUpdate);
+    clearInterval(poller);
+    unFs();
+  };
 }
 
 // ==========================================
@@ -736,88 +991,119 @@ export async function upsertCustomerByPhone(params: {
   const path = 'customers';
   const now = new Date().toISOString();
 
-  let docRef: any = null;
-  let existing: Customer | null = null;
+  // 1. Check local customers
+  const localList = getLocalCustomers();
+  const existingLocal = localList.find(
+    c => c.businessId === params.businessId && c.phone && params.phone && c.phone.replace(/\D/g, '') === params.phone.replace(/\D/g, '')
+  );
 
+  let targetId = existingLocal?.id || `cust_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+
+  const currentCount = existingLocal ? (existingLocal.reviewsCount || 1) + 1 : 1;
+  const currentAvg = existingLocal
+    ? Number((((existingLocal.avgRating || params.rating) * (currentCount - 1) + params.rating) / currentCount).toFixed(1))
+    : params.rating;
+
+  const customerPayload: Customer = sanitizeForFirestore({
+    id: targetId,
+    businessId: params.businessId,
+    name: params.name || existingLocal?.name || 'Cliente',
+    phone: params.phone || existingLocal?.phone || '',
+    email: params.email || existingLocal?.email || '',
+    reviewsCount: currentCount,
+    lastReviewAt: now,
+    avgRating: currentAvg,
+    status: params.status || existingLocal?.status || 'in_recovery',
+    internalNotes: params.internalNotes || existingLocal?.internalNotes || '',
+    lastInteractionAt: now,
+    createdAt: existingLocal?.createdAt || now,
+    updatedAt: now
+  });
+
+  // Save locally
+  saveLocalCustomer(customerPayload);
+
+  // Sync to Global Cloud Store
+  pushGlobalCloudData({ customers: getLocalCustomers() }).catch(() => {});
+
+  // Sync to Backend API
   try {
-    const q = query(
-      collection(db, path),
-      where('businessId', '==', params.businessId),
-      where('phone', '==', params.phone),
-      limit(1)
-    );
-    const snap = await getDocs(q);
-    if (!snap.empty) {
-      docRef = snap.docs[0];
-      existing = docRef.data() as Customer;
-    }
-  } catch (lookupErr) {
-    console.warn('Customer lookup skipped or not permitted (creating new record):', lookupErr);
-  }
-
-  if (docRef && existing) {
-    try {
-      const newCount = (existing.reviewsCount || 0) + 1;
-      const newAvg = Number((((existing.avgRating || params.rating) * (newCount - 1) + params.rating) / newCount).toFixed(1));
-
-      await updateDoc(doc(db, path, docRef.id), sanitizeForFirestore({
-        name: params.name || existing.name,
-        email: params.email || existing.email || '',
-        reviewsCount: newCount,
-        lastReviewAt: now,
-        avgRating: newAvg,
-        status: params.status || existing.status,
-        lastInteractionAt: now,
-        updatedAt: now
-      }));
-      return docRef.id;
-    } catch (updErr) {
-      console.warn('Customer update warning (falling back to new record):', updErr);
-    }
-  }
-
-  // Create new customer
-  try {
-    const newCustomer: Omit<Customer, 'id'> = sanitizeForFirestore({
-      businessId: params.businessId,
-      name: params.name,
-      phone: params.phone,
-      email: params.email || '',
-      reviewsCount: 1,
-      lastReviewAt: now,
-      avgRating: params.rating,
-      status: params.status || 'in_recovery',
-      internalNotes: params.internalNotes || '',
-      lastInteractionAt: now,
-      createdAt: now,
-      updatedAt: now
+    await fetch('/api/customers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(customerPayload)
     });
-    const ref = await addDoc(collection(db, path), newCustomer);
-    return ref.id;
-  } catch (createErr) {
-    console.warn('Customer addDoc warning:', createErr);
-    return `cust_${Date.now().toString(36)}`;
+  } catch (e) {}
+
+  // Sync to Firestore
+  try {
+    await setDoc(doc(db, path, targetId), customerPayload, { merge: true });
+  } catch (fsErr) {
+    console.warn('Firestore customer upsert warning:', fsErr);
   }
+
+  notifyDataChanged();
+  return targetId;
 }
 
 export function subscribeCustomers(businessId: string | null, callback: (customers: Customer[]) => void) {
+  const filterAndSort = (list: Customer[]) => {
+    const filtered = businessId ? list.filter(c => c.businessId === businessId) : list;
+    return filtered.sort((a, b) => new Date(b.lastReviewAt || b.createdAt).getTime() - new Date(a.lastReviewAt || a.createdAt).getTime());
+  };
+
+  callback(filterAndSort(getLocalCustomers()));
+
+  const emitMerged = () => {
+    callback(filterAndSort(getLocalCustomers()));
+  };
+
+  const handleUpdate = () => emitMerged();
+  window.addEventListener('reputaflow_data_updated', handleUpdate);
+
+  const poller = setInterval(async () => {
+    try {
+      const cloudData = await fetchGlobalCloudData();
+      if (cloudData && Array.isArray(cloudData.customers)) {
+        cloudData.customers.forEach(c => saveLocalCustomer(c));
+        emitMerged();
+      }
+    } catch (e) {}
+  }, 3500);
+
   const path = 'customers';
   let q = query(collection(db, path));
   if (businessId) {
     q = query(collection(db, path), where('businessId', '==', businessId));
   }
-  return onSnapshot(
+  const unFs = onSnapshot(
     q,
     (snap) => {
-      const items = snap.docs.map(d => ({ id: d.id, ...d.data() } as Customer));
-      items.sort((a, b) => new Date(b.lastReviewAt || b.createdAt).getTime() - new Date(a.lastReviewAt || a.createdAt).getTime());
-      callback(items);
+      snap.docs.forEach(d => {
+        saveLocalCustomer({ id: d.id, ...d.data() } as Customer);
+      });
+      emitMerged();
     },
-    (err) => handleFirestoreError(err, OperationType.LIST, path)
+    (err) => {
+      emitMerged();
+    }
   );
+
+  return () => {
+    window.removeEventListener('reputaflow_data_updated', handleUpdate);
+    clearInterval(poller);
+    unFs();
+  };
 }
 
 export async function updateCustomer(id: string, data: Partial<Customer>): Promise<void> {
+  const localList = getLocalCustomers();
+  const existing = localList.find(c => c.id === id);
+  if (existing) {
+    saveLocalCustomer({ ...existing, ...data, updatedAt: new Date().toISOString() });
+    pushGlobalCloudData({ customers: getLocalCustomers() }).catch(() => {});
+  }
+
   const path = `customers/${id}`;
   try {
     await updateDoc(doc(db, 'customers', id), sanitizeForFirestore({
@@ -825,8 +1111,9 @@ export async function updateCustomer(id: string, data: Partial<Customer>): Promi
       updatedAt: new Date().toISOString()
     }));
   } catch (err) {
-    handleFirestoreError(err, OperationType.UPDATE, path);
+    console.warn('updateCustomer firestore warning:', err);
   }
+  notifyDataChanged();
 }
 
 // ==========================================
@@ -834,20 +1121,53 @@ export async function updateCustomer(id: string, data: Partial<Customer>): Promi
 // ==========================================
 
 export function subscribeRecoveryCases(businessId: string | null, callback: (cases: RecoveryCase[]) => void) {
+  const filterAndSort = (list: RecoveryCase[]) => {
+    const filtered = businessId ? list.filter(c => c.businessId === businessId) : list;
+    return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  };
+
+  callback(filterAndSort(getLocalRecoveryCases()));
+
+  const emitMerged = () => {
+    callback(filterAndSort(getLocalRecoveryCases()));
+  };
+
+  const handleUpdate = () => emitMerged();
+  window.addEventListener('reputaflow_data_updated', handleUpdate);
+
+  const poller = setInterval(async () => {
+    try {
+      const cloudData = await fetchGlobalCloudData();
+      if (cloudData && Array.isArray(cloudData.recoveryCases)) {
+        cloudData.recoveryCases.forEach(rc => saveLocalRecoveryCase(rc));
+        emitMerged();
+      }
+    } catch (e) {}
+  }, 3500);
+
   const path = 'recovery_cases';
   let q = query(collection(db, path));
   if (businessId) {
     q = query(collection(db, path), where('businessId', '==', businessId));
   }
-  return onSnapshot(
+  const unFs = onSnapshot(
     q,
     (snap) => {
-      const items = snap.docs.map(d => ({ id: d.id, ...d.data() } as RecoveryCase));
-      items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      callback(items);
+      snap.docs.forEach(d => {
+        saveLocalRecoveryCase({ id: d.id, ...d.data() } as RecoveryCase);
+      });
+      emitMerged();
     },
-    (err) => handleFirestoreError(err, OperationType.LIST, path)
+    (err) => {
+      emitMerged();
+    }
   );
+
+  return () => {
+    window.removeEventListener('reputaflow_data_updated', handleUpdate);
+    clearInterval(poller);
+    unFs();
+  };
 }
 
 export async function updateRecoveryCaseStatus(
@@ -856,9 +1176,30 @@ export async function updateRecoveryCaseStatus(
   notes?: string,
   customerId?: string
 ): Promise<void> {
+  const now = new Date().toISOString();
+  const localList = getLocalRecoveryCases();
+  const existing = localList.find(c => c.id === caseId);
+  if (existing) {
+    saveLocalRecoveryCase({
+      ...existing,
+      status,
+      updatedAt: now,
+      ...(status === 'resolvido' || status === 'cliente_recuperado' ? { resolvedAt: now } : {}),
+      ...(notes ? { notes } : {})
+    });
+    pushGlobalCloudData({ recoveryCases: getLocalRecoveryCases() }).catch(() => {});
+  }
+
+  // If customer ID provided, sync customer status
+  if (customerId) {
+    let customerStatus: Customer['status'] = 'in_recovery';
+    if (status === 'cliente_recuperado') customerStatus = 'recovered';
+    if (status === 'resolvido') customerStatus = 'active';
+    await updateCustomer(customerId, { status: customerStatus, lastInteractionAt: now });
+  }
+
   const path = `recovery_cases/${caseId}`;
   try {
-    const now = new Date().toISOString();
     const updateData: Record<string, any> = sanitizeForFirestore({
       status,
       updatedAt: now,
@@ -866,17 +1207,10 @@ export async function updateRecoveryCaseStatus(
       ...(notes ? { notes } : {})
     });
     await updateDoc(doc(db, 'recovery_cases', caseId), updateData);
-
-    // If customer ID provided, sync customer status
-    if (customerId) {
-      let customerStatus: Customer['status'] = 'in_recovery';
-      if (status === 'cliente_recuperado') customerStatus = 'recovered';
-      if (status === 'resolvido') customerStatus = 'active';
-      await updateCustomer(customerId, { status: customerStatus, lastInteractionAt: now });
-    }
   } catch (err) {
-    handleFirestoreError(err, OperationType.UPDATE, path);
+    console.warn('updateRecoveryCaseStatus firestore warning:', err);
   }
+  notifyDataChanged();
 }
 
 // ==========================================
@@ -884,39 +1218,78 @@ export async function updateRecoveryCaseStatus(
 // ==========================================
 
 export async function addInteraction(data: Omit<Interaction, 'id' | 'createdAt'>): Promise<string> {
+  const id = `int_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+  const payload: Interaction = sanitizeForFirestore({
+    ...data,
+    id,
+    createdAt: new Date().toISOString()
+  });
+
+  saveLocalInteraction(payload);
+  pushGlobalCloudData({ interactions: getLocalInteractions() }).catch(() => {});
+
+  if (data.customerId) {
+    await updateCustomer(data.customerId, { lastInteractionAt: new Date().toISOString() });
+  }
+
   const path = 'interactions';
   try {
-    const payload = sanitizeForFirestore({
-      ...data,
-      createdAt: new Date().toISOString()
-    });
-    const ref = await addDoc(collection(db, path), payload);
-
-    // Update customer last interaction
-    if (data.customerId) {
-      await updateCustomer(data.customerId, { lastInteractionAt: new Date().toISOString() });
-    }
-    return ref.id;
+    await setDoc(doc(db, path, id), payload);
   } catch (err) {
-    handleFirestoreError(err, OperationType.CREATE, path);
+    console.warn('addInteraction firestore warning:', err);
   }
+  notifyDataChanged();
+  return id;
 }
 
 export function subscribeInteractions(businessId: string | null, callback: (items: Interaction[]) => void) {
+  const filterAndSort = (list: Interaction[]) => {
+    const filtered = businessId ? list.filter(i => i.businessId === businessId) : list;
+    return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  };
+
+  callback(filterAndSort(getLocalInteractions()));
+
+  const emitMerged = () => {
+    callback(filterAndSort(getLocalInteractions()));
+  };
+
+  const handleUpdate = () => emitMerged();
+  window.addEventListener('reputaflow_data_updated', handleUpdate);
+
+  const poller = setInterval(async () => {
+    try {
+      const cloudData = await fetchGlobalCloudData();
+      if (cloudData && Array.isArray(cloudData.interactions)) {
+        cloudData.interactions.forEach(i => saveLocalInteraction(i));
+        emitMerged();
+      }
+    } catch (e) {}
+  }, 3500);
+
   const path = 'interactions';
   let q = query(collection(db, path));
   if (businessId) {
     q = query(collection(db, path), where('businessId', '==', businessId));
   }
-  return onSnapshot(
+  const unFs = onSnapshot(
     q,
     (snap) => {
-      const items = snap.docs.map(d => ({ id: d.id, ...d.data() } as Interaction));
-      items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      callback(items);
+      snap.docs.forEach(d => {
+        saveLocalInteraction({ id: d.id, ...d.data() } as Interaction);
+      });
+      emitMerged();
     },
-    (err) => handleFirestoreError(err, OperationType.LIST, path)
+    (err) => {
+      emitMerged();
+    }
   );
+
+  return () => {
+    window.removeEventListener('reputaflow_data_updated', handleUpdate);
+    clearInterval(poller);
+    unFs();
+  };
 }
 
 // ==========================================

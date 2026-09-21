@@ -1,19 +1,21 @@
-import { Business, Review, Feedback, RecoveryCase, PlatformSettings } from '../types';
+import { Business, Review, Feedback, RecoveryCase, Customer, Interaction, PlatformSettings } from '../types';
 
 const CLOUD_SYNC_OBJECT_ID = 'ff808181a09d98f701a0c414460b6189';
 const CLOUD_SYNC_URL = `https://api.restful-api.dev/objects/${CLOUD_SYNC_OBJECT_ID}`;
 
-interface CloudSyncPayload {
+export interface CloudSyncPayload {
   businesses: Business[];
   reviews?: Review[];
   feedback?: Feedback[];
+  customers?: Customer[];
   recoveryCases?: RecoveryCase[];
+  interactions?: Interaction[];
   settings?: PlatformSettings;
   lastUpdated: string;
 }
 
 let syncInProgress = false;
-let pendingDataToSync: CloudSyncPayload | null = null;
+let pendingDataToSync: Partial<CloudSyncPayload> | null = null;
 
 export async function fetchGlobalCloudData(): Promise<CloudSyncPayload | null> {
   try {
@@ -40,25 +42,29 @@ export async function fetchGlobalCloudData(): Promise<CloudSyncPayload | null> {
 
 export async function pushGlobalCloudData(payload: Partial<CloudSyncPayload>): Promise<void> {
   if (syncInProgress) {
-    pendingDataToSync = {
-      businesses: payload.businesses || [],
-      reviews: payload.reviews || [],
-      feedback: payload.feedback || [],
-      recoveryCases: payload.recoveryCases || [],
-      settings: payload.settings,
-      lastUpdated: new Date().toISOString()
-    };
+    pendingDataToSync = { ...pendingDataToSync, ...payload };
     return;
   }
 
   syncInProgress = true;
   try {
     const existing = await fetchGlobalCloudData();
+
+    // Helper to merge arrays uniquely by ID
+    const mergeById = <T extends { id?: string }>(incoming?: T[], base?: T[]): T[] => {
+      const map = new Map<string, T>();
+      (base || []).forEach(item => { if (item?.id) map.set(item.id, item); });
+      (incoming || []).forEach(item => { if (item?.id) map.set(item.id, item); });
+      return Array.from(map.values());
+    };
+
     const mergedPayload: CloudSyncPayload = {
-      businesses: payload.businesses || existing?.businesses || [],
-      reviews: payload.reviews || existing?.reviews || [],
-      feedback: payload.feedback || existing?.feedback || [],
-      recoveryCases: payload.recoveryCases || existing?.recoveryCases || [],
+      businesses: payload.businesses ? mergeById(payload.businesses, existing?.businesses) : (existing?.businesses || []),
+      reviews: payload.reviews ? mergeById(payload.reviews, existing?.reviews) : (existing?.reviews || []),
+      feedback: payload.feedback ? mergeById(payload.feedback, existing?.feedback) : (existing?.feedback || []),
+      customers: payload.customers ? mergeById(payload.customers, existing?.customers) : (existing?.customers || []),
+      recoveryCases: payload.recoveryCases ? mergeById(payload.recoveryCases, existing?.recoveryCases) : (existing?.recoveryCases || []),
+      interactions: payload.interactions ? mergeById(payload.interactions, existing?.interactions) : (existing?.interactions || []),
       settings: payload.settings || existing?.settings,
       lastUpdated: new Date().toISOString()
     };
@@ -89,3 +95,4 @@ export async function pushGlobalCloudData(payload: Partial<CloudSyncPayload>): P
     }
   }
 }
+

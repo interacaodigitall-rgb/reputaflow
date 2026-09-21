@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Star } from 'lucide-react';
 
 interface BrandLogoProps {
   className?: string;
   size?: 'sm' | 'md' | 'lg';
   variant?: 'dark' | 'light';
 }
+
+export const BRAND_LOGO_URL = 'https://i.postimg.cc/2ScRmDwy/logo-02-png.png';
 
 export const BrandLogo: React.FC<BrandLogoProps> = ({
   className = '',
@@ -20,28 +21,31 @@ export const BrandLogo: React.FC<BrandLogoProps> = ({
     lg: 'w-12 h-12'
   };
 
-  const iconSizes = {
-    sm: 'w-4 h-4',
-    md: 'w-5 h-5',
-    lg: 'w-6 h-6'
-  };
-
   if (imgError) {
     return (
       <div
-        className={`${sizeClasses[size]} rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 flex items-center justify-center text-white shadow-sm shrink-0 ${className}`}
+        className={`${sizeClasses[size]} rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-sm shrink-0 font-extrabold text-sm overflow-hidden ${className}`}
       >
-        <Star className={`${iconSizes[size]} fill-white text-white`} />
+        <img
+          src="/logo.png"
+          alt="ReputaFlow"
+          onError={(e) => {
+            (e.target as HTMLElement).style.display = 'none';
+          }}
+          className="w-full h-full object-contain"
+        />
       </div>
     );
   }
 
   return (
     <img
-      src="/logo.png"
+      src={BRAND_LOGO_URL}
       alt="ReputaFlow"
       onError={() => setImgError(true)}
+      referrerPolicy="no-referrer"
       className={`${sizeClasses[size]} object-contain rounded-xl shrink-0 ${className}`}
     />
   );
 };
+

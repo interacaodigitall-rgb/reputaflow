@@ -195,7 +195,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* User Card */}
         <div className="flex items-center justify-between pt-1">
           <div className="flex items-center gap-2 min-w-0">
-            <div className="w-8 h-8 rounded-full overflow-hidden bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0 text-white font-bold text-xs">
+            <div className="w-8 h-8 rounded-full overflow-hidden bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0">
               {currentUser?.photoURL && !avatarError ? (
                 <img
                   src={currentUser.photoURL}
@@ -205,9 +205,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   referrerPolicy="no-referrer"
                 />
               ) : (
-                <div className="w-full h-full bg-indigo-600 flex items-center justify-center text-white font-bold">
-                  {currentUser?.email ? currentUser.email[0].toUpperCase() : 'R'}
-                </div>
+                <img
+                  src="https://i.postimg.cc/2ScRmDwy/logo-02-png.png"
+                  alt="ReputaFlow Avatar"
+                  className="w-full h-full object-cover p-0.5"
+                  referrerPolicy="no-referrer"
+                />
               )}
             </div>
             <div className="min-w-0">
