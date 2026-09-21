@@ -10,34 +10,10 @@ export default defineConfig(() => {
       react(), 
       tailwindcss(),
       VitePWA({
-        registerType: 'autoUpdate',
-        manifest: {
-          id: '/',
-          name: 'ReputaFlow',
-          short_name: 'ReputaFlow',
-          description: 'Gestão de Avaliações e Recuperação de Clientes',
-          theme_color: '#ffffff',
-          background_color: '#ffffff',
-          display: 'standalone',
-          start_url: '/',
-          scope: '/',
-          icons: [
-            {
-              src: '/pwa-192x192.png',
-              sizes: '192x192',
-              type: 'image/png',
-              purpose: 'any',
-            },
-            {
-              src: '/pwa-512x512.png',
-              sizes: '512x512',
-              type: 'image/png',
-              purpose: 'any',
-            },
-          ],
-        },
+        injectRegister: null,
+        manifest: false, // Handled dynamically via /public/manifest.json and pwaManager.ts
         devOptions: {
-          enabled: true,
+          enabled: false,
         },
       }),
     ],

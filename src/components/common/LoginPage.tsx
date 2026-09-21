@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Mail, Lock, LogIn, AlertCircle, RefreshCw } from 'lucide-react';
+import { BrandLogo } from './BrandLogo';
 
 export const LoginPage: React.FC = () => {
   const { signInWithEmail, signInWithGoogle } = useAuth();
@@ -60,12 +61,9 @@ export const LoginPage: React.FC = () => {
         
         {/* Logo and Brand Header */}
         <div className="text-center space-y-3">
-          <img
-            src="https://i.postimg.cc/Y974HYRZ/logo-png.png"
-            alt="ReputaFlow Logo"
-            className="h-16 mx-auto object-contain transition-transform hover:scale-102 duration-300"
-            referrerPolicy="no-referrer"
-          />
+          <div className="flex justify-center">
+            <BrandLogo size="lg" />
+          </div>
           <div className="space-y-1">
             <h2 className="text-xl font-extrabold tracking-tight text-slate-900">
               Aceda à sua plataforma

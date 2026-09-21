@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   LayoutDashboard,
   Users,
@@ -10,9 +10,12 @@ import {
   ExternalLink,
   ChevronDown,
   LogOut,
-  QrCode
+  QrCode,
+  UserCheck
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { BrandLogo } from './BrandLogo';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface SidebarProps {
   activeTab: string;
@@ -41,6 +44,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     isSuperAdmin
   } = useAuth();
 
+  const [avatarError, setAvatarError] = useState(false);
+
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'crm', label: 'CRM de Clientes', icon: Users },
@@ -61,16 +66,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Brand Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img
-              src="https://i.postimg.cc/Y974HYRZ/logo-png.png"
-              alt="ReputaFlow Logo"
-              className="h-11 w-auto object-contain"
-              style={{
-                filter: 'invert(1) brightness(1.8) contrast(1.2)',
-                mixBlendMode: 'screen'
-              }}
-              referrerPolicy="no-referrer"
-            />
+            <BrandLogo size="md" variant="dark" />
             <div className="flex flex-col">
               <span className="font-extrabold text-white text-base tracking-tight font-heading leading-none">
                 Reputa<span className="text-indigo-400">Flow</span>
@@ -80,6 +76,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </span>
             </div>
           </div>
+          <PWAInstallButton />
         </div>
 
         {/* Business Selector or Merchant Badge */}
@@ -113,6 +110,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     alt={selectedBusiness.name}
                     className="w-6 h-6 rounded-lg object-cover shrink-0 border border-slate-600"
                     referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      (e.target as HTMLElement).style.display = 'none';
+                    }}
                   />
                 )}
                 <span className="truncate">{selectedBusiness?.name || 'A carregar comércio...'}</span>
@@ -195,13 +195,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* User Card */}
         <div className="flex items-center justify-between pt-1">
           <div className="flex items-center gap-2 min-w-0">
-            <div className="w-8 h-8 rounded-full overflow-hidden bg-slate-800 p-1 border border-slate-700 flex items-center justify-center shrink-0">
-              <img
-                src="https://i.postimg.cc/Y974HYRZ/logo-png.png"
-                alt="ReputaFlow Avatar"
-                className="w-full h-full object-contain filter invert brightness-200"
-                referrerPolicy="no-referrer"
-              />
+            <div className="w-8 h-8 rounded-full overflow-hidden bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0 text-white font-bold text-xs">
+              {currentUser?.photoURL && !avatarError ? (
+                <img
+                  src={currentUser.photoURL}
+                  alt={currentUser.displayName || 'Avatar'}
+                  onError={() => setAvatarError(true)}
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="w-full h-full bg-indigo-600 flex items-center justify-center text-white font-bold">
+                  {currentUser?.email ? currentUser.email[0].toUpperCase() : 'R'}
+                </div>
+              )}
             </div>
             <div className="min-w-0">
               <p className="text-xs font-bold text-white truncate">

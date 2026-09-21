@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Menu,
   ShieldAlert,
@@ -10,6 +10,8 @@ import {
   ChevronDown
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { BrandLogo } from './BrandLogo';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface HeaderProps {
   onOpenQrModal: () => void;
@@ -34,18 +36,14 @@ export const Header: React.FC<HeaderProps> = ({
     isSuperAdmin
   } = useAuth();
 
+  const [avatarError, setAvatarError] = useState(false);
+
   return (
     <header className="bg-white border-b border-slate-200/80 sticky top-0 z-30 px-4 sm:px-6 py-3 flex items-center justify-between">
       {/* Left: Mobile Brand & Business Selector */}
       <div className="flex items-center gap-3">
         <div className="flex lg:hidden items-center gap-2">
-          <img
-            src="https://i.postimg.cc/Y974HYRZ/logo-png.png"
-            alt="ReputaFlow Logo"
-            className="h-10 w-auto object-contain"
-            style={{ mixBlendMode: 'multiply' }}
-            referrerPolicy="no-referrer"
-          />
+          <BrandLogo size="sm" variant="light" />
           <span className="font-extrabold text-slate-900 text-sm tracking-tight font-heading">
             Reputa<span className="text-indigo-600">Flow</span>
           </span>
@@ -78,6 +76,9 @@ export const Header: React.FC<HeaderProps> = ({
                   alt={selectedBusiness.name}
                   className="w-4 h-4 rounded-md object-cover shrink-0"
                   referrerPolicy="no-referrer"
+                  onError={(e) => {
+                    (e.target as HTMLElement).style.display = 'none';
+                  }}
                 />
               )}
               <span className="truncate">{selectedBusiness?.name || 'A carregar...'}</span>
@@ -95,6 +96,9 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right Controls */}
       <div className="flex items-center gap-2 sm:gap-3">
+        {/* PWA Install on Top Bar */}
+        <PWAInstallButton />
+
         {/* Quick Review Test Button */}
         <button
           onClick={onOpenReviewPreview}
@@ -131,13 +135,20 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Auth status */}
         {currentUser ? (
           <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
-            <div className="w-7 h-7 rounded-full overflow-hidden bg-slate-50 p-0.5 border border-slate-200 flex items-center justify-center shrink-0">
-              <img
-                src="https://i.postimg.cc/Y974HYRZ/logo-png.png"
-                alt="ReputaFlow Avatar"
-                className="w-full h-full object-contain"
-                referrerPolicy="no-referrer"
-              />
+            <div className="w-7 h-7 rounded-full overflow-hidden bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0 text-slate-800 font-bold text-xs">
+              {currentUser?.photoURL && !avatarError ? (
+                <img
+                  src={currentUser.photoURL}
+                  alt={currentUser.displayName || 'Avatar'}
+                  onError={() => setAvatarError(true)}
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="w-full h-full bg-indigo-600 flex items-center justify-center text-white font-bold text-xs">
+                  {currentUser?.email ? currentUser.email[0].toUpperCase() : 'U'}
+                </div>
+              )}
             </div>
             <button
               onClick={signOut}
