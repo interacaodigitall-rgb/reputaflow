@@ -8,6 +8,17 @@ const PORT = 3000;
 
 app.use(express.json());
 
+// Enable CORS for external access from Vercel and mobile clients
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 // Persistent local storage file for server state
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
@@ -26,11 +37,11 @@ const DEFAULT_BUSINESSES = [
     name: 'Mr. Navalha',
     slug: 'mrnavalha',
     category: 'Barbearia & Estética',
-    logoUrl: 'https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=150&auto=format&fit=crop&q=80',
-    phone: '+351 912 345 678',
-    email: 'mrnavalha@reputaflow.com',
+    logoUrl: 'https://i.postimg.cc/h4YbXjcK/MISTER-VETOR-removebg-preview.png',
+    phone: '+351 937 472 634',
+    email: 'contacto@misternavalha.com',
     address: 'R. António Sérgio 20, 6300-685 Guarda, Portugal',
-    googleReviewUrl: 'https://g.page/r/mrnavalha/review',
+    googleReviewUrl: 'https://search.google.com/local/writereview?placeid=ChIJtrX8AEj7PA0Rp4bh2umMy6k',
     status: 'active',
     planId: 'plan_pro',
     ownerId: 'owner_mrnavalha',

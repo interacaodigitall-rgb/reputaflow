@@ -65,6 +65,20 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
 
   useEffect(() => {
     fetchBusiness();
+
+    const handleUpdate = () => {
+      getBusinessBySlug(slug).then((b) => {
+        if (b) setBusiness(b);
+      });
+    };
+
+    window.addEventListener('reputaflow_businesses_updated', handleUpdate);
+    const interval = setInterval(handleUpdate, 3500);
+
+    return () => {
+      window.removeEventListener('reputaflow_businesses_updated', handleUpdate);
+      clearInterval(interval);
+    };
   }, [slug, businessOverride]);
 
   const handleSelectStar = async (rating: number) => {

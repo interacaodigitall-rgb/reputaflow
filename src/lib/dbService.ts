@@ -17,6 +17,7 @@ import {
 import { signInAnonymously } from 'firebase/auth';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
 import { REGISTERED_BUSINESSES } from './initialData';
+import { fetchGlobalCloudData, pushGlobalCloudData } from './cloudSync';
 import {
   Business,
   Customer,
@@ -175,7 +176,34 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
   const norm = normalizeKey(slug);
   const deletedIds = new Set(getDeletedBusinessIds());
 
-  // 1. Query Firestore FIRST (cloud-native source of truth for cross-device sync between PC and mobile)
+  // 1. Check Global Cloud Sync Store FIRST (works seamlessly on Vercel, Mobile, and AI Studio)
+  try {
+    const cloudData = await fetchGlobalCloudData();
+    if (cloudData && Array.isArray(cloudData.businesses)) {
+      for (const b of cloudData.businesses) {
+        if (!deletedIds.has(b.id)) {
+          saveLocalBusiness(b);
+          const bId = (b.id || '').toLowerCase();
+          const bSlug = (b.slug || '').toLowerCase();
+          const bName = (b.name || '').toLowerCase();
+          if (
+            bSlug === cleanSlug ||
+            bId === cleanSlug ||
+            bName === cleanSlug ||
+            normalizeKey(bSlug) === norm ||
+            normalizeKey(bId) === norm ||
+            normalizeKey(bName) === norm
+          ) {
+            return b;
+          }
+        }
+      }
+    }
+  } catch (cloudErr) {
+    console.warn('Cloud sync getBusinessBySlug warning:', cloudErr);
+  }
+
+  // 2. Query Firestore (cloud-native source of truth for cross-device sync between PC and mobile)
   try {
     const q = query(collection(db, 'businesses'), where('slug', '==', cleanSlug), limit(1));
     const snap = await Promise.race([
@@ -410,6 +438,26 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
   // Immediate dispatch of cached / local businesses
   mergeAndNotify();
 
+  // 1. Sync from Global Cloud Store (ensures Vercel & mobile get latest data instantly)
+  const syncFromCloud = async () => {
+    try {
+      const cloudData = await fetchGlobalCloudData();
+      if (cloudData && Array.isArray(cloudData.businesses) && cloudData.businesses.length > 0) {
+        const deletedIds = new Set(getDeletedBusinessIds());
+        const validList = cloudData.businesses.filter(b =>
+          b &&
+          !deletedIds.has(b.id) &&
+          b.slug !== 'bistro-paris' &&
+          b.slug !== 'clinica-estetica'
+        );
+        validList.forEach(b => saveLocalBusiness(b));
+        mergeAndNotify(validList);
+      }
+    } catch (err) {}
+  };
+  syncFromCloud();
+  const cloudPollerInterval = setInterval(syncFromCloud, 3500);
+
   // Fetch backend API to ensure server-synced businesses are included immediately
   fetch('/api/businesses')
     .then(res => res.ok ? res.json() : [])
@@ -451,6 +499,7 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
   );
 
   return () => {
+    clearInterval(cloudPollerInterval);
     window.removeEventListener('reputaflow_businesses_updated', handleLocalUpdate);
     unsubscribe();
   };
@@ -478,7 +527,10 @@ export async function createBusiness(data: Omit<Business, 'id'>, customId?: stri
   // 1. Instantly save locally and notify all listeners so UI updates without any delay
   saveLocalBusiness(fullBusiness);
 
-  // 2. Sync to Backend API (makes it instantly available across all devices, customer phones, incognito)
+  // 2. Sync to Global Cloud Store (makes it instantly available across all devices, mobile, Vercel)
+  pushGlobalCloudData({ businesses: getLocalBusinesses() }).catch(() => {});
+
+  // 3. Sync to Backend API (makes it instantly available across all devices, customer phones, incognito)
   try {
     await fetch('/api/businesses', {
       method: 'POST',
@@ -489,9 +541,9 @@ export async function createBusiness(data: Omit<Business, 'id'>, customId?: stri
     console.warn('Backend API business creation warning:', apiErr);
   }
 
-  // 3. Asynchronously sync to Firestore with a 4-second timeout to prevent modal hanging
+  // 4. Asynchronously sync to Firestore with a 4-second timeout to prevent modal hanging
   try {
-    const firestoreWrite = setDoc(doc(db, path, targetId), payload);
+    const firestoreWrite = setDoc(doc(db, path, targetId), payload, { merge: true });
     const timeout = new Promise<void>((_, reject) =>
       setTimeout(() => reject(new Error('Firestore write timeout')), 4000)
     );
@@ -510,14 +562,17 @@ export async function updateBusiness(id: string, data: Partial<Business>): Promi
     updatedAt: new Date().toISOString()
   });
 
-  // Update locally first
+  // 1. Update locally first
   const localList = getLocalBusinesses();
   const existing = localList.find(b => b.id === id);
   if (existing) {
     saveLocalBusiness({ ...existing, ...payload });
   }
 
-  // Sync to Backend API
+  // 2. Sync to Global Cloud Store (makes changes instantly available across all devices, mobile, Vercel)
+  pushGlobalCloudData({ businesses: getLocalBusinesses() }).catch(() => {});
+
+  // 3. Sync to Backend API
   try {
     await fetch(`/api/businesses/${encodeURIComponent(id)}`, {
       method: 'PUT',
@@ -528,14 +583,15 @@ export async function updateBusiness(id: string, data: Partial<Business>): Promi
     console.warn('Backend API business update warning:', apiErr);
   }
 
+  // 4. Safe upsert to Firestore (handles existing and non-existing docs)
   try {
-    const updatePromise = updateDoc(doc(db, 'businesses', id), payload);
+    const updatePromise = setDoc(doc(db, 'businesses', id), payload, { merge: true });
     const timeout = new Promise<void>((_, reject) =>
       setTimeout(() => reject(new Error('Firestore update timeout')), 4000)
     );
     await Promise.race([updatePromise, timeout]);
   } catch (err) {
-    console.warn('Firestore update warning (business updated locally):', err);
+    console.warn('Firestore update warning (business updated locally and in cloud):', err);
   }
 }
 
@@ -543,7 +599,10 @@ export async function deleteBusiness(id: string): Promise<void> {
   // 1. Mark as permanently deleted and remove locally
   removeLocalBusiness(id);
 
-  // 2. Sync to Backend API
+  // 2. Sync to Global Cloud Store
+  pushGlobalCloudData({ businesses: getLocalBusinesses() }).catch(() => {});
+
+  // 3. Sync to Backend API
   try {
     await fetch(`/api/businesses/${encodeURIComponent(id)}`, {
       method: 'DELETE'
@@ -552,7 +611,7 @@ export async function deleteBusiness(id: string): Promise<void> {
     console.warn('Backend API business deletion warning:', apiErr);
   }
 
-  // 3. Attempt Firestore deletion (non-blocking, timeout guarded)
+  // 4. Attempt Firestore deletion (non-blocking, timeout guarded)
   try {
     const delPromise = deleteDoc(doc(db, 'businesses', id));
     const timeout = new Promise<void>((_, reject) =>
