@@ -1,0 +1,204 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "App user profile with role-based access",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "role": { "type": "string", "enum": ["super_admin", "merchant", "staff"] },
+        "businessId": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["email", "role"]
+    },
+    "Business": {
+      "title": "Business",
+      "description": "Commercial establishment multi-tenant space",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "maxLength": 100 },
+        "slug": { "type": "string", "maxLength": 50 },
+        "logoUrl": { "type": "string" },
+        "phone": { "type": "string", "maxLength": 30 },
+        "email": { "type": "string", "format": "email" },
+        "address": { "type": "string", "maxLength": 200 },
+        "googleReviewUrl": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "pending", "suspended"] },
+        "planId": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["name", "slug", "ownerId", "status"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Customer CRM record for a specific business",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "businessId": { "type": "string" },
+        "name": { "type": "string", "maxLength": 100 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "email": { "type": "string" },
+        "reviewsCount": { "type": "number" },
+        "lastReviewAt": { "type": "string" },
+        "avgRating": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "in_recovery", "recovered", "churned"] },
+        "internalNotes": { "type": "string", "maxLength": 1000 },
+        "lastInteractionAt": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["businessId", "name", "phone"]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "Public customer 1-5 star review submission",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "businessId": { "type": "string" },
+        "customerId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "rating": { "type": "number" },
+        "channel": { "type": "string", "enum": ["qr", "link", "sms", "email"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["businessId", "rating"]
+    },
+    "Feedback": {
+      "title": "Feedback",
+      "description": "Detailed recovery feedback for 1-4 star ratings",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "businessId": { "type": "string" },
+        "reviewId": { "type": "string" },
+        "customerId": { "type": "string" },
+        "customerName": { "type": "string", "maxLength": 100 },
+        "customerPhone": { "type": "string", "maxLength": 30 },
+        "customerEmail": { "type": "string" },
+        "rating": { "type": "number" },
+        "question1": { "type": "string", "maxLength": 1000 },
+        "question2": { "type": "string", "maxLength": 1000 },
+        "question3WantsContact": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["businessId", "customerName", "customerPhone", "rating"]
+    },
+    "RecoveryCase": {
+      "title": "RecoveryCase",
+      "description": "Customer recovery incident ticket in CRM",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "businessId": { "type": "string" },
+        "customerId": { "type": "string" },
+        "reviewId": { "type": "string" },
+        "feedbackId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "customerEmail": { "type": "string" },
+        "rating": { "type": "number" },
+        "status": { "type": "string", "enum": ["novo", "em_contacto", "em_resolucao", "resolvido", "cliente_recuperado"] },
+        "notes": { "type": "string", "maxLength": 2000 },
+        "assignedTo": { "type": "string" },
+        "resolvedAt": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["businessId", "customerName", "customerPhone", "status"]
+    },
+    "Interaction": {
+      "title": "Interaction",
+      "description": "Log of contact/interaction made with a customer",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "businessId": { "type": "string" },
+        "customerId": { "type": "string" },
+        "caseId": { "type": "string" },
+        "type": { "type": "string", "enum": ["whatsapp", "call", "email", "note"] },
+        "summary": { "type": "string", "maxLength": 1000 },
+        "outcome": { "type": "string", "maxLength": 500 },
+        "staffEmail": { "type": "string" },
+        "staffName": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["businessId", "type", "summary"]
+    },
+    "Plan": {
+      "title": "Plan",
+      "description": "SaaS Subscription plan tier",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "price": { "type": "number" },
+        "maxBusinesses": { "type": "number" },
+        "maxReviewsMonth": { "type": "number" },
+        "features": { "type": "array" },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["name", "price"]
+    },
+    "Setting": {
+      "title": "Setting",
+      "description": "Global SaaS system settings",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "platformName": { "type": "string" },
+        "supportEmail": { "type": "string" },
+        "defaultGoogleReviewInstructions": { "type": "string" }
+      },
+      "required": ["platformName"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles with role definitions"
+    },
+    "/businesses/{businessId}": {
+      "schema": "Business",
+      "description": "Establishments records with tenant isolation"
+    },
+    "/customers/{customerId}": {
+      "schema": "Customer",
+      "description": "CRM customer records isolated by businessId"
+    },
+    "/reviews/{reviewId}": {
+      "schema": "Review",
+      "description": "Customer reviews (public submit, merchant read)"
+    },
+    "/feedback/{feedbackId}": {
+      "schema": "Feedback",
+      "description": "Private 1-4 star recovery feedback submissions"
+    },
+    "/recovery_cases/{caseId}": {
+      "schema": "RecoveryCase",
+      "description": "CRM recovery tickets isolated by businessId"
+    },
+    "/interactions/{interactionId}": {
+      "schema": "Interaction",
+      "description": "Customer contact logs and history"
+    },
+    "/plans/{planId}": {
+      "schema": "Plan",
+      "description": "SaaS pricing plans"
+    },
+    "/settings/{settingId}": {
+      "schema": "Setting",
+      "description": "Global platform parameters"
+    }
+  }
+}

@@ -1,0 +1,110 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'interacaodigitall@gmail.com' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'super_admin')
+      );
+    }
+
+    function isMerchantOwner(businessId) {
+      return isSignedIn() && (
+        isSuperAdmin() ||
+        (exists(/databases/$(database)/documents/businesses/$(businessId)) &&
+         get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerId == request.auth.uid) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.businessId == businessId)
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Users
+    match /users/{userId} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isSuperAdmin());
+      allow create: if isSignedIn() && (request.auth.uid == userId || isSuperAdmin());
+      allow update: if isSignedIn() && (request.auth.uid == userId || isSuperAdmin());
+      allow delete: if isSuperAdmin();
+    }
+
+    // Businesses
+    match /businesses/{businessId} {
+      // Public needs read to display business name, logo, google review link on review landing page
+      allow get: if true;
+      allow list: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSuperAdmin() || (isSignedIn() && resource.data.ownerId == request.auth.uid);
+      allow delete: if isSuperAdmin();
+    }
+
+    // Reviews (Public can create, merchants read their own)
+    match /reviews/{reviewId} {
+      allow create: if request.resource.data.businessId is string &&
+                       request.resource.data.rating is number &&
+                       request.resource.data.rating >= 1 &&
+                       request.resource.data.rating <= 5;
+      allow read: if isSuperAdmin() || (isSignedIn() && isMerchantOwner(resource.data.businessId));
+      allow update, delete: if isSuperAdmin() || (isSignedIn() && isMerchantOwner(resource.data.businessId));
+    }
+
+    // Feedback (Public can create for 1-4 stars, merchants read their own)
+    match /feedback/{feedbackId} {
+      allow create: if request.resource.data.businessId is string &&
+                       request.resource.data.rating is number &&
+                       request.resource.data.customerName is string;
+      allow read: if isSuperAdmin() || (isSignedIn() && isMerchantOwner(resource.data.businessId));
+      allow update, delete: if isSuperAdmin() || (isSignedIn() && isMerchantOwner(resource.data.businessId));
+    }
+
+    // Customers CRM (Multi-tenant isolated by businessId)
+    match /customers/{customerId} {
+      // Public review submission can upsert/create customer record
+      allow create: if request.resource.data.businessId is string;
+      allow read: if isSuperAdmin() || (isSignedIn() && isMerchantOwner(resource.data.businessId));
+      allow update: if isSuperAdmin() || (isSignedIn() && isMerchantOwner(resource.data.businessId)) || 
+                      (request.resource.data.businessId == resource.data.businessId);
+      allow delete: if isSuperAdmin() || (isSignedIn() && isMerchantOwner(resource.data.businessId));
+    }
+
+    // Recovery Cases (CRM tickets)
+    match /recovery_cases/{caseId} {
+      allow create: if request.resource.data.businessId is string;
+      allow read: if isSuperAdmin() || (isSignedIn() && isMerchantOwner(resource.data.businessId));
+      allow update: if isSuperAdmin() || (isSignedIn() && isMerchantOwner(resource.data.businessId));
+      allow delete: if isSuperAdmin();
+    }
+
+    // Interactions
+    match /interactions/{interactionId} {
+      allow read, create, update: if isSuperAdmin() || (isSignedIn() && isMerchantOwner(request.resource.data.businessId));
+      allow delete: if isSuperAdmin();
+    }
+
+    // Plans
+    match /plans/{planId} {
+      allow read: if true;
+      allow write: if isSuperAdmin();
+    }
+
+    // Settings
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isSuperAdmin();
+    }
+  }
+}

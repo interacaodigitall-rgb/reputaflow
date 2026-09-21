@@ -1,0 +1,6 @@
+{
+  "name": "ReputaFlow",
+  "description": "Plataforma SaaS multiempresa de avaliação de clientes, feedback interno e recuperação de clientes para estabelecimentos comerciais.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

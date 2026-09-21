@@ -1,0 +1,141 @@
+import React from 'react';
+import { QRCodeSVG } from 'qrcode.react';
+import { X, Download, Copy, ExternalLink, QrCode } from 'lucide-react';
+import { Business } from '../../types';
+
+interface QrCodeModalProps {
+  business: Business | null;
+  onClose: () => void;
+  onOpenReviewPreview: () => void;
+}
+
+export const QrCodeModal: React.FC<QrCodeModalProps> = ({
+  business,
+  onClose,
+  onOpenReviewPreview
+}) => {
+  if (!business) return null;
+
+  const publicReviewUrl = `${window.location.origin}?b=${business.slug}`;
+
+  const handleCopyLink = () => {
+    navigator.clipboard.writeText(publicReviewUrl);
+    alert('Link de avaliação copiado para a área de transferência!');
+  };
+
+  const handleDownloadPng = () => {
+    const svg = document.getElementById('modal-qr-svg');
+    if (!svg) return;
+
+    const svgData = new XMLSerializer().serializeToString(svg);
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+
+    img.onload = () => {
+      canvas.width = 400;
+      canvas.height = 500;
+      if (ctx) {
+        // Background card
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Header color bar
+        ctx.fillStyle = '#4F46E5';
+        ctx.fillRect(0, 0, canvas.width, 10);
+
+        // Business Name
+        ctx.fillStyle = '#0F172A';
+        ctx.font = 'bold 22px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(business.name, canvas.width / 2, 55);
+
+        // Subtitle
+        ctx.fillStyle = '#64748B';
+        ctx.font = '14px sans-serif';
+        ctx.fillText('Aponte a câmara e avalie a sua experiência', canvas.width / 2, 85);
+
+        // Draw QR code centered
+        ctx.drawImage(img, 75, 120, 250, 250);
+
+        // Footer note
+        ctx.fillStyle = '#94A3B8';
+        ctx.font = '12px sans-serif';
+        ctx.fillText('Avaliação rápida e segura • ReputaFlow', canvas.width / 2, 430);
+
+        const pngFile = canvas.toDataURL('image/png');
+        const downloadLink = document.createElement('a');
+        downloadLink.download = `qrcode-${business.slug}.png`;
+        downloadLink.href = pngFile;
+        downloadLink.click();
+      }
+    };
+
+    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4">
+      <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl space-y-5 text-center relative animate-fade-in">
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition"
+        >
+          <X className="w-5 h-5" />
+        </button>
+
+        <div className="space-y-1 pt-2">
+          <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-2">
+            <QrCode className="w-5 h-5" />
+          </div>
+          <h3 className="text-base font-bold text-slate-900">{business.name}</h3>
+          <p className="text-xs text-slate-500">
+            Aponte a câmara do telemóvel para abrir a página de avaliação instantânea.
+          </p>
+        </div>
+
+        {/* QR Code Container */}
+        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 inline-block shadow-inner">
+          <QRCodeSVG
+            id="modal-qr-svg"
+            value={publicReviewUrl}
+            size={200}
+            level="H"
+            includeMargin={true}
+          />
+        </div>
+
+        <div className="space-y-2">
+          <button
+            onClick={handleDownloadPng}
+            className="w-full py-2.5 px-4 bg-slate-900 hover:bg-black text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-sm"
+          >
+            <Download className="w-4 h-4" />
+            <span>Descarregar Placa em Imagem</span>
+          </button>
+
+          <button
+            onClick={handleCopyLink}
+            className="w-full py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition flex items-center justify-center gap-2"
+          >
+            <Copy className="w-3.5 h-3.5" />
+            <span>Copiar Link de Avaliação</span>
+          </button>
+        </div>
+
+        <div className="pt-2 border-t border-slate-100">
+          <button
+            onClick={() => {
+              onClose();
+              onOpenReviewPreview();
+            }}
+            className="text-xs text-indigo-600 hover:text-indigo-800 font-bold inline-flex items-center gap-1"
+          >
+            <span>Testar página de avaliação agora</span>
+            <ExternalLink className="w-3 h-3" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
