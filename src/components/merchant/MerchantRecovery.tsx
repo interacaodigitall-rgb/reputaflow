@@ -198,21 +198,21 @@ export const MerchantRecovery: React.FC<MerchantRecoveryProps> = ({
               </div>
 
               {/* Action Toolbar */}
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-                <div className="flex items-center gap-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-1">
+                <div className="flex items-center gap-2 w-full sm:w-auto">
                   <a
                     href={getWhatsAppLink(c.customerPhone, c.customerName)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-xs transition"
+                    className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 py-2.5 px-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-xs transition"
                   >
-                    <MessageCircle className="w-3.5 h-3.5" />
-                    <span>Contactar via WhatsApp</span>
+                    <MessageCircle className="w-4 h-4" />
+                    <span>WhatsApp</span>
                   </a>
 
                   <a
                     href={`tel:${c.customerPhone}`}
-                    className="inline-flex items-center gap-1.5 py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-xl text-xs transition"
+                    className="inline-flex items-center justify-center gap-1.5 py-2.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition"
                   >
                     <Phone className="w-3.5 h-3.5" />
                     <span>Ligar</span>
@@ -222,10 +222,10 @@ export const MerchantRecovery: React.FC<MerchantRecoveryProps> = ({
                 {c.status !== 'cliente_recuperado' && (
                   <button
                     onClick={() => handleStatusChange(c.id, 'cliente_recuperado', c.customerId)}
-                    className="inline-flex items-center gap-1 py-1.5 px-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs transition"
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 py-2 px-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs transition border border-indigo-100"
                   >
                     <UserCheck className="w-3.5 h-3.5 text-indigo-600" />
-                    <span>Marcar como Cliente Recuperado</span>
+                    <span>Marcar como Recuperado</span>
                   </button>
                 )}
               </div>

@@ -13,45 +13,59 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   pendingCasesCount
 }) => {
   const items = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'crm', label: 'CRM', icon: Users },
+    { id: 'dashboard', label: 'Painel', icon: LayoutDashboard },
+    { id: 'crm', label: 'Clientes', icon: Users },
     {
       id: 'recovery',
-      label: 'Recuperação',
+      label: 'Recuperar',
       icon: AlertTriangle,
       badge: pendingCasesCount > 0 ? pendingCasesCount : undefined
     },
     { id: 'reviews', label: 'Avaliações', icon: Star },
-    { id: 'settings', label: 'Ajustes', icon: Settings }
+    { id: 'settings', label: 'Definições', icon: Settings }
   ];
 
   return (
-    <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 px-2 py-1 flex items-center justify-around shadow-lg">
-      {items.map((item) => {
-        const Icon = item.icon;
-        const isActive = activeTab === item.id;
-        return (
-          <button
-            key={item.id}
-            onClick={() => onSelectTab(item.id)}
-            className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition relative min-w-[56px] ${
-              isActive ? 'text-indigo-600' : 'text-slate-400 hover:text-slate-600'
-            }`}
-          >
-            <div className="relative">
-              <Icon className={`w-5 h-5 ${isActive ? 'stroke-[2.5]' : ''}`} />
-              {item.badge && (
-                <span className="absolute -top-1 -right-2 px-1 rounded-full text-[9px] font-black bg-rose-500 text-white min-w-[14px] text-center">
-                  {item.badge}
-                </span>
-              )}
-            </div>
-            <span className={`text-[10px] mt-0.5 ${isActive ? 'font-bold' : 'font-medium'}`}>
-              {item.label}
-            </span>
-          </button>
-        );
-      })}
-    </div>
+    <nav
+      id="merchant-mobile-bottom-nav"
+      aria-label="Navegação Mobile"
+      className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-lg border-t border-slate-200/80 shadow-[0_-4px_25px_rgba(15,23,42,0.08)] px-2 pt-1.5 pb-[calc(env(safe-area-inset-bottom,0px)+6px)] transition-all"
+    >
+      <div className="max-w-md mx-auto grid grid-cols-5 gap-1 items-center">
+        {items.map((item) => {
+          const Icon = item.icon;
+          const isActive = activeTab === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => onSelectTab(item.id)}
+              className={`flex flex-col items-center justify-center py-1 px-1 rounded-2xl transition-all duration-200 relative ${
+                isActive
+                  ? 'text-indigo-600 bg-indigo-50/80 font-bold'
+                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 font-medium'
+              }`}
+            >
+              <div className="relative flex items-center justify-center">
+                <Icon
+                  className={`w-5 h-5 transition-transform duration-200 ${
+                    isActive ? 'scale-110 stroke-[2.5]' : 'scale-100'
+                  }`}
+                />
+                {item.badge && (
+                  <span className="absolute -top-1.5 -right-2.5 px-1.5 py-0.2 rounded-full text-[9px] font-black bg-rose-500 text-white min-w-[16px] text-center shadow-xs animate-pulse">
+                    {item.badge}
+                  </span>
+                )}
+              </div>
+              <span className="text-[10.5px] mt-1 leading-tight tracking-tight whitespace-nowrap">
+                {item.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </nav>
   );
 };
+
