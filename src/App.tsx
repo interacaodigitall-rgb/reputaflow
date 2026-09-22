@@ -197,6 +197,19 @@ function MainAppContent() {
       <div className="flex-1 flex flex-col min-w-0 pb-28 lg:pb-8">
         {/* Top Header */}
         <Header
+          activeTab={activeTab}
+          onSelectTab={(tab) => {
+            if (tab === 'super_admin' && isSuperAdmin) {
+              setActiveTab('super_admin');
+            } else {
+              if (activeTab === 'super_admin') {
+                setActiveTab(tab);
+              } else {
+                setActiveTab(tab);
+              }
+            }
+          }}
+          pendingCasesCount={pendingCasesCount}
           onOpenQrModal={() => setShowQrModal(true)}
           onOpenReviewPreview={() => setIsCustomerViewMode(true)}
           onNavigateToSuperAdmin={() => {

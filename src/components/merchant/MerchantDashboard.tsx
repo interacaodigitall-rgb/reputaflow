@@ -117,28 +117,28 @@ export const MerchantDashboard: React.FC<MerchantDashboardProps> = ({
           </div>
 
           {/* Quick Review Share Actions */}
-          <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 bg-white/5 p-3 rounded-2xl border border-white/10 backdrop-blur">
+          <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-stretch sm:items-center gap-2.5 bg-white/5 p-2.5 sm:p-3 rounded-2xl border border-white/10 backdrop-blur w-full md:w-auto">
             <button
               onClick={onOpenQrModal}
-              className="flex items-center gap-2 py-2.5 px-4 bg-white text-slate-900 hover:bg-slate-100 font-semibold rounded-xl text-xs transition shadow-sm"
+              className="flex items-center justify-center gap-2 py-3 sm:py-2.5 px-4 bg-white text-slate-900 hover:bg-slate-100 font-bold rounded-xl text-xs transition shadow-sm min-h-[44px]"
             >
               <QrCode className="w-4 h-4 text-indigo-600" />
               <span>Gerar QR Code</span>
             </button>
             <button
               onClick={handleCopyLink}
-              className="flex items-center gap-2 py-2.5 px-4 bg-white/10 hover:bg-white/20 text-white font-medium rounded-xl text-xs transition"
+              className="flex items-center justify-center gap-2 py-3 sm:py-2.5 px-4 bg-white/10 hover:bg-white/20 text-white font-semibold rounded-xl text-xs transition min-h-[44px]"
             >
               <Copy className="w-4 h-4" />
               <span>Copiar Link</span>
             </button>
             <button
               onClick={onOpenReviewPreview}
-              className="flex items-center gap-2 py-2.5 px-3 text-indigo-200 hover:text-white font-medium text-xs transition"
+              className="flex items-center justify-center gap-2 py-3 sm:py-2.5 px-3.5 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 hover:text-white font-semibold rounded-xl text-xs transition min-h-[44px]"
               title="Testar como cliente"
             >
               <ExternalLink className="w-4 h-4" />
-              <span className="hidden sm:inline">Testar Página</span>
+              <span>Testar Página</span>
             </button>
           </div>
         </div>

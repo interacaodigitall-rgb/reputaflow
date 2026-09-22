@@ -53,13 +53,13 @@ export const MerchantReviews: React.FC<MerchantReviewsProps> = ({
         </div>
 
         {/* Rating Filter Pills */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+        <div className="flex items-center gap-2 overflow-x-auto pb-2 pt-1 scrollbar-none -mx-1 px-1">
           <button
             onClick={() => setSelectedRatingFilter('all')}
-            className={`py-1.5 px-3 rounded-xl text-xs font-semibold transition ${
+            className={`py-2 px-3.5 rounded-xl text-xs font-semibold whitespace-nowrap transition min-h-[40px] ${
               selectedRatingFilter === 'all'
-                ? 'bg-slate-900 text-white'
-                : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                ? 'bg-slate-900 text-white shadow-xs font-bold'
+                : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 active:bg-slate-100'
             }`}
           >
             Todas ({reviews.length})
@@ -70,10 +70,10 @@ export const MerchantReviews: React.FC<MerchantReviewsProps> = ({
               <button
                 key={rating}
                 onClick={() => setSelectedRatingFilter(rating)}
-                className={`py-1.5 px-3 rounded-xl text-xs font-semibold flex items-center gap-1 transition ${
+                className={`py-2 px-3.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition min-h-[40px] ${
                   selectedRatingFilter === rating
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                    ? 'bg-indigo-600 text-white shadow-xs font-bold'
+                    : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 active:bg-slate-100'
                 }`}
               >
                 <span>{rating}★</span>

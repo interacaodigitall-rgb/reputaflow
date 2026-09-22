@@ -102,7 +102,7 @@ export const MerchantRecovery: React.FC<MerchantRecoveryProps> = ({
       </div>
 
       {/* Filter Tabs */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+      <div className="flex items-center gap-2 overflow-x-auto pb-2 pt-1 scrollbar-none -mx-1 px-1">
         {statuses.map((s) => {
           const count =
             s.id === 'all'
@@ -113,15 +113,15 @@ export const MerchantRecovery: React.FC<MerchantRecoveryProps> = ({
             <button
               key={s.id}
               onClick={() => setSelectedStatus(s.id)}
-              className={`py-1.5 px-3 rounded-xl text-xs font-semibold whitespace-nowrap transition flex items-center gap-1.5 ${
+              className={`py-2 px-3.5 rounded-xl text-xs font-semibold whitespace-nowrap transition flex items-center gap-1.5 min-h-[40px] ${
                 selectedStatus === s.id
-                  ? 'bg-slate-900 text-white shadow-xs'
-                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                  ? 'bg-slate-900 text-white shadow-xs font-bold'
+                  : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 active:bg-slate-100'
               }`}
             >
               <span>{s.label}</span>
               <span
-                className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+                className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
                   selectedStatus === s.id ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
                 }`}
               >
@@ -168,15 +168,15 @@ export const MerchantRecovery: React.FC<MerchantRecoveryProps> = ({
                 </div>
 
                 {/* Status selector directly on card */}
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-500 font-medium">Estado do Ticket:</span>
+                <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto">
+                  <span className="text-xs text-slate-500 font-medium">Estado:</span>
                   <select
                     disabled={updatingId === c.id}
                     value={c.status}
                     onChange={(e) =>
                       handleStatusChange(c.id, e.target.value as RecoveryCaseStatus, c.customerId)
                     }
-                    className="text-xs font-bold py-1.5 px-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                    className="text-xs font-bold py-2 px-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer min-h-[40px]"
                   >
                     <option value="novo">Novo</option>
                     <option value="em_contacto">Em contacto</option>
@@ -204,7 +204,7 @@ export const MerchantRecovery: React.FC<MerchantRecoveryProps> = ({
                     href={getWhatsAppLink(c.customerPhone, c.customerName)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 py-2.5 px-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-xs transition"
+                    className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-xs transition min-h-[44px]"
                   >
                     <MessageCircle className="w-4 h-4" />
                     <span>WhatsApp</span>
@@ -212,7 +212,7 @@ export const MerchantRecovery: React.FC<MerchantRecoveryProps> = ({
 
                   <a
                     href={`tel:${c.customerPhone}`}
-                    className="inline-flex items-center justify-center gap-1.5 py-2.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition"
+                    className="inline-flex items-center justify-center gap-1.5 py-2.5 px-3.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition min-h-[44px]"
                   >
                     <Phone className="w-3.5 h-3.5" />
                     <span>Ligar</span>
@@ -222,9 +222,9 @@ export const MerchantRecovery: React.FC<MerchantRecoveryProps> = ({
                 {c.status !== 'cliente_recuperado' && (
                   <button
                     onClick={() => handleStatusChange(c.id, 'cliente_recuperado', c.customerId)}
-                    className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 py-2 px-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs transition border border-indigo-100"
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 py-2.5 px-4 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs transition border border-indigo-100 min-h-[44px]"
                   >
-                    <UserCheck className="w-3.5 h-3.5 text-indigo-600" />
+                    <UserCheck className="w-4 h-4 text-indigo-600" />
                     <span>Marcar como Recuperado</span>
                   </button>
                 )}

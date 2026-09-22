@@ -40,10 +40,10 @@ export const BottomNav: React.FC<BottomNavProps> = ({
               key={item.id}
               type="button"
               onClick={() => onSelectTab(item.id)}
-              className={`flex flex-col items-center justify-center py-1 px-1 rounded-2xl transition-all duration-200 relative ${
+              className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl transition-all duration-200 relative min-h-[48px] ${
                 isActive
                   ? 'text-indigo-600 bg-indigo-50/80 font-bold'
-                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 font-medium'
+                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 font-medium active:scale-95'
               }`}
             >
               <div className="relative flex items-center justify-center">
