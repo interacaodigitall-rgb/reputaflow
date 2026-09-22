@@ -687,6 +687,19 @@ export async function deleteBusiness(id: string): Promise<void> {
   }
 }
 
+export function isMatchingBusiness(itemBizId: string | undefined, targetBizId: string | null): boolean {
+  if (!targetBizId) return true;
+  if (!itemBizId) return false;
+  if (itemBizId === targetBizId) return true;
+  const a = itemBizId.toLowerCase().trim();
+  const b = targetBizId.toLowerCase().trim();
+  if (a === b) return true;
+  const aNorm = a.replace(/[^a-z0-9]/g, '').replace(/^biz/, '');
+  const bNorm = b.replace(/[^a-z0-9]/g, '').replace(/^biz/, '');
+  if (aNorm && bNorm && aNorm === bNorm) return true;
+  return false;
+}
+
 // ==========================================
 // REVIEWS & FEEDBACK
 // ==========================================
@@ -696,19 +709,21 @@ export async function submitReview(
 ): Promise<{ reviewId: string }> {
   const path = 'reviews';
   const targetId = `rev_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+  const now = new Date().toISOString();
   const payload: Review = sanitizeForFirestore({
     ...data,
     id: targetId,
-    createdAt: new Date().toISOString(),
+    createdAt: now,
   });
 
-  // 1. Save Locally
+  // 1. Save locally and notify immediately (< 5ms)
   saveLocalReview(payload);
+  notifyDataChanged();
 
-  // 2. If customer info was provided, upsert Customer in CRM
+  // 2. If customer info was provided, upsert Customer in CRM locally
   if (data.customerName || data.customerPhone) {
     try {
-      await upsertCustomerByPhone({
+      upsertCustomerByPhone({
         businessId: data.businessId,
         name: data.customerName || 'Cliente',
         phone: data.customerPhone || '',
@@ -716,41 +731,43 @@ export async function submitReview(
         rating: data.rating,
         status: data.rating >= 4 ? 'active' : 'in_recovery',
         internalNotes: `Avaliação de ${data.rating} estrelas via ${data.channel || 'QR'}`
-      });
+      }).catch(() => {});
     } catch (custErr) {
       console.warn('Customer auto-creation warning in submitReview:', custErr);
     }
   }
 
-  // 3. Sync to Global Cloud Store
-  pushGlobalCloudData({
-    reviews: getLocalReviews(),
-    customers: getLocalCustomers()
-  }).catch(() => {});
+  // 3. Background asynchronous sync (non-blocking)
+  Promise.resolve().then(async () => {
+    // Sync to Global Cloud Store
+    pushGlobalCloudData({
+      reviews: getLocalReviews(),
+      customers: getLocalCustomers()
+    }).catch(() => {});
 
-  // 4. Sync to Backend API
-  try {
-    await fetch('/api/reviews', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-  } catch (apiErr) {
-    console.warn('API review submission warning:', apiErr);
-  }
+    // Sync to Backend API with 2s timeout
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2000);
+      await fetch('/api/reviews', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+    } catch (apiErr) {}
 
-  // 5. Upsert to Firestore
-  try {
-    const writePromise = setDoc(doc(db, path, targetId), payload);
-    const timeout = new Promise<void>((_, reject) =>
-      setTimeout(() => reject(new Error('timeout')), 3000)
-    );
-    await Promise.race([writePromise, timeout]);
-  } catch (err) {
-    console.warn('submitReview warning (stored locally and in cloud):', err);
-  }
+    // Upsert to Firestore with 2s timeout
+    try {
+      const writePromise = setDoc(doc(db, path, targetId), payload);
+      const timeout = new Promise<void>((_, reject) =>
+        setTimeout(() => reject(new Error('timeout')), 2000)
+      );
+      await Promise.race([writePromise, timeout]);
+    } catch (err) {}
+  });
 
-  notifyDataChanged();
   return { reviewId: targetId };
 }
 
@@ -765,119 +782,121 @@ export async function submitFeedbackAndRecovery(params: {
   question2: string;
   question3WantsContact: boolean;
 }): Promise<{ feedbackId: string; caseId: string; customerId: string }> {
-  try {
-    // 1. Create or update Customer in CRM
-    const customerId = await upsertCustomerByPhone({
-      businessId: params.businessId,
-      name: params.customerName,
-      phone: params.customerPhone,
-      email: params.customerEmail,
-      rating: params.rating,
-      status: 'in_recovery',
-      internalNotes: `Feedback negativo (${params.rating} estrelas): ${params.question1.slice(0, 100)}`
-    });
+  const now = new Date().toISOString();
+  const fbId = `fb_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+  const caseId = `rec_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+  const custId = `cust_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
 
-    const now = new Date().toISOString();
-    const fbId = `fb_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
-    const caseId = `rec_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+  // 1. Create or update Customer locally
+  const customerId = await upsertCustomerByPhone({
+    businessId: params.businessId,
+    name: params.customerName,
+    phone: params.customerPhone,
+    email: params.customerEmail,
+    rating: params.rating,
+    status: 'in_recovery',
+    internalNotes: `Feedback de insatisfação (${params.rating} estrelas): ${params.question1.slice(0, 120)}`
+  });
 
-    // 2. Create Feedback document
-    const feedbackPayload: Feedback = sanitizeForFirestore({
-      id: fbId,
-      businessId: params.businessId,
-      reviewId: params.reviewId,
-      customerId,
-      customerName: params.customerName,
-      customerPhone: params.customerPhone,
-      customerEmail: params.customerEmail || '',
-      rating: params.rating,
-      question1: params.question1,
-      question2: params.question2,
-      question3WantsContact: params.question3WantsContact,
-      createdAt: now
-    });
-    saveLocalFeedback(feedbackPayload);
+  // 2. Create Feedback document locally
+  const feedbackPayload: Feedback = sanitizeForFirestore({
+    id: fbId,
+    businessId: params.businessId,
+    reviewId: params.reviewId,
+    customerId: customerId || custId,
+    customerName: params.customerName,
+    customerPhone: params.customerPhone,
+    customerEmail: params.customerEmail || '',
+    rating: params.rating,
+    question1: params.question1,
+    question2: params.question2,
+    question3WantsContact: params.question3WantsContact,
+    createdAt: now
+  });
+  saveLocalFeedback(feedbackPayload);
 
-    // 3. Create Recovery Case document
-    const casePayload: RecoveryCase = sanitizeForFirestore({
-      id: caseId,
-      businessId: params.businessId,
-      customerId,
-      reviewId: params.reviewId,
-      feedbackId: fbId,
-      customerName: params.customerName,
-      customerPhone: params.customerPhone,
-      customerEmail: params.customerEmail || '',
-      rating: params.rating,
-      complaint: params.question1,
-      status: 'novo',
-      priority: params.rating <= 2 ? 'urgente' : 'media',
-      assignedTo: '',
-      history: [
-        {
-          id: `hist_${Date.now()}`,
-          action: 'Caso aberto automaticamente via página de avaliação',
-          timestamp: now,
-          userName: 'Sistema ReputaFlow'
-        }
-      ],
-      createdAt: now,
-      updatedAt: now
-    });
-    saveLocalRecoveryCase(casePayload);
+  // 3. Create Recovery Case document locally
+  const casePayload: RecoveryCase = sanitizeForFirestore({
+    id: caseId,
+    businessId: params.businessId,
+    customerId: customerId || custId,
+    reviewId: params.reviewId,
+    feedbackId: fbId,
+    customerName: params.customerName,
+    customerPhone: params.customerPhone,
+    customerEmail: params.customerEmail || '',
+    rating: params.rating,
+    complaint: params.question1,
+    status: 'novo',
+    priority: params.rating <= 2 ? 'urgente' : 'media',
+    assignedTo: '',
+    history: [
+      {
+        id: `hist_${Date.now()}`,
+        action: 'Caso de recuperação aberto automaticamente via avaliação',
+        timestamp: now,
+        userName: 'Sistema ReputaFlow'
+      }
+    ],
+    createdAt: now,
+    updatedAt: now
+  });
+  saveLocalRecoveryCase(casePayload);
 
-    // 4. Sync to Global Cloud Store
+  // Notify listeners immediately
+  notifyDataChanged();
+
+  // 4. Background asynchronous sync (non-blocking)
+  Promise.resolve().then(async () => {
+    // Sync to Global Cloud Store
     pushGlobalCloudData({
       feedback: getLocalFeedback(),
       recoveryCases: getLocalRecoveryCases(),
       customers: getLocalCustomers()
     }).catch(() => {});
 
-    // 5. Sync to Backend API
+    // Sync to Backend API
     try {
-      await fetch('/api/feedback', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(feedbackPayload)
-      });
-      await fetch('/api/recovery_cases', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(casePayload)
-      });
-    } catch (apiErr) {
-      console.warn('API feedback sync warning:', apiErr);
-    }
-
-    // 6. Write to Firestore
-    try {
-      await Promise.all([
-        setDoc(doc(db, 'feedback', fbId), feedbackPayload),
-        setDoc(doc(db, 'recovery_cases', caseId), casePayload)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2000);
+      await Promise.allSettled([
+        fetch('/api/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(feedbackPayload),
+          signal: controller.signal
+        }),
+        fetch('/api/recovery_cases', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(casePayload),
+          signal: controller.signal
+        })
       ]);
-    } catch (fsErr) {
-      console.warn('Firestore feedback write warning (stored locally and in cloud):', fsErr);
-    }
+      clearTimeout(timeoutId);
+    } catch (apiErr) {}
 
-    notifyDataChanged();
-    return { feedbackId: fbId, caseId, customerId };
-  } catch (err) {
-    console.warn('submitFeedbackAndRecovery fallback handling:', err);
-    return {
-      feedbackId: `fb_${Date.now()}`,
-      caseId: `rec_${Date.now()}`,
-      customerId: `cust_${Date.now()}`
-    };
-  }
+    // Write to Firestore with fast timeout
+    try {
+      await Promise.race([
+        Promise.all([
+          setDoc(doc(db, 'feedback', fbId), feedbackPayload),
+          setDoc(doc(db, 'recovery_cases', caseId), casePayload)
+        ]),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2500))
+      ]);
+    } catch (fsErr) {}
+  });
+
+  return { feedbackId: fbId, caseId, customerId: customerId || custId };
 }
 
 export function subscribeReviews(businessId: string | null, callback: (reviews: Review[]) => void) {
   const filterAndSort = (list: Review[]) => {
-    const filtered = businessId ? list.filter(r => r.businessId === businessId) : list;
+    const filtered = list.filter(r => isMatchingBusiness(r.businessId, businessId));
     return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   };
 
-  // Immediate callback from local cache
   callback(filterAndSort(getLocalReviews()));
 
   const emitMerged = () => {
@@ -887,7 +906,6 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
   const handleUpdate = () => emitMerged();
   window.addEventListener('reputaflow_data_updated', handleUpdate);
 
-  // Background Cloud Sync poller (pulls reviews submitted on mobile Vercel into CRM)
   const poller = setInterval(async () => {
     try {
       const cloudData = await fetchGlobalCloudData();
@@ -912,8 +930,7 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
       });
       emitMerged();
     },
-    (err) => {
-      // If Firestore subscription throws error, fallback silently to local/cloud store
+    () => {
       emitMerged();
     }
   );
@@ -927,7 +944,7 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
 
 export function subscribeFeedback(businessId: string | null, callback: (feedbackList: Feedback[]) => void) {
   const filterAndSort = (list: Feedback[]) => {
-    const filtered = businessId ? list.filter(f => f.businessId === businessId) : list;
+    const filtered = list.filter(f => isMatchingBusiness(f.businessId, businessId));
     return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   };
 
@@ -963,7 +980,7 @@ export function subscribeFeedback(businessId: string | null, callback: (feedback
       });
       emitMerged();
     },
-    (err) => {
+    () => {
       emitMerged();
     }
   );
@@ -994,10 +1011,10 @@ export async function upsertCustomerByPhone(params: {
   // 1. Check local customers
   const localList = getLocalCustomers();
   const existingLocal = localList.find(
-    c => c.businessId === params.businessId && c.phone && params.phone && c.phone.replace(/\D/g, '') === params.phone.replace(/\D/g, '')
+    c => isMatchingBusiness(c.businessId, params.businessId) && c.phone && params.phone && c.phone.replace(/\D/g, '') === params.phone.replace(/\D/g, '')
   );
 
-  let targetId = existingLocal?.id || `cust_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+  const targetId = existingLocal?.id || `cust_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
 
   const currentCount = existingLocal ? (existingLocal.reviewsCount || 1) + 1 : 1;
   const currentAvg = existingLocal
@@ -1020,35 +1037,37 @@ export async function upsertCustomerByPhone(params: {
     updatedAt: now
   });
 
-  // Save locally
+  // Save locally and notify immediately
   saveLocalCustomer(customerPayload);
-
-  // Sync to Global Cloud Store
-  pushGlobalCloudData({ customers: getLocalCustomers() }).catch(() => {});
-
-  // Sync to Backend API
-  try {
-    await fetch('/api/customers', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(customerPayload)
-    });
-  } catch (e) {}
-
-  // Sync to Firestore
-  try {
-    await setDoc(doc(db, path, targetId), customerPayload, { merge: true });
-  } catch (fsErr) {
-    console.warn('Firestore customer upsert warning:', fsErr);
-  }
-
   notifyDataChanged();
+
+  // Background sync (non-blocking)
+  Promise.resolve().then(async () => {
+    pushGlobalCloudData({ customers: getLocalCustomers() }).catch(() => {});
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2000);
+      await fetch('/api/customers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(customerPayload),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+    } catch (e) {}
+
+    try {
+      await setDoc(doc(db, path, targetId), customerPayload, { merge: true });
+    } catch (fsErr) {}
+  });
+
   return targetId;
 }
 
 export function subscribeCustomers(businessId: string | null, callback: (customers: Customer[]) => void) {
   const filterAndSort = (list: Customer[]) => {
-    const filtered = businessId ? list.filter(c => c.businessId === businessId) : list;
+    const filtered = list.filter(c => isMatchingBusiness(c.businessId, businessId));
     return filtered.sort((a, b) => new Date(b.lastReviewAt || b.createdAt).getTime() - new Date(a.lastReviewAt || a.createdAt).getTime());
   };
 
@@ -1084,7 +1103,7 @@ export function subscribeCustomers(businessId: string | null, callback: (custome
       });
       emitMerged();
     },
-    (err) => {
+    () => {
       emitMerged();
     }
   );
@@ -1122,7 +1141,7 @@ export async function updateCustomer(id: string, data: Partial<Customer>): Promi
 
 export function subscribeRecoveryCases(businessId: string | null, callback: (cases: RecoveryCase[]) => void) {
   const filterAndSort = (list: RecoveryCase[]) => {
-    const filtered = businessId ? list.filter(c => c.businessId === businessId) : list;
+    const filtered = list.filter(c => isMatchingBusiness(c.businessId, businessId));
     return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   };
 
@@ -1158,7 +1177,7 @@ export function subscribeRecoveryCases(businessId: string | null, callback: (cas
       });
       emitMerged();
     },
-    (err) => {
+    () => {
       emitMerged();
     }
   );

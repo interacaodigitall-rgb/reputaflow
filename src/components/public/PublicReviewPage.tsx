@@ -136,34 +136,28 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
 
     setSubmitting(true);
     try {
-      // Guard both review and feedback submission with a strict 4.5-second timeout
-      const submitAction = async () => {
-        const rev = await submitReview({
-          businessId: business.id,
-          customerName,
-          customerPhone,
-          customerEmail,
-          rating: selectedRating,
-          channel: 'qr'
-        });
+      const rev = await submitReview({
+        businessId: business.id,
+        customerName: customerName.trim(),
+        customerPhone: customerPhone.trim(),
+        customerEmail: customerEmail.trim(),
+        rating: selectedRating,
+        channel: 'qr'
+      });
 
-        await submitFeedbackAndRecovery({
-          businessId: business.id,
-          reviewId: rev.reviewId,
-          customerName,
-          customerPhone,
-          customerEmail,
-          rating: selectedRating,
-          question1,
-          question2,
-          question3WantsContact: wantsContact
-        });
-      };
+      await submitFeedbackAndRecovery({
+        businessId: business.id,
+        reviewId: rev.reviewId,
+        customerName: customerName.trim(),
+        customerPhone: customerPhone.trim(),
+        customerEmail: customerEmail.trim(),
+        rating: selectedRating,
+        question1: question1.trim(),
+        question2: question2.trim(),
+        question3WantsContact: wantsContact
+      });
 
-      const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 4500));
-      await Promise.race([submitAction(), timeoutPromise]);
-
-      // Always advance to completion so mobile user is never stuck in infinite loading
+      // Complete immediately and show success screen
       setIsCompleted(true);
     } catch (err) {
       console.warn('Feedback submit handled gracefully:', err);
