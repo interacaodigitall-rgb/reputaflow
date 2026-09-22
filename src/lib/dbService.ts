@@ -732,10 +732,11 @@ export async function submitReview(
   const path = 'reviews';
   const targetId = `rev_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
   const now = new Date().toISOString();
-  const payload: Review = sanitizeForFirestore({
+  const payload: any = sanitizeForFirestore({
     ...data,
     id: targetId,
     createdAt: now,
+    merchantId: data.businessId,
   });
 
   // 1. Save locally and notify immediately (< 5ms)
@@ -815,9 +816,10 @@ export async function submitFeedbackAndRecovery(params: {
   });
 
   // 2. Create Feedback document locally
-  const feedbackPayload: Feedback = sanitizeForFirestore({
+  const feedbackPayload: any = sanitizeForFirestore({
     id: fbId,
     businessId: params.businessId,
+    merchantId: params.businessId,
     reviewId: params.reviewId,
     customerId: customerId || custId,
     customerName: params.customerName,
@@ -832,9 +834,10 @@ export async function submitFeedbackAndRecovery(params: {
   saveLocalFeedback(feedbackPayload);
 
   // 3. Create Recovery Case document locally
-  const casePayload: RecoveryCase = sanitizeForFirestore({
+  const casePayload: any = sanitizeForFirestore({
     id: caseId,
     businessId: params.businessId,
+    merchantId: params.businessId,
     customerId: customerId || custId,
     reviewId: params.reviewId,
     feedbackId: fbId,
@@ -914,42 +917,49 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
   const handleUpdate = () => emitMerged();
   window.addEventListener('reputaflow_data_updated', handleUpdate);
 
-  const poller = setInterval(async () => {
-    try {
-      const cloudData = await fetchGlobalCloudData();
-      if (cloudData && Array.isArray(cloudData.reviews)) {
-        cloudData.reviews.forEach(r => saveLocalReview(r));
-        emitMerged();
-      }
-    } catch (e) {}
-  }, 3500);
-
   // Firestore onSnapshot listener with automatic bi-directional healing & sync
   const path = 'reviews';
-  const q = collection(db, path);
+  const q = businessId 
+    ? query(collection(db, path), where('businessId', '==', businessId))
+    : collection(db, path);
+
   const unFs = onSnapshot(
     q,
     (snap) => {
-      const remoteMap = new Map<string, Review>();
-      snap.docs.forEach(d => {
-        remoteMap.set(d.id, { id: d.id, ...d.data() } as Review);
+      // Create a map of ALL existing local reviews to avoid wiping other business data
+      const localReviews = getLocalReviews();
+      const localMap = new Map<string, Review>();
+      localReviews.forEach(loc => {
+        if (loc.id) localMap.set(loc.id, loc);
       });
 
-      // If this device has any local reviews not yet in Firestore, auto-heal and push them to Firestore!
-      const localReviews = getLocalReviews();
+      // Update/add items from remote Firestore that belong to this business
+      const remoteMapOfCurrentBusiness = new Map<string, Review>();
+      snap.docs.forEach(d => {
+        const item = { id: d.id, ...d.data() } as Review;
+        localMap.set(d.id, item);
+        remoteMapOfCurrentBusiness.set(d.id, item);
+      });
+
+      // If this device has any local reviews for THIS business not yet in Firestore, auto-heal and push them!
       localReviews.forEach(loc => {
-        if (loc.id && !remoteMap.has(loc.id)) {
-          setDoc(doc(db, 'reviews', loc.id), sanitizeForFirestore(loc)).catch(() => {});
-          remoteMap.set(loc.id, loc);
+        if (loc.id && isMatchingBusiness(loc.businessId, businessId) && !remoteMapOfCurrentBusiness.has(loc.id)) {
+          // Sync to Firestore
+          setDoc(doc(db, 'reviews', loc.id), sanitizeForFirestore({
+            ...loc,
+            merchantId: loc.businessId || businessId // Ensure both keys exist
+          })).catch(() => {});
+          remoteMapOfCurrentBusiness.set(loc.id, loc);
+          localMap.set(loc.id, loc);
         }
       });
 
-      const merged = Array.from(remoteMap.values());
+      const mergedAll = Array.from(localMap.values());
       try {
-        localStorage.setItem(LOCAL_STORAGE_KEY_REVIEWS, JSON.stringify(merged));
+        localStorage.setItem(LOCAL_STORAGE_KEY_REVIEWS, JSON.stringify(mergedAll));
       } catch (e) {}
 
-      callback(filterAndSort(merged));
+      callback(filterAndSort(mergedAll));
     },
     (err) => {
       console.warn('Firestore reviews subscription warning:', err);
@@ -959,7 +969,6 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
 
   return () => {
     window.removeEventListener('reputaflow_data_updated', handleUpdate);
-    clearInterval(poller);
     unFs();
   };
 }
@@ -979,41 +988,45 @@ export function subscribeFeedback(businessId: string | null, callback: (feedback
   const handleUpdate = () => emitMerged();
   window.addEventListener('reputaflow_data_updated', handleUpdate);
 
-  const poller = setInterval(async () => {
-    try {
-      const cloudData = await fetchGlobalCloudData();
-      if (cloudData && Array.isArray(cloudData.feedback)) {
-        cloudData.feedback.forEach(f => saveLocalFeedback(f));
-        emitMerged();
-      }
-    } catch (e) {}
-  }, 3500);
-
   const path = 'feedback';
-  const q = collection(db, path);
+  const q = businessId 
+    ? query(collection(db, path), where('businessId', '==', businessId))
+    : collection(db, path);
+
   const unFs = onSnapshot(
     q,
     (snap) => {
-      const remoteMap = new Map<string, Feedback>();
+      const localFeedback = getLocalFeedback();
+      const localMap = new Map<string, Feedback>();
+      localFeedback.forEach(loc => {
+        if (loc.id) localMap.set(loc.id, loc);
+      });
+
+      const remoteMapOfCurrentBusiness = new Map<string, Feedback>();
       snap.docs.forEach(d => {
-        remoteMap.set(d.id, { id: d.id, ...d.data() } as Feedback);
+        const item = { id: d.id, ...d.data() } as Feedback;
+        localMap.set(d.id, item);
+        remoteMapOfCurrentBusiness.set(d.id, item);
       });
 
       // Auto-heal local feedback to Firestore
-      const localFeedback = getLocalFeedback();
       localFeedback.forEach(loc => {
-        if (loc.id && !remoteMap.has(loc.id)) {
-          setDoc(doc(db, 'feedback', loc.id), sanitizeForFirestore(loc)).catch(() => {});
-          remoteMap.set(loc.id, loc);
+        if (loc.id && isMatchingBusiness(loc.businessId, businessId) && !remoteMapOfCurrentBusiness.has(loc.id)) {
+          setDoc(doc(db, 'feedback', loc.id), sanitizeForFirestore({
+            ...loc,
+            merchantId: loc.businessId || businessId
+          })).catch(() => {});
+          remoteMapOfCurrentBusiness.set(loc.id, loc);
+          localMap.set(loc.id, loc);
         }
       });
 
-      const merged = Array.from(remoteMap.values());
+      const mergedAll = Array.from(localMap.values());
       try {
-        localStorage.setItem(LOCAL_STORAGE_KEY_FEEDBACK, JSON.stringify(merged));
+        localStorage.setItem(LOCAL_STORAGE_KEY_FEEDBACK, JSON.stringify(mergedAll));
       } catch (e) {}
 
-      callback(filterAndSort(merged));
+      callback(filterAndSort(mergedAll));
     },
     (err) => {
       console.warn('Firestore feedback subscription warning:', err);
@@ -1023,7 +1036,6 @@ export function subscribeFeedback(businessId: string | null, callback: (feedback
 
   return () => {
     window.removeEventListener('reputaflow_data_updated', handleUpdate);
-    clearInterval(poller);
     unFs();
   };
 }
@@ -1057,9 +1069,10 @@ export async function upsertCustomerByPhone(params: {
     ? Number((((existingLocal.avgRating || params.rating) * (currentCount - 1) + params.rating) / currentCount).toFixed(1))
     : params.rating;
 
-  const customerPayload: Customer = sanitizeForFirestore({
+  const customerPayload: any = sanitizeForFirestore({
     id: targetId,
     businessId: params.businessId,
+    merchantId: params.businessId,
     name: params.name || existingLocal?.name || 'Cliente',
     phone: params.phone || existingLocal?.phone || '',
     email: params.email || existingLocal?.email || '',
@@ -1116,41 +1129,45 @@ export function subscribeCustomers(businessId: string | null, callback: (custome
   const handleUpdate = () => emitMerged();
   window.addEventListener('reputaflow_data_updated', handleUpdate);
 
-  const poller = setInterval(async () => {
-    try {
-      const cloudData = await fetchGlobalCloudData();
-      if (cloudData && Array.isArray(cloudData.customers)) {
-        cloudData.customers.forEach(c => saveLocalCustomer(c));
-        emitMerged();
-      }
-    } catch (e) {}
-  }, 3500);
-
   const path = 'customers';
-  const q = collection(db, path);
+  const q = businessId 
+    ? query(collection(db, path), where('businessId', '==', businessId))
+    : collection(db, path);
+
   const unFs = onSnapshot(
     q,
     (snap) => {
-      const remoteMap = new Map<string, Customer>();
+      const localCustomers = getLocalCustomers();
+      const localMap = new Map<string, Customer>();
+      localCustomers.forEach(loc => {
+        if (loc.id) localMap.set(loc.id, loc);
+      });
+
+      const remoteMapOfCurrentBusiness = new Map<string, Customer>();
       snap.docs.forEach(d => {
-        remoteMap.set(d.id, { id: d.id, ...d.data() } as Customer);
+        const item = { id: d.id, ...d.data() } as Customer;
+        localMap.set(d.id, item);
+        remoteMapOfCurrentBusiness.set(d.id, item);
       });
 
       // Auto-heal local customers to Firestore
-      const localCustomers = getLocalCustomers();
       localCustomers.forEach(loc => {
-        if (loc.id && !remoteMap.has(loc.id)) {
-          setDoc(doc(db, 'customers', loc.id), sanitizeForFirestore(loc), { merge: true }).catch(() => {});
-          remoteMap.set(loc.id, loc);
+        if (loc.id && isMatchingBusiness(loc.businessId, businessId) && !remoteMapOfCurrentBusiness.has(loc.id)) {
+          setDoc(doc(db, 'customers', loc.id), sanitizeForFirestore({
+            ...loc,
+            merchantId: loc.businessId || businessId
+          }), { merge: true }).catch(() => {});
+          remoteMapOfCurrentBusiness.set(loc.id, loc);
+          localMap.set(loc.id, loc);
         }
       });
 
-      const merged = Array.from(remoteMap.values());
+      const mergedAll = Array.from(localMap.values());
       try {
-        localStorage.setItem(LOCAL_STORAGE_KEY_CUSTOMERS, JSON.stringify(merged));
+        localStorage.setItem(LOCAL_STORAGE_KEY_CUSTOMERS, JSON.stringify(mergedAll));
       } catch (e) {}
 
-      callback(filterAndSort(merged));
+      callback(filterAndSort(mergedAll));
     },
     (err) => {
       console.warn('Firestore customers subscription warning:', err);
@@ -1160,7 +1177,6 @@ export function subscribeCustomers(businessId: string | null, callback: (custome
 
   return () => {
     window.removeEventListener('reputaflow_data_updated', handleUpdate);
-    clearInterval(poller);
     unFs();
   };
 }
@@ -1204,41 +1220,45 @@ export function subscribeRecoveryCases(businessId: string | null, callback: (cas
   const handleUpdate = () => emitMerged();
   window.addEventListener('reputaflow_data_updated', handleUpdate);
 
-  const poller = setInterval(async () => {
-    try {
-      const cloudData = await fetchGlobalCloudData();
-      if (cloudData && Array.isArray(cloudData.recoveryCases)) {
-        cloudData.recoveryCases.forEach(rc => saveLocalRecoveryCase(rc));
-        emitMerged();
-      }
-    } catch (e) {}
-  }, 3500);
-
   const path = 'recovery_cases';
-  const q = collection(db, path);
+  const q = businessId 
+    ? query(collection(db, path), where('businessId', '==', businessId))
+    : collection(db, path);
+
   const unFs = onSnapshot(
     q,
     (snap) => {
-      const remoteMap = new Map<string, RecoveryCase>();
+      const localCases = getLocalRecoveryCases();
+      const localMap = new Map<string, RecoveryCase>();
+      localCases.forEach(loc => {
+        if (loc.id) localMap.set(loc.id, loc);
+      });
+
+      const remoteMapOfCurrentBusiness = new Map<string, RecoveryCase>();
       snap.docs.forEach(d => {
-        remoteMap.set(d.id, { id: d.id, ...d.data() } as RecoveryCase);
+        const item = { id: d.id, ...d.data() } as RecoveryCase;
+        localMap.set(d.id, item);
+        remoteMapOfCurrentBusiness.set(d.id, item);
       });
 
       // Auto-heal local recovery cases to Firestore
-      const localCases = getLocalRecoveryCases();
       localCases.forEach(loc => {
-        if (loc.id && !remoteMap.has(loc.id)) {
-          setDoc(doc(db, 'recovery_cases', loc.id), sanitizeForFirestore(loc), { merge: true }).catch(() => {});
-          remoteMap.set(loc.id, loc);
+        if (loc.id && isMatchingBusiness(loc.businessId, businessId) && !remoteMapOfCurrentBusiness.has(loc.id)) {
+          setDoc(doc(db, 'recovery_cases', loc.id), sanitizeForFirestore({
+            ...loc,
+            merchantId: loc.businessId || businessId
+          }), { merge: true }).catch(() => {});
+          remoteMapOfCurrentBusiness.set(loc.id, loc);
+          localMap.set(loc.id, loc);
         }
       });
 
-      const merged = Array.from(remoteMap.values());
+      const mergedAll = Array.from(localMap.values());
       try {
-        localStorage.setItem(LOCAL_STORAGE_KEY_RECOVERY, JSON.stringify(merged));
+        localStorage.setItem(LOCAL_STORAGE_KEY_RECOVERY, JSON.stringify(mergedAll));
       } catch (e) {}
 
-      callback(filterAndSort(merged));
+      callback(filterAndSort(mergedAll));
     },
     (err) => {
       console.warn('Firestore recovery cases subscription warning:', err);
@@ -1248,7 +1268,6 @@ export function subscribeRecoveryCases(businessId: string | null, callback: (cas
 
   return () => {
     window.removeEventListener('reputaflow_data_updated', handleUpdate);
-    clearInterval(poller);
     unFs();
   };
 }
@@ -1302,10 +1321,11 @@ export async function updateRecoveryCaseStatus(
 
 export async function addInteraction(data: Omit<Interaction, 'id' | 'createdAt'>): Promise<string> {
   const id = `int_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
-  const payload: Interaction = sanitizeForFirestore({
+  const payload: any = sanitizeForFirestore({
     ...data,
     id,
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    merchantId: data.businessId
   });
 
   saveLocalInteraction(payload);
@@ -1340,28 +1360,31 @@ export function subscribeInteractions(businessId: string | null, callback: (item
   const handleUpdate = () => emitMerged();
   window.addEventListener('reputaflow_data_updated', handleUpdate);
 
-  const poller = setInterval(async () => {
-    try {
-      const cloudData = await fetchGlobalCloudData();
-      if (cloudData && Array.isArray(cloudData.interactions)) {
-        cloudData.interactions.forEach(i => saveLocalInteraction(i));
-        emitMerged();
-      }
-    } catch (e) {}
-  }, 3500);
-
   const path = 'interactions';
-  let q = query(collection(db, path));
-  if (businessId) {
-    q = query(collection(db, path), where('businessId', '==', businessId));
-  }
+  const q = businessId 
+    ? query(collection(db, path), where('businessId', '==', businessId))
+    : collection(db, path);
+
   const unFs = onSnapshot(
     q,
     (snap) => {
-      snap.docs.forEach(d => {
-        saveLocalInteraction({ id: d.id, ...d.data() } as Interaction);
+      const localInteractions = getLocalInteractions();
+      const localMap = new Map<string, Interaction>();
+      localInteractions.forEach(loc => {
+        if (loc.id) localMap.set(loc.id, loc);
       });
-      emitMerged();
+
+      snap.docs.forEach(d => {
+        const item = { id: d.id, ...d.data() } as Interaction;
+        localMap.set(d.id, item);
+      });
+
+      const mergedAll = Array.from(localMap.values());
+      try {
+        localStorage.setItem(LOCAL_STORAGE_KEY_INTERACTIONS, JSON.stringify(mergedAll));
+      } catch (e) {}
+
+      callback(filterAndSort(mergedAll));
     },
     (err) => {
       emitMerged();
@@ -1370,7 +1393,6 @@ export function subscribeInteractions(businessId: string | null, callback: (item
 
   return () => {
     window.removeEventListener('reputaflow_data_updated', handleUpdate);
-    clearInterval(poller);
     unFs();
   };
 }
