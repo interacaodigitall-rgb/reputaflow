@@ -720,10 +720,10 @@ export async function submitReview(
   saveLocalReview(payload);
   notifyDataChanged();
 
-  // 2. If customer info was provided, upsert Customer in CRM locally
+  // 2. If customer info was provided, upsert Customer in CRM
   if (data.customerName || data.customerPhone) {
     try {
-      upsertCustomerByPhone({
+      await upsertCustomerByPhone({
         businessId: data.businessId,
         name: data.customerName || 'Cliente',
         phone: data.customerPhone || '',
@@ -731,42 +731,36 @@ export async function submitReview(
         rating: data.rating,
         status: data.rating >= 4 ? 'active' : 'in_recovery',
         internalNotes: `Avaliação de ${data.rating} estrelas via ${data.channel || 'QR'}`
-      }).catch(() => {});
+      });
     } catch (custErr) {
       console.warn('Customer auto-creation warning in submitReview:', custErr);
     }
   }
 
-  // 3. Background asynchronous sync (non-blocking)
-  Promise.resolve().then(async () => {
-    // Sync to Global Cloud Store
-    pushGlobalCloudData({
-      reviews: getLocalReviews(),
-      customers: getLocalCustomers()
+  // 3. Directly WRITE TO FIRESTORE with graceful timeout
+  try {
+    const fsPromise = setDoc(doc(db, path, targetId), payload);
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Firestore write timeout')), 3000)
+    );
+    await Promise.race([fsPromise, timeoutPromise]);
+  } catch (err) {
+    console.warn('Firestore write warning in submitReview:', err);
+  }
+
+  // 4. Background auxiliary sync
+  pushGlobalCloudData({
+    reviews: getLocalReviews(),
+    customers: getLocalCustomers()
+  }).catch(() => {});
+
+  try {
+    fetch('/api/reviews', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
     }).catch(() => {});
-
-    // Sync to Backend API with 2s timeout
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000);
-      await fetch('/api/reviews', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-    } catch (apiErr) {}
-
-    // Upsert to Firestore with 2s timeout
-    try {
-      const writePromise = setDoc(doc(db, path, targetId), payload);
-      const timeout = new Promise<void>((_, reject) =>
-        setTimeout(() => reject(new Error('timeout')), 2000)
-      );
-      await Promise.race([writePromise, timeout]);
-    } catch (err) {}
-  });
+  } catch {}
 
   return { reviewId: targetId };
 }
@@ -787,7 +781,7 @@ export async function submitFeedbackAndRecovery(params: {
   const caseId = `rec_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
   const custId = `cust_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
 
-  // 1. Create or update Customer locally
+  // 1. Create or update Customer locally & in Firestore
   const customerId = await upsertCustomerByPhone({
     businessId: params.businessId,
     name: params.customerName,
@@ -843,50 +837,41 @@ export async function submitFeedbackAndRecovery(params: {
   });
   saveLocalRecoveryCase(casePayload);
 
-  // Notify listeners immediately
   notifyDataChanged();
 
-  // 4. Background asynchronous sync (non-blocking)
-  Promise.resolve().then(async () => {
-    // Sync to Global Cloud Store
-    pushGlobalCloudData({
-      feedback: getLocalFeedback(),
-      recoveryCases: getLocalRecoveryCases(),
-      customers: getLocalCustomers()
+  // 4. WRITE DIRECTLY TO FIRESTORE with graceful timeout
+  try {
+    const fsPromise = Promise.all([
+      setDoc(doc(db, 'feedback', fbId), feedbackPayload),
+      setDoc(doc(db, 'recovery_cases', caseId), casePayload)
+    ]);
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Firestore write timeout')), 3000)
+    );
+    await Promise.race([fsPromise, timeoutPromise]);
+  } catch (fsErr) {
+    console.warn('Firestore write warning for feedback and recovery case:', fsErr);
+  }
+
+  // 5. Background auxiliary sync
+  pushGlobalCloudData({
+    feedback: getLocalFeedback(),
+    recoveryCases: getLocalRecoveryCases(),
+    customers: getLocalCustomers()
+  }).catch(() => {});
+
+  try {
+    fetch('/api/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(feedbackPayload)
     }).catch(() => {});
-
-    // Sync to Backend API
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000);
-      await Promise.allSettled([
-        fetch('/api/feedback', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(feedbackPayload),
-          signal: controller.signal
-        }),
-        fetch('/api/recovery_cases', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(casePayload),
-          signal: controller.signal
-        })
-      ]);
-      clearTimeout(timeoutId);
-    } catch (apiErr) {}
-
-    // Write to Firestore with fast timeout
-    try {
-      await Promise.race([
-        Promise.all([
-          setDoc(doc(db, 'feedback', fbId), feedbackPayload),
-          setDoc(doc(db, 'recovery_cases', caseId), casePayload)
-        ]),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2500))
-      ]);
-    } catch (fsErr) {}
-  });
+    fetch('/api/recovery_cases', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(casePayload)
+    }).catch(() => {});
+  } catch {}
 
   return { feedbackId: fbId, caseId, customerId: customerId || custId };
 }
@@ -897,6 +882,7 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
     return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   };
 
+  // Immediate dispatch of current local state
   callback(filterAndSort(getLocalReviews()));
 
   const emitMerged = () => {
@@ -916,18 +902,35 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
     } catch (e) {}
   }, 3500);
 
-  // Firestore onSnapshot (broad collection listener with client-side robust business normalization)
+  // Firestore onSnapshot listener with automatic bi-directional healing & sync
   const path = 'reviews';
   const q = collection(db, path);
   const unFs = onSnapshot(
     q,
     (snap) => {
+      const remoteMap = new Map<string, Review>();
       snap.docs.forEach(d => {
-        saveLocalReview({ id: d.id, ...d.data() } as Review);
+        remoteMap.set(d.id, { id: d.id, ...d.data() } as Review);
       });
-      emitMerged();
+
+      // If this device has any local reviews not yet in Firestore, auto-heal and push them to Firestore!
+      const localReviews = getLocalReviews();
+      localReviews.forEach(loc => {
+        if (loc.id && !remoteMap.has(loc.id)) {
+          setDoc(doc(db, 'reviews', loc.id), sanitizeForFirestore(loc)).catch(() => {});
+          remoteMap.set(loc.id, loc);
+        }
+      });
+
+      const merged = Array.from(remoteMap.values());
+      try {
+        localStorage.setItem(LOCAL_STORAGE_KEY_REVIEWS, JSON.stringify(merged));
+      } catch (e) {}
+
+      callback(filterAndSort(merged));
     },
-    () => {
+    (err) => {
+      console.warn('Firestore reviews subscription warning:', err);
       emitMerged();
     }
   );
@@ -969,12 +972,29 @@ export function subscribeFeedback(businessId: string | null, callback: (feedback
   const unFs = onSnapshot(
     q,
     (snap) => {
+      const remoteMap = new Map<string, Feedback>();
       snap.docs.forEach(d => {
-        saveLocalFeedback({ id: d.id, ...d.data() } as Feedback);
+        remoteMap.set(d.id, { id: d.id, ...d.data() } as Feedback);
       });
-      emitMerged();
+
+      // Auto-heal local feedback to Firestore
+      const localFeedback = getLocalFeedback();
+      localFeedback.forEach(loc => {
+        if (loc.id && !remoteMap.has(loc.id)) {
+          setDoc(doc(db, 'feedback', loc.id), sanitizeForFirestore(loc)).catch(() => {});
+          remoteMap.set(loc.id, loc);
+        }
+      });
+
+      const merged = Array.from(remoteMap.values());
+      try {
+        localStorage.setItem(LOCAL_STORAGE_KEY_FEEDBACK, JSON.stringify(merged));
+      } catch (e) {}
+
+      callback(filterAndSort(merged));
     },
-    () => {
+    (err) => {
+      console.warn('Firestore feedback subscription warning:', err);
       emitMerged();
     }
   );
@@ -1089,12 +1109,29 @@ export function subscribeCustomers(businessId: string | null, callback: (custome
   const unFs = onSnapshot(
     q,
     (snap) => {
+      const remoteMap = new Map<string, Customer>();
       snap.docs.forEach(d => {
-        saveLocalCustomer({ id: d.id, ...d.data() } as Customer);
+        remoteMap.set(d.id, { id: d.id, ...d.data() } as Customer);
       });
-      emitMerged();
+
+      // Auto-heal local customers to Firestore
+      const localCustomers = getLocalCustomers();
+      localCustomers.forEach(loc => {
+        if (loc.id && !remoteMap.has(loc.id)) {
+          setDoc(doc(db, 'customers', loc.id), sanitizeForFirestore(loc), { merge: true }).catch(() => {});
+          remoteMap.set(loc.id, loc);
+        }
+      });
+
+      const merged = Array.from(remoteMap.values());
+      try {
+        localStorage.setItem(LOCAL_STORAGE_KEY_CUSTOMERS, JSON.stringify(merged));
+      } catch (e) {}
+
+      callback(filterAndSort(merged));
     },
-    () => {
+    (err) => {
+      console.warn('Firestore customers subscription warning:', err);
       emitMerged();
     }
   );
@@ -1160,12 +1197,29 @@ export function subscribeRecoveryCases(businessId: string | null, callback: (cas
   const unFs = onSnapshot(
     q,
     (snap) => {
+      const remoteMap = new Map<string, RecoveryCase>();
       snap.docs.forEach(d => {
-        saveLocalRecoveryCase({ id: d.id, ...d.data() } as RecoveryCase);
+        remoteMap.set(d.id, { id: d.id, ...d.data() } as RecoveryCase);
       });
-      emitMerged();
+
+      // Auto-heal local recovery cases to Firestore
+      const localCases = getLocalRecoveryCases();
+      localCases.forEach(loc => {
+        if (loc.id && !remoteMap.has(loc.id)) {
+          setDoc(doc(db, 'recovery_cases', loc.id), sanitizeForFirestore(loc), { merge: true }).catch(() => {});
+          remoteMap.set(loc.id, loc);
+        }
+      });
+
+      const merged = Array.from(remoteMap.values());
+      try {
+        localStorage.setItem(LOCAL_STORAGE_KEY_RECOVERY, JSON.stringify(merged));
+      } catch (e) {}
+
+      callback(filterAndSort(merged));
     },
-    () => {
+    (err) => {
+      console.warn('Firestore recovery cases subscription warning:', err);
       emitMerged();
     }
   );

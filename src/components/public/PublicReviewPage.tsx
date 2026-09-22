@@ -98,7 +98,7 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
     setSelectedRating(rating);
 
     if (rating === 5 && business) {
-      // 5-star direct submission & instant redirect
+      setSubmitting(true);
       setIsCompleted(true);
 
       // Determine target redirect URL from business registration
@@ -107,26 +107,32 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
         targetUrl = 'https://' + targetUrl;
       }
 
-      // Record review asynchronously in background with safe error boundary
-      submitReview({
-        businessId: business.id,
-        rating: 5,
-        channel: 'qr'
-      }).catch((err) => {
-        console.warn('Review submission background log:', err);
-      });
+      // Record review and AWAIT Firestore write before navigation!
+      try {
+        await submitReview({
+          businessId: business.id,
+          rating: 5,
+          channel: 'qr'
+        });
+      } catch (err) {
+        console.warn('Review submission error:', err);
+      } finally {
+        setSubmitting(false);
+      }
 
-      // If business has a registered review URL, send user directly to it immediately
+      // If business has a registered review URL, redirect to Google Review after write is committed
       if (targetUrl) {
-        try {
-          window.location.href = targetUrl;
-        } catch {
+        setTimeout(() => {
           try {
-            window.open(targetUrl, '_blank');
-          } catch (err2) {
-            console.error('Redirection blocked by browser:', err2);
+            window.location.href = targetUrl;
+          } catch {
+            try {
+              window.open(targetUrl, '_blank');
+            } catch (err2) {
+              console.error('Redirection blocked by browser:', err2);
+            }
           }
-        }
+        }, 350);
       }
     }
   };
