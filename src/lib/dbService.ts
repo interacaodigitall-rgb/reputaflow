@@ -916,12 +916,9 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
     } catch (e) {}
   }, 3500);
 
-  // Firestore onSnapshot
+  // Firestore onSnapshot (broad collection listener with client-side robust business normalization)
   const path = 'reviews';
-  let q = query(collection(db, path));
-  if (businessId) {
-    q = query(collection(db, path), where('businessId', '==', businessId));
-  }
+  const q = collection(db, path);
   const unFs = onSnapshot(
     q,
     (snap) => {
@@ -968,10 +965,7 @@ export function subscribeFeedback(businessId: string | null, callback: (feedback
   }, 3500);
 
   const path = 'feedback';
-  let q = query(collection(db, path));
-  if (businessId) {
-    q = query(collection(db, path), where('businessId', '==', businessId));
-  }
+  const q = collection(db, path);
   const unFs = onSnapshot(
     q,
     (snap) => {
@@ -1091,10 +1085,7 @@ export function subscribeCustomers(businessId: string | null, callback: (custome
   }, 3500);
 
   const path = 'customers';
-  let q = query(collection(db, path));
-  if (businessId) {
-    q = query(collection(db, path), where('businessId', '==', businessId));
-  }
+  const q = collection(db, path);
   const unFs = onSnapshot(
     q,
     (snap) => {
@@ -1165,10 +1156,7 @@ export function subscribeRecoveryCases(businessId: string | null, callback: (cas
   }, 3500);
 
   const path = 'recovery_cases';
-  let q = query(collection(db, path));
-  if (businessId) {
-    q = query(collection(db, path), where('businessId', '==', businessId));
-  }
+  const q = collection(db, path);
   const unFs = onSnapshot(
     q,
     (snap) => {

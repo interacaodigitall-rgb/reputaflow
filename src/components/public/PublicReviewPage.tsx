@@ -41,6 +41,11 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [logoError, setLogoError] = useState(false);
 
+  // Reset logo error whenever the active business changes
+  useEffect(() => {
+    setLogoError(false);
+  }, [business?.id, business?.logoUrl]);
+
   const fetchBusiness = async () => {
     if (businessOverride) {
       setBusiness(businessOverride);
@@ -256,19 +261,22 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
         >
           {/* Business Header & Logo */}
           <div className="px-6 pt-8 pb-4 text-center">
-            {business.logoUrl && !logoError ? (
-              <img
-                src={business.logoUrl}
-                alt={business.name}
-                onError={() => setLogoError(true)}
-                referrerPolicy="no-referrer"
-                className="w-20 h-20 mx-auto rounded-2xl object-cover shadow-md border-2 border-white ring-2 ring-slate-100"
-              />
-            ) : (
-              <div className="w-20 h-20 mx-auto rounded-2xl bg-indigo-600 text-white font-bold text-2xl flex items-center justify-center shadow-md ring-2 ring-indigo-50">
-                {business.name.slice(0, 2).toUpperCase()}
-              </div>
-            )}
+            <div className="w-20 h-20 mx-auto rounded-2xl bg-white shadow-md border-2 border-white ring-2 ring-slate-100 flex items-center justify-center overflow-hidden p-1">
+              {business.logoUrl && !logoError ? (
+                <img
+                  src={business.logoUrl}
+                  alt={business.name}
+                  onError={() => setLogoError(true)}
+                  referrerPolicy="no-referrer"
+                  crossOrigin="anonymous"
+                  className="w-full h-full object-contain rounded-xl"
+                />
+              ) : (
+                <div className="w-full h-full rounded-xl bg-gradient-to-br from-indigo-600 to-indigo-800 text-white font-black text-2xl flex items-center justify-center shadow-inner">
+                  {business.name.slice(0, 2).toUpperCase()}
+                </div>
+              )}
+            </div>
             <h1 className="mt-4 text-xl font-extrabold text-slate-900 tracking-tight">
               {business.name}
             </h1>
