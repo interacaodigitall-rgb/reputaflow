@@ -16,7 +16,13 @@ import {
 } from 'firebase/firestore';
 import { signInAnonymously } from 'firebase/auth';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
-import { REGISTERED_BUSINESSES } from './initialData';
+import {
+  REGISTERED_BUSINESSES,
+  INITIAL_REVIEWS,
+  INITIAL_FEEDBACK,
+  INITIAL_CUSTOMERS,
+  INITIAL_RECOVERY_CASES
+} from './initialData';
 import { fetchGlobalCloudData, pushGlobalCloudData } from './cloudSync';
 import {
   Business,
@@ -114,9 +120,13 @@ export function notifyDataChanged() {
 export function getLocalReviews(): Review[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_KEY_REVIEWS);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) {
+      localStorage.setItem(LOCAL_STORAGE_KEY_REVIEWS, JSON.stringify(INITIAL_REVIEWS));
+      return INITIAL_REVIEWS;
+    }
+    return JSON.parse(raw);
   } catch {
-    return [];
+    return INITIAL_REVIEWS;
   }
 }
 
@@ -140,9 +150,13 @@ export function saveLocalReview(review: Review): void {
 export function getLocalFeedback(): Feedback[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_KEY_FEEDBACK);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) {
+      localStorage.setItem(LOCAL_STORAGE_KEY_FEEDBACK, JSON.stringify(INITIAL_FEEDBACK));
+      return INITIAL_FEEDBACK;
+    }
+    return JSON.parse(raw);
   } catch {
-    return [];
+    return INITIAL_FEEDBACK;
   }
 }
 
@@ -166,9 +180,13 @@ export function saveLocalFeedback(fb: Feedback): void {
 export function getLocalCustomers(): Customer[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_KEY_CUSTOMERS);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) {
+      localStorage.setItem(LOCAL_STORAGE_KEY_CUSTOMERS, JSON.stringify(INITIAL_CUSTOMERS));
+      return INITIAL_CUSTOMERS;
+    }
+    return JSON.parse(raw);
   } catch {
-    return [];
+    return INITIAL_CUSTOMERS;
   }
 }
 
@@ -192,9 +210,13 @@ export function saveLocalCustomer(cust: Customer): void {
 export function getLocalRecoveryCases(): RecoveryCase[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_KEY_RECOVERY);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) {
+      localStorage.setItem(LOCAL_STORAGE_KEY_RECOVERY, JSON.stringify(INITIAL_RECOVERY_CASES));
+      return INITIAL_RECOVERY_CASES;
+    }
+    return JSON.parse(raw);
   } catch {
-    return [];
+    return INITIAL_RECOVERY_CASES;
   }
 }
 

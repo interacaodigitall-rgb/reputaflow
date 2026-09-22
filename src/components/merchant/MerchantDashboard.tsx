@@ -120,21 +120,21 @@ export const MerchantDashboard: React.FC<MerchantDashboardProps> = ({
           <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-stretch sm:items-center gap-2.5 bg-white/5 p-2.5 sm:p-3 rounded-2xl border border-white/10 backdrop-blur w-full md:w-auto">
             <button
               onClick={onOpenQrModal}
-              className="flex items-center justify-center gap-2 py-3 sm:py-2.5 px-4 bg-white text-slate-900 hover:bg-slate-100 font-bold rounded-xl text-xs transition shadow-sm min-h-[44px]"
+              className="w-full sm:w-auto flex items-center justify-center gap-2 py-3 sm:py-2.5 px-4 bg-white text-slate-900 hover:bg-slate-100 font-bold rounded-xl text-xs transition shadow-sm min-h-[44px]"
             >
               <QrCode className="w-4 h-4 text-indigo-600" />
               <span>Gerar QR Code</span>
             </button>
             <button
               onClick={handleCopyLink}
-              className="flex items-center justify-center gap-2 py-3 sm:py-2.5 px-4 bg-white/10 hover:bg-white/20 text-white font-semibold rounded-xl text-xs transition min-h-[44px]"
+              className="w-full sm:w-auto flex items-center justify-center gap-2 py-3 sm:py-2.5 px-4 bg-white/10 hover:bg-white/20 text-white font-semibold rounded-xl text-xs transition min-h-[44px]"
             >
               <Copy className="w-4 h-4" />
               <span>Copiar Link</span>
             </button>
             <button
               onClick={onOpenReviewPreview}
-              className="flex items-center justify-center gap-2 py-3 sm:py-2.5 px-3.5 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 hover:text-white font-semibold rounded-xl text-xs transition min-h-[44px]"
+              className="w-full sm:w-auto flex items-center justify-center gap-2 py-3 sm:py-2.5 px-3.5 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 hover:text-white font-semibold rounded-xl text-xs transition min-h-[44px]"
               title="Testar como cliente"
             >
               <ExternalLink className="w-4 h-4" />
@@ -145,7 +145,7 @@ export const MerchantDashboard: React.FC<MerchantDashboardProps> = ({
       </div>
 
       {/* Primary KPI Metrics Grid (7 cards as specified in Section 6) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 sm:gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3 sm:gap-4">
         {/* 1. Total Reviews */}
         <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs">
           <div className="flex items-center justify-between text-slate-400 mb-2">

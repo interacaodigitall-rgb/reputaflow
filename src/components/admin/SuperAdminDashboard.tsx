@@ -320,7 +320,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
       )}
 
       {/* Global Metrics Cards (Section 7) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 sm:gap-4">
         {/* Total Comerciantes */}
         <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
@@ -384,10 +384,10 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
       </div>
 
       {/* Navigation Subtabs */}
-      <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+      <div className="flex items-center gap-2 border-b border-slate-200 pb-2 overflow-x-auto scrollbar-none max-w-full -mx-1 px-1">
         <button
           onClick={() => setActiveTab('merchants')}
-          className={`py-2 px-4 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+          className={`py-2 px-4 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap min-h-[40px] ${
             activeTab === 'merchants'
               ? 'bg-slate-900 text-white shadow-xs'
               : 'text-slate-600 hover:bg-slate-100'
@@ -399,7 +399,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
 
         <button
           onClick={() => setActiveTab('plans')}
-          className={`py-2 px-4 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+          className={`py-2 px-4 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap min-h-[40px] ${
             activeTab === 'plans'
               ? 'bg-slate-900 text-white shadow-xs'
               : 'text-slate-600 hover:bg-slate-100'
@@ -411,7 +411,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
 
         <button
           onClick={() => setActiveTab('settings')}
-          className={`py-2 px-4 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+          className={`py-2 px-4 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap min-h-[40px] ${
             activeTab === 'settings'
               ? 'bg-slate-900 text-white shadow-xs'
               : 'text-slate-600 hover:bg-slate-100'
@@ -439,7 +439,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
           </div>
 
           <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden">
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto max-w-full">
               <table className="w-full text-left text-xs text-slate-600">
                 <thead className="bg-slate-50 uppercase tracking-wider text-[10px] text-slate-400 font-semibold border-b border-slate-100">
                   <tr>

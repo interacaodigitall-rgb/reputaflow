@@ -180,7 +180,7 @@ function MainAppContent() {
   }
 
   return (
-    <div className="min-h-screen flex bg-slate-50/80">
+    <div className="min-h-screen flex bg-slate-50/80 w-full max-w-full overflow-x-hidden">
       {/* Desktop Sidebar */}
       <Sidebar
         activeTab={activeTab}
@@ -194,7 +194,7 @@ function MainAppContent() {
       />
 
       {/* Main Container */}
-      <div className="flex-1 flex flex-col min-w-0 pb-28 lg:pb-8">
+      <div className="flex-1 flex flex-col min-w-0 w-full max-w-full overflow-x-hidden pb-28 lg:pb-8">
         {/* Top Header */}
         <Header
           activeTab={activeTab}
@@ -240,7 +240,7 @@ function MainAppContent() {
         )}
 
         {/* Main Content Area */}
-        <main className="p-4 sm:p-6 max-w-7xl w-full mx-auto flex-1">
+        <main className="p-4 sm:p-6 max-w-7xl w-full mx-auto flex-1 overflow-x-hidden">
           {activeTab === 'dashboard' && (
             selectedBusiness ? (
               <MerchantDashboard
