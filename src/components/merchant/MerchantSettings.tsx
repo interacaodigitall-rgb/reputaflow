@@ -15,11 +15,13 @@ import {
   Save,
   Link,
   Shield,
-  Upload
+  Upload,
+  Database
 } from 'lucide-react';
 import { Business } from '../../types';
 import { updateBusiness, uploadImage } from '../../lib/dbService';
 import { getPublicReviewUrl } from '../../lib/urlHelper';
+import { getSupabaseAnonKey, setSupabaseAnonKey, getSupabaseClient } from '../../lib/supabaseClient';
 
 interface MerchantSettingsProps {
   business: Business;
@@ -50,6 +52,25 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
   const [newPassword, setNewPassword] = useState('');
   const [passwordStatus, setPasswordStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [passwordError, setPasswordError] = useState('');
+
+  // Supabase migration state
+  const [supabaseAnonKeyInput, setSupabaseAnonKeyInput] = useState(getSupabaseAnonKey());
+  const [supabaseStatus, setSupabaseStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [supabaseMsg, setSupabaseMsg] = useState('');
+
+  const handleSaveSupabaseKey = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSupabaseAnonKey(supabaseAnonKeyInput);
+    const client = getSupabaseClient();
+    if (client) {
+      setSupabaseStatus('success');
+      setSupabaseMsg('Supabase conectado com sucesso (Projeto: ltpxwagdnrtuulzhfdjk)!');
+    } else {
+      setSupabaseStatus('error');
+      setSupabaseMsg('Chave Anon Inválida.');
+    }
+    setTimeout(() => setSupabaseStatus('idle'), 4000);
+  };
 
   const publicReviewUrl = getPublicReviewUrl(slug || business.slug);
 
@@ -422,6 +443,51 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
               >
                 {passwordStatus === 'loading' ? 'A atualizar...' : 'Alterar Senha'}
               </button>
+            </div>
+          </form>
+        </div>
+
+        {/* Section: Supabase Migration */}
+        <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs space-y-4">
+          <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+            <Database className="w-4 h-4 text-emerald-600" />
+            <span>Migração Supabase (Imagens & Database)</span>
+          </h2>
+          <p className="text-xs text-slate-500">
+            Projeto ID: <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono font-semibold text-emerald-700">ltpxwagdnrtuulzhfdjk</code>. Insira a sua chave Anon Key do Supabase para ativar o upload direto de imagens para o Supabase Storage.
+          </p>
+
+          <form onSubmit={handleSaveSupabaseKey} className="space-y-3">
+            {supabaseStatus === 'success' && (
+              <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-xl text-xs font-semibold flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 text-emerald-600" />
+                <span>{supabaseMsg}</span>
+              </div>
+            )}
+            {supabaseStatus === 'error' && (
+              <div className="p-3 bg-rose-50 border border-rose-100 text-rose-800 rounded-xl text-xs font-semibold flex items-center gap-2">
+                <Shield className="w-4 h-4 text-rose-600" />
+                <span>{supabaseMsg}</span>
+              </div>
+            )}
+
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="text"
+                placeholder="Insira a sua Supabase Anon Key (eyJ...)"
+                value={supabaseAnonKeyInput}
+                onChange={(e) => setSupabaseAnonKeyInput(e.target.value)}
+                className="flex-1 text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 font-mono outline-none"
+              />
+              <button
+                type="submit"
+                className="py-2.5 px-5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs transition whitespace-nowrap"
+              >
+                Conectar Supabase
+              </button>
+            </div>
+            <div className="text-[11px] text-slate-400">
+              Certifique-se de criar um bucket público chamado <code className="text-slate-600 font-mono">uploads</code> no seu painel do Supabase Storage.
             </div>
           </form>
         </div>

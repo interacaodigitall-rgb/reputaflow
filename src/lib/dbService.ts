@@ -17,6 +17,7 @@ import {
   INITIAL_CUSTOMERS,
   INITIAL_RECOVERY_CASES
 } from './initialData';
+import { uploadToSupabaseStorage, getSupabaseClient } from './supabaseClient';
 
 // ==========================================
 // CENTRALIZED NO-CACHE HTTP CLIENT
@@ -36,9 +37,20 @@ async function apiFetch(endpoint: string, options: RequestInit = {}): Promise<Re
 }
 
 // ==========================================
-// BULLETPROOF IMAGE UPLOAD SERVICE (WITH BASE64 FALLBACK)
+// BULLETPROOF IMAGE UPLOAD SERVICE (SUPABASE + SERVER/BASE64)
 // ==========================================
 export async function uploadImage(file: File): Promise<string> {
+  // 1. Try Supabase Storage first if configured
+  try {
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      const url = await uploadToSupabaseStorage(file);
+      if (url) return url;
+    }
+  } catch (err) {
+    console.warn('Supabase Storage upload failed, falling back:', err);
+  }
+
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = (e) => {
