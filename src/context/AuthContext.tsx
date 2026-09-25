@@ -78,11 +78,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, []);
 
-  // Listen to businesses from local, server API and Firestore
+  // Listen to businesses from server API
   useEffect(() => {
-    // Initial bootstrap check
-    bootstrapSeedData(currentUser?.uid || 'default-owner');
-
     const unsubscribe = subscribeBusinesses((bizList) => {
       setBusinesses(bizList);
       if (bizList.length > 0) {
@@ -192,10 +189,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       }
 
-      if (cleanEmail === 'reputa@glowfyhub.com' && (password === 'reputa123' || password === 'admin123')) {
+      if (ADMIN_EMAILS.includes(cleanEmail) && (password === 'reputa123' || password === 'admin123')) {
         const mockAdmin: any = {
-          uid: 'super_admin_root',
-          email: 'reputa@glowfyhub.com',
+          uid: 'super_admin_' + cleanEmail.replace(/[^a-z0-9]/g, ''),
+          email: cleanEmail,
           displayName: 'Super Administrador',
           emailVerified: true
         };
