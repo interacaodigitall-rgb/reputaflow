@@ -88,6 +88,43 @@ export async function upsertBusinessSql(data: any) {
   }
 }
 
+export async function updateBusinessSql(id: string, updates: any) {
+  try {
+    const fieldsToUpdate: Record<string, any> = {
+      updatedAt: new Date()
+    };
+    if (updates.name !== undefined) fieldsToUpdate.name = updates.name;
+    if (updates.slug !== undefined) {
+      fieldsToUpdate.slug = updates.slug
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9-]/g, '-')
+        .replace(/-+/g, '-');
+    }
+    if (updates.category !== undefined) fieldsToUpdate.category = updates.category;
+    if (updates.logoUrl !== undefined) fieldsToUpdate.logoUrl = updates.logoUrl;
+    if (updates.phone !== undefined) fieldsToUpdate.phone = updates.phone;
+    if (updates.email !== undefined) fieldsToUpdate.email = updates.email;
+    if (updates.address !== undefined) fieldsToUpdate.address = updates.address;
+    if (updates.googleReviewUrl !== undefined) fieldsToUpdate.googleReviewUrl = updates.googleReviewUrl;
+    if (updates.status !== undefined) fieldsToUpdate.status = updates.status;
+    if (updates.planId !== undefined) fieldsToUpdate.planId = updates.planId;
+    if (updates.currency !== undefined) fieldsToUpdate.currency = updates.currency;
+    if (updates.password !== undefined) fieldsToUpdate.password = updates.password;
+
+    const result = await db
+      .update(businesses)
+      .set(fieldsToUpdate)
+      .where(eq(businesses.id, id))
+      .returning();
+
+    return result[0] || null;
+  } catch (error) {
+    console.error('Database query failed in updateBusinessSql:', error);
+    throw new Error('Database operation failed', { cause: error });
+  }
+}
+
 export async function deleteBusinessSql(id: string) {
   try {
     const result = await db.delete(businesses).where(eq(businesses.id, id)).returning();

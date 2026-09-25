@@ -8,6 +8,7 @@ import {
   getBusinessByIdSql,
   getBusinessBySlugSql,
   upsertBusinessSql,
+  updateBusinessSql,
   deleteBusinessSql
 } from './src/db/businesses.ts';
 import { getReviewsSql, createReviewSql } from './src/db/reviews.ts';
@@ -166,7 +167,10 @@ app.put('/api/businesses/:id', async (req, res) => {
   const updates = req.body;
 
   try {
-    const updated = await upsertBusinessSql({ ...updates, id });
+    const updated = await updateBusinessSql(id, updates);
+    if (!updated) {
+      return res.status(404).json({ error: 'Estabelecimento não encontrado' });
+    }
     res.json(updated);
   } catch (error: any) {
     console.error('Failed to update business:', error);

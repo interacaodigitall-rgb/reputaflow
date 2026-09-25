@@ -19,6 +19,23 @@ import {
 } from './initialData';
 
 // ==========================================
+// CENTRALIZED NO-CACHE HTTP CLIENT
+// ==========================================
+async function apiFetch(endpoint: string, options: RequestInit = {}): Promise<Response> {
+  const url = endpoint.includes('?') ? `${endpoint}&_t=${Date.now()}` : `${endpoint}?_t=${Date.now()}`;
+  return fetch(url, {
+    ...options,
+    cache: 'no-store',
+    headers: {
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+      ...(options.headers || {})
+    }
+  });
+}
+
+// ==========================================
 // REAL IMAGE UPLOAD SERVICE
 // ==========================================
 export async function uploadImage(file: File): Promise<string> {
@@ -27,7 +44,7 @@ export async function uploadImage(file: File): Promise<string> {
     reader.onload = async () => {
       try {
         const base64Data = reader.result as string;
-        const res = await fetch('/api/upload', {
+        const res = await apiFetch('/api/upload', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -120,7 +137,7 @@ export function getLocalBusinesses(): Business[] {
 
 export async function getAllBusinesses(): Promise<Business[]> {
   try {
-    const res = await fetch('/api/businesses');
+    const res = await apiFetch('/api/businesses');
     if (res.ok) {
       const data: Business[] = await res.json();
       if (Array.isArray(data) && data.length > 0) {
@@ -141,7 +158,7 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
 
   // 1. Fetch from server API
   try {
-    const res = await fetch(`/api/businesses/${encodeURIComponent(cleanSlug)}`);
+    const res = await apiFetch(`/api/businesses/${encodeURIComponent(cleanSlug)}`);
     if (res.ok) {
       const biz: Business = await res.json();
       if (biz) {
@@ -175,7 +192,7 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
 export async function getBusinessById(id: string): Promise<Business | null> {
   if (!id) return null;
   try {
-    const res = await fetch(`/api/businesses/${encodeURIComponent(id)}`);
+    const res = await apiFetch(`/api/businesses/${encodeURIComponent(id)}`);
     if (res.ok) {
       const biz: Business = await res.json();
       return biz;
@@ -194,7 +211,7 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
 
   const fetchLatest = async () => {
     try {
-      const res = await fetch('/api/businesses');
+      const res = await apiFetch('/api/businesses');
       if (res.ok) {
         const data: Business[] = await res.json();
         if (Array.isArray(data)) {
@@ -206,7 +223,7 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
   };
 
   fetchLatest();
-  const interval = setInterval(fetchLatest, 2500);
+  const interval = setInterval(fetchLatest, 2000);
 
   const handleLiveEvent = () => fetchLatest();
   window.addEventListener('reputaflow_live_sync', handleLiveEvent);
@@ -223,7 +240,7 @@ export async function createBusiness(data: Omit<Business, 'id'>, customId?: stri
   const targetId = customId || `biz_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
   const payload = { ...data, id: targetId };
 
-  const res = await fetch('/api/businesses', {
+  const res = await apiFetch('/api/businesses', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
@@ -238,7 +255,7 @@ export async function createBusiness(data: Omit<Business, 'id'>, customId?: stri
 }
 
 export async function updateBusiness(id: string, data: Partial<Business>): Promise<void> {
-  const res = await fetch(`/api/businesses/${encodeURIComponent(id)}`, {
+  const res = await apiFetch(`/api/businesses/${encodeURIComponent(id)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
@@ -252,7 +269,7 @@ export async function updateBusiness(id: string, data: Partial<Business>): Promi
 }
 
 export async function deleteBusiness(id: string): Promise<void> {
-  const res = await fetch(`/api/businesses/${encodeURIComponent(id)}`, {
+  const res = await apiFetch(`/api/businesses/${encodeURIComponent(id)}`, {
     method: 'DELETE'
   });
 
@@ -277,7 +294,7 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
   const fetchLatest = async () => {
     try {
       const url = businessId ? `/api/reviews?businessId=${encodeURIComponent(businessId)}` : '/api/reviews';
-      const res = await fetch(url);
+      const res = await apiFetch(url);
       if (res.ok) {
         const data: Review[] = await res.json();
         if (Array.isArray(data)) {
@@ -289,7 +306,7 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
   };
 
   fetchLatest();
-  const interval = setInterval(fetchLatest, 2500);
+  const interval = setInterval(fetchLatest, 2000);
 
   const handleLiveEvent = () => fetchLatest();
   window.addEventListener('reputaflow_live_sync', handleLiveEvent);
@@ -314,7 +331,7 @@ export async function submitReview(
   };
 
   // 1. Post to Server PostgreSQL
-  const res = await fetch('/api/reviews', {
+  const res = await apiFetch('/api/reviews', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
@@ -355,7 +372,7 @@ export function subscribeFeedback(businessId: string | null, callback: (feedback
   const fetchLatest = async () => {
     try {
       const url = businessId ? `/api/feedback?businessId=${encodeURIComponent(businessId)}` : '/api/feedback';
-      const res = await fetch(url);
+      const res = await apiFetch(url);
       if (res.ok) {
         const data: Feedback[] = await res.json();
         if (Array.isArray(data)) {
@@ -367,7 +384,7 @@ export function subscribeFeedback(businessId: string | null, callback: (feedback
   };
 
   fetchLatest();
-  const interval = setInterval(fetchLatest, 2500);
+  const interval = setInterval(fetchLatest, 2000);
 
   const handleLiveEvent = () => fetchLatest();
   window.addEventListener('reputaflow_live_sync', handleLiveEvent);
@@ -441,12 +458,12 @@ export async function submitFeedbackAndRecovery(params: {
   };
 
   await Promise.all([
-    fetch('/api/feedback', {
+    apiFetch('/api/feedback', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(fbPayload)
     }),
-    fetch('/api/recovery_cases', {
+    apiFetch('/api/recovery_cases', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(casePayload)
@@ -471,7 +488,7 @@ export function subscribeCustomers(businessId: string | null, callback: (custome
   const fetchLatest = async () => {
     try {
       const url = businessId ? `/api/customers?businessId=${encodeURIComponent(businessId)}` : '/api/customers';
-      const res = await fetch(url);
+      const res = await apiFetch(url);
       if (res.ok) {
         const data: Customer[] = await res.json();
         if (Array.isArray(data)) {
@@ -483,7 +500,7 @@ export function subscribeCustomers(businessId: string | null, callback: (custome
   };
 
   fetchLatest();
-  const interval = setInterval(fetchLatest, 2500);
+  const interval = setInterval(fetchLatest, 2000);
 
   const handleLiveEvent = () => fetchLatest();
   window.addEventListener('reputaflow_live_sync', handleLiveEvent);
@@ -524,7 +541,7 @@ export async function upsertCustomerByPhone(params: {
     updatedAt: now
   };
 
-  const res = await fetch('/api/customers', {
+  const res = await apiFetch('/api/customers', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
@@ -541,7 +558,7 @@ export async function upsertCustomerByPhone(params: {
 }
 
 export async function updateCustomer(id: string, data: Partial<Customer>): Promise<void> {
-  const res = await fetch('/api/customers', {
+  const res = await apiFetch('/api/customers', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...data, id })
@@ -568,7 +585,7 @@ export function subscribeRecoveryCases(businessId: string | null, callback: (cas
   const fetchLatest = async () => {
     try {
       const url = businessId ? `/api/recovery_cases?businessId=${encodeURIComponent(businessId)}` : '/api/recovery_cases';
-      const res = await fetch(url);
+      const res = await apiFetch(url);
       if (res.ok) {
         const data: RecoveryCase[] = await res.json();
         if (Array.isArray(data)) {
@@ -580,7 +597,7 @@ export function subscribeRecoveryCases(businessId: string | null, callback: (cas
   };
 
   fetchLatest();
-  const interval = setInterval(fetchLatest, 2500);
+  const interval = setInterval(fetchLatest, 2000);
 
   const handleLiveEvent = () => fetchLatest();
   window.addEventListener('reputaflow_live_sync', handleLiveEvent);
@@ -599,7 +616,7 @@ export async function updateRecoveryCaseStatus(
   notes?: string,
   customerId?: string
 ): Promise<void> {
-  const res = await fetch(`/api/recovery_cases/${encodeURIComponent(caseId)}`, {
+  const res = await apiFetch(`/api/recovery_cases/${encodeURIComponent(caseId)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -636,7 +653,7 @@ export function subscribeInteractions(businessId: string | null, callback: (inte
   const fetchLatest = async () => {
     try {
       const url = businessId ? `/api/interactions?businessId=${encodeURIComponent(businessId)}` : '/api/interactions';
-      const res = await fetch(url);
+      const res = await apiFetch(url);
       if (res.ok) {
         const data: Interaction[] = await res.json();
         if (Array.isArray(data)) {
@@ -648,7 +665,7 @@ export function subscribeInteractions(businessId: string | null, callback: (inte
   };
 
   fetchLatest();
-  const interval = setInterval(fetchLatest, 2500);
+  const interval = setInterval(fetchLatest, 2000);
 
   const handleLiveEvent = () => fetchLatest();
   window.addEventListener('reputaflow_live_sync', handleLiveEvent);
@@ -673,7 +690,7 @@ export async function addInteraction(
     createdAt: now
   };
 
-  const res = await fetch('/api/interactions', {
+  const res = await apiFetch('/api/interactions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
@@ -692,7 +709,7 @@ export async function addInteraction(
 // ==========================================
 export async function getPlans(): Promise<Plan[]> {
   try {
-    const res = await fetch('/api/plans');
+    const res = await apiFetch('/api/plans');
     if (res.ok) {
       const plans = await res.json();
       return plans;
@@ -703,7 +720,7 @@ export async function getPlans(): Promise<Plan[]> {
 
 export async function getPlatformSettings(): Promise<PlatformSettings | null> {
   try {
-    const res = await fetch('/api/settings');
+    const res = await apiFetch('/api/settings');
     if (res.ok) {
       const s = await res.json();
       return s;
@@ -713,7 +730,7 @@ export async function getPlatformSettings(): Promise<PlatformSettings | null> {
 }
 
 export async function updatePlatformSettings(settings: Partial<PlatformSettings>): Promise<void> {
-  await fetch('/api/settings', {
+  await apiFetch('/api/settings', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(settings)
