@@ -28,14 +28,9 @@ import {
   getDocFromServer
 } from 'firebase/firestore';
 
-export const firebaseConfig = {
-  apiKey: "AIzaSyDZkLq2QM9hNoRwabJB5tyEhurmhx9g0II",
-  authDomain: "feedback-d117a.firebaseapp.com",
-  projectId: "feedback-d117a",
-  storageBucket: "feedback-d117a.firebasestorage.app",
-  messagingSenderId: "579804393665",
-  appId: "1:579804393665:web:9c017eef798d828ffea440"
-};
+import firebaseConfig from '../../firebase-applet-config.json';
+
+export { firebaseConfig };
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);

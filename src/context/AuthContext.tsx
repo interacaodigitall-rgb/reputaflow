@@ -30,7 +30,7 @@ interface AuthContextType {
   isSuperAdmin: boolean;
 }
 
-const ADMIN_EMAILS = ['interacaodigitall@gmail.com', 'reputa@glowfyhub.com'];
+const ADMIN_EMAILS = ['interacaodigitall@gmail.com', 'reputa@glowfyhub.com', 'eunawebse@gmail.com'];
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -46,6 +46,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
       if (user) {
+        // Sync user profile to Cloud SQL database
+        if (user.email) {
+          fetch('/api/users/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              uid: user.uid,
+              email: user.email,
+              displayName: user.displayName || user.email.split('@')[0]
+            })
+          }).catch(() => {});
+        }
+
         // STRICT: Only explicitly listed administrator emails can ever obtain super_admin role
         const isAdmin = Boolean(
           user.email && ADMIN_EMAILS.map(e => e.toLowerCase()).includes(user.email.toLowerCase().trim())
