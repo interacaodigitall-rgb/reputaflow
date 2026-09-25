@@ -19,8 +19,8 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
   // Synchronous initial probe to avoid blank screen/hanging on QR scan
   const initialLocalMatch = 
     businessOverride ||
-    getLocalBusinesses().find((b) => b.slug === slug || b.id === slug) ||
-    REGISTERED_BUSINESSES.find((b) => b.slug === slug || b.id === slug) ||
+    getLocalBusinesses().find((b: Business) => b.slug === slug || b.id === slug) ||
+    REGISTERED_BUSINESSES.find((b: Business) => b.slug === slug || b.id === slug) ||
     null;
 
   const [business, setBusiness] = useState<Business | null>(initialLocalMatch);

@@ -18,7 +18,7 @@ import {
   Upload
 } from 'lucide-react';
 import { Business } from '../../types';
-import { updateBusiness } from '../../lib/dbService';
+import { updateBusiness, uploadImage } from '../../lib/dbService';
 import { getPublicReviewUrl } from '../../lib/urlHelper';
 
 interface MerchantSettingsProps {
@@ -53,20 +53,21 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
 
   const publicReviewUrl = getPublicReviewUrl(slug || business.slug);
 
-  const handleLogoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+
+  const handleLogoFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 800 * 1024) {
-        alert('A imagem é muito grande (máx 800KB). O Firestore tem um limite de tamanho. Por favor, redimensione ou use uma URL externa.');
-        return;
+      setUploadingLogo(true);
+      try {
+        const url = await uploadImage(file);
+        setLogoUrl(url);
+      } catch (err: any) {
+        console.error('Logo upload error:', err);
+        alert('Erro ao enviar imagem. Verifique a conexão.');
+      } finally {
+        setUploadingLogo(false);
       }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        if (typeof reader.result === 'string') {
-          setLogoUrl(reader.result);
-        }
-      };
-      reader.readAsDataURL(file);
     }
   };
 

@@ -1,5 +1,7 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
+import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import {
   getAllBusinessesSql,
@@ -20,21 +22,83 @@ import { getInteractionsSql, createInteractionSql } from './src/db/interactions.
 import { getPlansSql, getPlatformSettingsSql } from './src/db/plans.ts';
 import { getOrCreateUser } from './src/db/users.ts';
 import { seedCloudSqlDatabase } from './src/db/seedSql.ts';
+import { db } from './src/db/index.ts';
+import { platformSettings } from './src/db/schema.ts';
+import { eq } from 'drizzle-orm';
 
 const app = express();
 const PORT = 3000;
 
-app.use(express.json());
+// High body limit for image uploads
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Enable CORS for external access from Vercel and mobile clients
+// Ensure public/uploads directory exists
+const UPLOADS_DIR = path.join(process.cwd(), 'public', 'uploads');
+if (!fs.existsSync(UPLOADS_DIR)) {
+  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+}
+
+// Serve uploaded media statically
+app.use('/uploads', express.static(UPLOADS_DIR));
+
+// Enable CORS for external access from Vercel, mobile clients, and cross-origin previews
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
   next();
+});
+
+// ==========================================
+// REAL IMAGE UPLOAD ENDPOINT
+// ==========================================
+app.post('/api/upload', (req, res) => {
+  try {
+    const { image, filename } = req.body;
+    if (!image) {
+      return res.status(400).json({ error: 'Nenhuma imagem fornecida' });
+    }
+
+    // Handle base64 data URL
+    let base64Data = image;
+    let extension = 'png';
+
+    if (image.startsWith('data:')) {
+      const matches = image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+      if (matches && matches.length === 3) {
+        const mimeType = matches[1];
+        base64Data = matches[2];
+        if (mimeType.includes('jpeg') || mimeType.includes('jpg')) extension = 'jpg';
+        else if (mimeType.includes('png')) extension = 'png';
+        else if (mimeType.includes('webp')) extension = 'webp';
+        else if (mimeType.includes('svg')) extension = 'svg';
+      }
+    }
+
+    const uniqueId = crypto.randomBytes(8).toString('hex');
+    const safeName = filename
+      ? `${Date.now()}_${filename.replace(/[^a-zA-Z0-9.-]/g, '_')}`
+      : `img_${Date.now()}_${uniqueId}.${extension}`;
+
+    const filePath = path.join(UPLOADS_DIR, safeName);
+    const buffer = Buffer.from(base64Data, 'base64');
+    fs.writeFileSync(filePath, buffer);
+
+    const publicUrl = `/uploads/${safeName}`;
+    return res.json({
+      success: true,
+      url: publicUrl,
+      filename: safeName,
+      size: buffer.length
+    });
+  } catch (error: any) {
+    console.error('Error uploading image:', error);
+    return res.status(500).json({ error: 'Erro ao processar e salvar a imagem no servidor' });
+  }
 });
 
 // ==========================================
@@ -274,6 +338,31 @@ app.get('/api/settings', async (req, res) => {
   }
 });
 
+// PUT /api/settings
+app.put('/api/settings', async (req, res) => {
+  try {
+    const body = req.body;
+    const existing = await getPlatformSettingsSql();
+    if (existing) {
+      const updated = await db
+        .update(platformSettings)
+        .set(body)
+        .where(eq(platformSettings.id, existing.id))
+        .returning();
+      return res.json(updated[0]);
+    } else {
+      const created = await db
+        .insert(platformSettings)
+        .values({ id: 'global', ...body })
+        .returning();
+      return res.json(created[0]);
+    }
+  } catch (error: any) {
+    console.error('Failed to update settings:', error);
+    res.status(500).json({ error: error.message || 'Failed to update settings' });
+  }
+});
+
 // POST /api/users/sync
 app.post('/api/users/sync', async (req, res) => {
   const { uid, email, displayName } = req.body;
@@ -294,7 +383,7 @@ app.post('/api/users/sync', async (req, res) => {
 // ==========================================
 
 async function startServer() {
-  // Attempt non-blocking seed on boot
+  // Non-blocking seed on boot
   seedCloudSqlDatabase().catch((err) => {
     console.warn('Initial seed error:', err);
   });
@@ -314,7 +403,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`ReputaFlow Server running on http://0.0.0.0:${PORT} with PostgreSQL Cloud SQL`);
+    console.log(`ReputaFlow Server running on http://0.0.0.0:${PORT} with PostgreSQL Cloud SQL & Uploads`);
   });
 }
 
