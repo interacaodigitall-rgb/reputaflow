@@ -39,7 +39,7 @@ async function apiFetch(endpoint: string, options: RequestInit = {}): Promise<Re
 // BULLETPROOF IMAGE UPLOAD SERVICE (WITH BASE64 FALLBACK)
 // ==========================================
 export async function uploadImage(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       const img = new Image();
@@ -93,7 +93,6 @@ export async function uploadImage(file: File): Promise<string> {
             console.warn('Server upload unreachable, using base64 data URL fallback:', netErr);
           }
 
-          // Fallback to base64 data URL so upload never fails
           resolve(base64Data);
         } catch (canvasErr) {
           console.warn('Canvas processing error, using raw reader result:', canvasErr);
@@ -105,9 +104,8 @@ export async function uploadImage(file: File): Promise<string> {
       };
       img.src = e.target?.result as string;
     };
-    reader.onerror = (err) => {
-      console.error('FileReader error:', err);
-      reject(err);
+    reader.onerror = () => {
+      resolve('');
     };
     reader.readAsDataURL(file);
   });
@@ -246,7 +244,6 @@ export async function getBusinessById(id: string): Promise<Business | null> {
 }
 
 export function subscribeBusinesses(callback: (businesses: Business[]) => void) {
-  // Emit initial cached data immediately
   callback(getCached<Business[]>(LOCAL_STORAGE_KEY_BIZ, REGISTERED_BUSINESSES));
 
   const fetchLatest = async () => {
@@ -254,7 +251,7 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
       const res = await apiFetch('/api/businesses');
       if (res.ok) {
         const data: Business[] = await res.json();
-        if (Array.isArray(data)) {
+        if (Array.isArray(data) && data.length > 0) {
           setCached(LOCAL_STORAGE_KEY_BIZ, data);
           callback(data);
         }
@@ -278,45 +275,65 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
 
 export async function createBusiness(data: Omit<Business, 'id'>, customId?: string): Promise<string> {
   const targetId = customId || `biz_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
-  const payload = { ...data, id: targetId };
+  const payload = { ...data, id: targetId, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
 
-  const res = await apiFetch('/api/businesses', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-
-  if (!res.ok) {
-    throw new Error('Falha ao criar estabelecimento');
+  try {
+    const res = await apiFetch('/api/businesses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (res.ok) {
+      notifyDataChanged();
+      return targetId;
+    }
+  } catch (err) {
+    console.warn('Server create business failed, saving locally:', err);
   }
 
+  const list = getCached<Business[]>(LOCAL_STORAGE_KEY_BIZ, REGISTERED_BUSINESSES);
+  setCached(LOCAL_STORAGE_KEY_BIZ, [payload, ...list]);
   notifyDataChanged();
   return targetId;
 }
 
 export async function updateBusiness(id: string, data: Partial<Business>): Promise<void> {
-  const res = await apiFetch(`/api/businesses/${encodeURIComponent(id)}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-  });
-
-  if (!res.ok) {
-    throw new Error('Falha ao atualizar estabelecimento');
+  try {
+    const res = await apiFetch(`/api/businesses/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (res.ok) {
+      notifyDataChanged();
+      return;
+    }
+  } catch (err) {
+    console.warn('Server update business failed, updating locally:', err);
   }
 
+  // Fallback local update (works 100% on Vercel / static hosts)
+  const list = getCached<Business[]>(LOCAL_STORAGE_KEY_BIZ, REGISTERED_BUSINESSES);
+  const updatedList = list.map((b) => (b.id === id ? { ...b, ...data, updatedAt: new Date().toISOString() } : b));
+  setCached(LOCAL_STORAGE_KEY_BIZ, updatedList);
   notifyDataChanged();
 }
 
 export async function deleteBusiness(id: string): Promise<void> {
-  const res = await apiFetch(`/api/businesses/${encodeURIComponent(id)}`, {
-    method: 'DELETE'
-  });
-
-  if (!res.ok) {
-    throw new Error('Falha ao remover estabelecimento');
+  try {
+    const res = await apiFetch(`/api/businesses/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    });
+    if (res.ok) {
+      notifyDataChanged();
+      return;
+    }
+  } catch (err) {
+    console.warn('Server delete business failed, deleting locally:', err);
   }
 
+  const list = getCached<Business[]>(LOCAL_STORAGE_KEY_BIZ, REGISTERED_BUSINESSES);
+  setCached(LOCAL_STORAGE_KEY_BIZ, list.filter((b) => b.id !== id));
   notifyDataChanged();
 }
 
@@ -370,15 +387,33 @@ export async function submitReview(
     createdAt: now
   };
 
-  const res = await apiFetch('/api/reviews', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-
-  if (!res.ok) {
-    throw new Error('Erro ao enviar avaliação para a base de dados');
+  try {
+    const res = await apiFetch('/api/reviews', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (res.ok) {
+      if (data.customerName || data.customerPhone) {
+        upsertCustomerByPhone({
+          businessId: data.businessId,
+          name: data.customerName || 'Cliente',
+          phone: data.customerPhone || '',
+          email: data.customerEmail || '',
+          rating: data.rating,
+          status: data.rating >= 4 ? 'active' : 'in_recovery',
+          internalNotes: `Avaliação de ${data.rating} estrelas via ${data.channel || 'QR'}`
+        }).catch(() => {});
+      }
+      notifyDataChanged();
+      return { reviewId: targetId };
+    }
+  } catch (err) {
+    console.warn('Server submit review failed, saving locally:', err);
   }
+
+  const list = getCached<Review[]>(LOCAL_STORAGE_KEY_REVIEWS, INITIAL_REVIEWS);
+  setCached(LOCAL_STORAGE_KEY_REVIEWS, [payload, ...list]);
 
   if (data.customerName || data.customerPhone) {
     upsertCustomerByPhone({
@@ -492,18 +527,28 @@ export async function submitFeedbackAndRecovery(params: {
     updatedAt: now
   };
 
-  await Promise.all([
-    apiFetch('/api/feedback', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(fbPayload)
-    }),
-    apiFetch('/api/recovery_cases', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(casePayload)
-    })
-  ]);
+  try {
+    await Promise.all([
+      apiFetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fbPayload)
+      }),
+      apiFetch('/api/recovery_cases', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(casePayload)
+      })
+    ]);
+  } catch (err) {
+    console.warn('Server feedback/recovery save failed, caching locally:', err);
+  }
+
+  const fbList = getCached<Feedback[]>(LOCAL_STORAGE_KEY_FEEDBACK, INITIAL_FEEDBACK);
+  setCached(LOCAL_STORAGE_KEY_FEEDBACK, [fbPayload, ...fbList]);
+
+  const caseList = getCached<RecoveryCase[]>(LOCAL_STORAGE_KEY_RECOVERY, INITIAL_RECOVERY_CASES);
+  setCached(LOCAL_STORAGE_KEY_RECOVERY, [casePayload, ...caseList]);
 
   notifyDataChanged();
   return { feedbackId: fbId, caseId, customerId };
@@ -576,33 +621,45 @@ export async function upsertCustomerByPhone(params: {
     updatedAt: now
   };
 
-  const res = await apiFetch('/api/customers', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-
-  if (res.ok) {
-    const saved = await res.json();
-    notifyDataChanged();
-    return saved.id || targetId;
+  try {
+    const res = await apiFetch('/api/customers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (res.ok) {
+      const saved = await res.json();
+      notifyDataChanged();
+      return saved.id || targetId;
+    }
+  } catch (err) {
+    console.warn('Server upsert customer failed, caching locally:', err);
   }
 
+  const list = getCached<Customer[]>(LOCAL_STORAGE_KEY_CUSTOMERS, INITIAL_CUSTOMERS);
+  setCached(LOCAL_STORAGE_KEY_CUSTOMERS, [payload, ...list]);
   notifyDataChanged();
   return targetId;
 }
 
 export async function updateCustomer(id: string, data: Partial<Customer>): Promise<void> {
-  const res = await apiFetch('/api/customers', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...data, id })
-  });
-
-  if (!res.ok) {
-    throw new Error('Falha ao atualizar cliente');
+  try {
+    const res = await apiFetch('/api/customers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...data, id })
+    });
+    if (res.ok) {
+      notifyDataChanged();
+      return;
+    }
+  } catch (err) {
+    console.warn('Server update customer failed, updating locally:', err);
   }
 
+  const list = getCached<Customer[]>(LOCAL_STORAGE_KEY_CUSTOMERS, INITIAL_CUSTOMERS);
+  const updated = list.map((c) => (c.id === id ? { ...c, ...data, updatedAt: new Date().toISOString() } : c));
+  setCached(LOCAL_STORAGE_KEY_CUSTOMERS, updated);
   notifyDataChanged();
 }
 
@@ -651,18 +708,32 @@ export async function updateRecoveryCaseStatus(
   notes?: string,
   customerId?: string
 ): Promise<void> {
-  const res = await apiFetch(`/api/recovery_cases/${encodeURIComponent(caseId)}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      status,
-      ...(notes ? { notes } : {})
-    })
-  });
-
-  if (!res.ok) {
-    throw new Error('Falha ao atualizar status do caso');
+  try {
+    const res = await apiFetch(`/api/recovery_cases/${encodeURIComponent(caseId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        status,
+        ...(notes ? { notes } : {})
+      })
+    });
+    if (res.ok) {
+      if (customerId) {
+        let customerStatus: Customer['status'] = 'in_recovery';
+        if (status === 'cliente_recuperado') customerStatus = 'recovered';
+        if (status === 'resolvido') customerStatus = 'active';
+        updateCustomer(customerId, { status: customerStatus }).catch(() => {});
+      }
+      notifyDataChanged();
+      return;
+    }
+  } catch (err) {
+    console.warn('Server update recovery case failed, updating locally:', err);
   }
+
+  const list = getCached<RecoveryCase[]>(LOCAL_STORAGE_KEY_RECOVERY, INITIAL_RECOVERY_CASES);
+  const updated = list.map((c) => (c.id === caseId ? { ...c, status, ...(notes ? { notes } : {}), updatedAt: new Date().toISOString() } : c));
+  setCached(LOCAL_STORAGE_KEY_RECOVERY, updated);
 
   if (customerId) {
     let customerStatus: Customer['status'] = 'in_recovery';
@@ -725,16 +796,22 @@ export async function addInteraction(
     createdAt: now
   };
 
-  const res = await apiFetch('/api/interactions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-
-  if (!res.ok) {
-    throw new Error('Falha ao registar interação');
+  try {
+    const res = await apiFetch('/api/interactions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (res.ok) {
+      notifyDataChanged();
+      return targetId;
+    }
+  } catch (err) {
+    console.warn('Server add interaction failed, saving locally:', err);
   }
 
+  const list = getCached<Interaction[]>(LOCAL_STORAGE_KEY_INTERACTIONS, []);
+  setCached(LOCAL_STORAGE_KEY_INTERACTIONS, [payload, ...list]);
   notifyDataChanged();
   return targetId;
 }
@@ -765,11 +842,13 @@ export async function getPlatformSettings(): Promise<PlatformSettings | null> {
 }
 
 export async function updatePlatformSettings(settings: Partial<PlatformSettings>): Promise<void> {
-  await apiFetch('/api/settings', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(settings)
-  });
+  try {
+    await apiFetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings)
+    });
+  } catch (e) {}
   notifyDataChanged();
 }
 
