@@ -223,7 +223,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
       console.error('Error creating business:', err);
       setCreateError(
         err?.message?.includes('permission')
-          ? 'Erro de permissão no Firestore. Verifique se está autenticado como administrador.'
+          ? 'Erro de permissão. Verifique se está autenticado como administrador.'
           : 'Ocorreu um erro ao salvar o estabelecimento. Verifique os dados e tente novamente.'
       );
     } finally {
