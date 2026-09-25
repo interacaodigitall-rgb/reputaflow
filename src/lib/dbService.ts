@@ -41,32 +41,63 @@ async function apiFetch(endpoint: string, options: RequestInit = {}): Promise<Re
 export async function uploadImage(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-        const base64Data = reader.result as string;
-        const res = await apiFetch('/api/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            image: base64Data,
-            filename: file.name
-          })
-        });
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = async () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        const MAX_WIDTH = 800;
+        const MAX_HEIGHT = 800;
 
-        if (!res.ok) {
-          throw new Error('Falha no upload da imagem para o servidor');
-        }
-
-        const data = await res.json();
-        if (data.url) {
-          resolve(data.url);
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height = Math.round((height * MAX_WIDTH) / width);
+            width = MAX_WIDTH;
+          }
         } else {
-          throw new Error('URL da imagem não retornada');
+          if (height > MAX_HEIGHT) {
+            width = Math.round((width * MAX_HEIGHT) / height);
+            height = MAX_HEIGHT;
+          }
         }
-      } catch (err) {
-        console.error('uploadImage error:', err);
-        reject(err);
-      }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+        }
+
+        const base64Data = canvas.toDataURL('image/jpeg', 0.85);
+
+        try {
+          const res = await apiFetch('/api/upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              image: base64Data,
+              filename: file.name
+            })
+          });
+
+          if (!res.ok) {
+            throw new Error('Falha no upload da imagem para o servidor');
+          }
+
+          const data = await res.json();
+          if (data.url) {
+            resolve(data.url);
+          } else {
+            throw new Error('URL da imagem não retornada');
+          }
+        } catch (err) {
+          console.error('uploadImage error:', err);
+          reject(err);
+        }
+      };
+      img.onerror = (err) => reject(err);
+      img.src = e.target?.result as string;
     };
     reader.onerror = (err) => reject(err);
     reader.readAsDataURL(file);
