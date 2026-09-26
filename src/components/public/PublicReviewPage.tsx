@@ -38,6 +38,7 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
 
   const [submitting, setSubmitting] = useState(false);
   const [isCompleted, setIsCompleted] = useState(false);
+  const [isRecoveryOpen, setIsRecoveryOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [logoError, setLogoError] = useState(false);
 
@@ -94,24 +95,27 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
     };
   }, [slug, businessOverride]);
 
-  const handleSelectStar = async (rating: number) => {
+  const handleSelectStar = (rating: number) => {
     setSelectedRating(rating);
+  };
 
-    if (rating === 5 && business) {
+  const handleConfirmRating = async () => {
+    if (!business || selectedRating < 1) return;
+
+    // Regra: 4 e 5 estrelas vão para o Google Reviews
+    if (selectedRating >= 4) {
       setSubmitting(true);
       setIsCompleted(true);
 
-      // Determine target redirect URL from business registration
       let targetUrl = business.googleReviewUrl ? business.googleReviewUrl.trim() : '';
       if (targetUrl && !/^https?:\/\//i.test(targetUrl)) {
         targetUrl = 'https://' + targetUrl;
       }
 
-      // Record review and AWAIT Firestore write before navigation!
       try {
         await submitReview({
           businessId: business.id,
-          rating: 5,
+          rating: selectedRating,
           channel: 'qr'
         });
       } catch (err) {
@@ -120,7 +124,6 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
         setSubmitting(false);
       }
 
-      // If business has a registered review URL, redirect to Google Review after write is committed
       if (targetUrl) {
         setTimeout(() => {
           try {
@@ -132,14 +135,17 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
               console.error('Redirection blocked by browser:', err2);
             }
           }
-        }, 350);
+        }, 500);
       }
+    } else {
+      // 1, 2 ou 3 estrelas abrem o questionário interno do sistema do comércio
+      setIsRecoveryOpen(true);
     }
   };
 
   const handleRecoverySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!business || selectedRating < 1 || selectedRating > 4) return;
+    if (!business || selectedRating < 1 || selectedRating > 3) return;
     if (!customerName.trim() || !customerPhone.trim()) {
       alert('Por favor, preencha pelo menos o seu nome e telefone.');
       return;
@@ -168,7 +174,6 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
         question3WantsContact: wantsContact
       });
 
-      // Complete immediately and show success screen
       setIsCompleted(true);
     } catch (err) {
       console.warn('Feedback submit handled gracefully:', err);
@@ -182,7 +187,7 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
     1: 'Experiência Muito Insatisfatória',
     2: 'Experiência Abaixo do Esperado',
     3: 'Experiência Regular / Neutra',
-    4: 'Boa Experiência',
+    4: 'Boa Experiência!',
     5: 'Excelente Experiência!'
   };
 
@@ -296,7 +301,7 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
 
           <div className="px-6 pb-8">
             <AnimatePresence mode="wait">
-              {/* STAGE 1: COMPLETED (5 Stars OR Recovery Submitted) */}
+              {/* STAGE 1: COMPLETED (4-5 Stars Google OR Recovery Submitted) */}
               {isCompleted ? (
                 <motion.div
                   key="completed"
@@ -309,15 +314,15 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
                     <CheckCircle2 className="w-9 h-9" />
                   </div>
 
-                  {selectedRating === 5 ? (
+                  {selectedRating >= 4 ? (
                     <div className="space-y-4">
                       <h2 className="text-xl font-bold text-slate-900">
                         {business.googleReviewUrl ? 'A redirecionar para a avaliação...' : 'Muito obrigado pela sua avaliação!'}
                       </h2>
                       <p className="text-sm text-slate-600 leading-relaxed">
                         {business.googleReviewUrl 
-                          ? 'Estamos a encaminhá-lo diretamente para a página de avaliação no Google. A sua opinião faz toda a diferença!'
-                          : 'A sua nota 5 estrelas foi registada com sucesso. Agradecemos a preferência!'}
+                          ? `A sua nota de ${selectedRating} estrelas foi registada! Estamos a encaminhá-lo diretamente para a página de avaliação oficial no Google. A sua opinião faz toda a diferença!`
+                          : `A sua nota de ${selectedRating} estrelas foi registada com sucesso. Agradecemos a preferência!`}
                       </p>
 
                       {business.googleReviewUrl && (
@@ -333,7 +338,7 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
                             }
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center justify-center w-full gap-2 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl text-sm shadow-md shadow-indigo-200 transition active:scale-[0.98]"
+                            className="inline-flex items-center justify-center w-full gap-2 py-3.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm shadow-md shadow-indigo-200 transition active:scale-[0.98]"
                           >
                             <span>Abrir Avaliação no Google</span>
                             <ExternalLink className="w-4 h-4" />
@@ -365,81 +370,18 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
                       onClick={() => {
                         setSelectedRating(0);
                         setIsCompleted(false);
+                        setIsRecoveryOpen(false);
                         setQuestion1('');
                         setQuestion2('');
                       }}
-                      className="text-xs text-slate-600 hover:text-slate-800 font-medium transition"
+                      className="text-xs text-slate-600 hover:text-slate-800 font-medium transition cursor-pointer"
                     >
                       Enviar nova avaliação
                     </button>
                   </div>
                 </motion.div>
-              ) : selectedRating === 0 ? (
-                /* STAGE 2: INITIAL RATING SCREEN (1 to 5 Stars) */
-                <motion.div
-                  key="star-rating"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="space-y-6 text-center"
-                >
-                  <div className="border-t border-slate-100 pt-6">
-                    <h2 className="text-lg font-bold text-slate-800">
-                      Como foi a sua experiência?
-                    </h2>
-                    <p className="text-xs text-slate-600 mt-1">
-                      Toque numa estrela para nos avaliar em poucos segundos
-                    </p>
-                  </div>
-
-                  {/* 5 Stars Rating Bar */}
-                  <div className="flex justify-center items-center gap-2 sm:gap-3 py-3">
-                    {[1, 2, 3, 4, 5].map((star) => {
-                      const isActive = (hoveredRating || selectedRating) >= star;
-                      return (
-                        <button
-                          key={star}
-                          type="button"
-                          id={`star-btn-${star}`}
-                          disabled={submitting}
-                          onMouseEnter={() => setHoveredRating(star)}
-                          onMouseLeave={() => setHoveredRating(0)}
-                          onClick={() => handleSelectStar(star)}
-                          className="p-1 sm:p-2 rounded-2xl transition-all duration-150 transform hover:scale-110 active:scale-95 focus:outline-none"
-                          aria-label={`${star} estrelas`}
-                        >
-                          <Star
-                            className={`w-10 h-10 sm:w-11 sm:h-11 transition-colors ${
-                              isActive
-                                ? 'fill-amber-400 text-amber-400 drop-shadow-sm'
-                                : 'text-slate-200 fill-slate-50 hover:text-slate-300'
-                            }`}
-                          />
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Rating Description Label */}
-                  <div className="h-6">
-                    {(hoveredRating > 0 || selectedRating > 0) && (
-                      <motion.span
-                        initial={{ opacity: 0, y: 3 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="text-xs font-semibold text-slate-700 bg-slate-100 px-3 py-1 rounded-full"
-                      >
-                        {ratingDescriptions[hoveredRating || selectedRating]}
-                      </motion.span>
-                    )}
-                  </div>
-
-                  <div className="pt-4 flex items-center justify-center gap-2 text-[11px] text-slate-600">
-                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-                    <span>Avaliação segura e privada</span>
-                  </div>
-                </motion.div>
-              ) : (
-                /* STAGE 3: 1-4 STARS RECOVERY FORM */
+              ) : isRecoveryOpen ? (
+                /* STAGE 3: 1-3 STARS RECOVERY FORM */
                 <motion.div
                   key="recovery-form"
                   initial={{ opacity: 0, x: 20 }}
@@ -467,8 +409,8 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
                     </div>
                     <button
                       type="button"
-                      onClick={() => setSelectedRating(0)}
-                      className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                      onClick={() => setIsRecoveryOpen(false)}
+                      className="text-xs text-indigo-600 hover:text-indigo-800 font-bold cursor-pointer"
                     >
                       Alterar nota
                     </button>
@@ -609,7 +551,7 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
                       type="submit"
                       id="submit-feedback-btn"
                       disabled={submitting}
-                      className="w-full mt-4 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm shadow-md shadow-indigo-200 flex items-center justify-center gap-2 transition disabled:opacity-50"
+                      className="w-full mt-4 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm shadow-md shadow-indigo-200 flex items-center justify-center gap-2 transition disabled:opacity-50 cursor-pointer"
                     >
                       {submitting ? (
                         <span>A registar...</span>
@@ -621,6 +563,120 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
                       )}
                     </button>
                   </form>
+                </motion.div>
+              ) : (
+                /* STAGE 2: INITIAL RATING SCREEN (1 to 5 Stars) */
+                <motion.div
+                  key="star-rating"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="space-y-6 text-center"
+                >
+                  <div className="border-t border-slate-100 pt-6">
+                    <h2 className="text-lg font-bold text-slate-800">
+                      Como foi a sua experiência?
+                    </h2>
+                    <p className="text-xs text-slate-600 mt-1">
+                      Selecione a classificação em baixo e toque em Avaliar
+                    </p>
+                  </div>
+
+                  {/* 5 Stars Rating Bar */}
+                  <div className="flex justify-center items-center gap-2 sm:gap-3 py-3">
+                    {[1, 2, 3, 4, 5].map((star) => {
+                      const isLit = (hoveredRating || selectedRating) >= star;
+                      return (
+                        <button
+                          key={star}
+                          type="button"
+                          id={`star-btn-${star}`}
+                          disabled={submitting}
+                          onMouseEnter={() => setHoveredRating(star)}
+                          onMouseLeave={() => setHoveredRating(0)}
+                          onClick={() => handleSelectStar(star)}
+                          className="p-1 sm:p-2 rounded-2xl transition-all duration-150 transform hover:scale-110 active:scale-95 focus:outline-none cursor-pointer"
+                          aria-label={`${star} estrelas`}
+                        >
+                          <Star
+                            className={`w-10 h-10 sm:w-12 sm:h-12 transition-all ${
+                              isLit
+                                ? 'fill-amber-400 text-amber-400 drop-shadow-md scale-105'
+                                : 'text-slate-200 fill-slate-50 hover:text-slate-300'
+                            }`}
+                          />
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Rating Description Label */}
+                  <div className="min-h-7 flex items-center justify-center">
+                    {(hoveredRating > 0 || selectedRating > 0) ? (
+                      <motion.span
+                        key={hoveredRating || selectedRating}
+                        initial={{ opacity: 0, y: 3 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className={`text-xs font-bold px-3.5 py-1 rounded-full ${
+                          (hoveredRating || selectedRating) >= 4
+                            ? 'bg-amber-100 text-amber-900 border border-amber-200'
+                            : 'bg-slate-100 text-slate-700'
+                        }`}
+                      >
+                        {ratingDescriptions[hoveredRating || selectedRating]}
+                      </motion.span>
+                    ) : (
+                      <span className="text-[11px] text-slate-400">
+                        Toque numa estrela para selecionar
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Action Button: Avaliar */}
+                  <div className="pt-2">
+                    {selectedRating >= 4 ? (
+                      <motion.button
+                        type="button"
+                        id="confirm-rating-btn"
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        disabled={submitting}
+                        onClick={handleConfirmRating}
+                        className="w-full py-3.5 px-5 bg-gradient-to-r from-amber-500 via-amber-600 to-amber-700 hover:from-amber-600 hover:to-amber-800 active:scale-[0.98] text-white font-extrabold rounded-2xl text-sm shadow-lg shadow-amber-500/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        {submitting ? (
+                          <span>A registar avaliação...</span>
+                        ) : (
+                          <>
+                            <span>Avaliar no Google ({selectedRating} {selectedRating === 1 ? 'estrela' : 'estrelas'})</span>
+                            <ExternalLink className="w-4 h-4" />
+                          </>
+                        )}
+                      </motion.button>
+                    ) : selectedRating >= 1 ? (
+                      <motion.button
+                        type="button"
+                        id="confirm-rating-btn"
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        disabled={submitting}
+                        onClick={handleConfirmRating}
+                        className="w-full py-3.5 px-5 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white font-extrabold rounded-2xl text-sm shadow-lg shadow-indigo-600/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <span>Continuar Avaliação ({selectedRating} {selectedRating === 1 ? 'estrela' : 'estrelas'})</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </motion.button>
+                    ) : (
+                      <div className="py-3 px-4 bg-slate-100 text-slate-400 font-semibold rounded-2xl text-xs flex items-center justify-center gap-1.5 cursor-not-allowed select-none">
+                        <span>Selecione as estrelas e clique em Avaliar</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pt-2 flex items-center justify-center gap-2 text-[11px] text-slate-600">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>Avaliação segura e privada</span>
+                  </div>
                 </motion.div>
               )}
             </AnimatePresence>

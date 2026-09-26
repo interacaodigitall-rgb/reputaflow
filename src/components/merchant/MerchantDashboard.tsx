@@ -47,7 +47,7 @@ export const MerchantDashboard: React.FC<MerchantDashboardProps> = ({
         ? Number((reviews.reduce((acc, r) => acc + r.rating, 0) / totalReviews).toFixed(1))
         : 0;
 
-    const lowRatingReviews = reviews.filter((r) => r.rating <= 4).length;
+    const lowRatingReviews = reviews.filter((r) => r.rating <= 3).length;
     const pendingCases = recoveryCases.filter(
       (c) => c.status === 'novo' || c.status === 'em_contacto' || c.status === 'em_resolucao'
     ).length;
@@ -173,11 +173,11 @@ export const MerchantDashboard: React.FC<MerchantDashboardProps> = ({
           <div className="text-[11px] text-amber-600 font-medium mt-1">Satisfação geral</div>
         </div>
 
-        {/* 3. Avaliações 1-4 estrelas */}
+        {/* 3. Avaliações 1-3 estrelas */}
         <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs">
           <div className="flex items-center justify-between text-slate-400 mb-2">
             <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-              Avaliações 1–4★
+              Avaliações 1–3★
             </span>
             <MessageSquare className="w-4 h-4 text-rose-500" />
           </div>

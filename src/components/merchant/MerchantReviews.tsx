@@ -168,7 +168,7 @@ export const MerchantReviews: React.FC<MerchantReviewsProps> = ({
         ) : (
           filteredReviews.map((rev) => {
             const feedback = getFeedbackForReview(rev.id);
-            const isFiveStar = rev.rating === 5;
+            const isGooglePromoter = rev.rating >= 4;
             const isDeleting = deletingId === rev.id;
 
             return (
@@ -197,12 +197,12 @@ export const MerchantReviews: React.FC<MerchantReviewsProps> = ({
                     </span>
                     <span
                       className={`text-[10px] uppercase font-extrabold px-2 py-0.5 rounded-full ${
-                        isFiveStar
+                        isGooglePromoter
                           ? 'bg-emerald-100 text-emerald-800'
                           : 'bg-rose-100 text-rose-800'
                       }`}
                     >
-                      {isFiveStar ? 'Promotor (Google)' : 'Feedback Interno 1–4★'}
+                      {isGooglePromoter ? 'Promotor (Google 4-5★)' : 'Feedback Interno 1–3★'}
                     </span>
                   </div>
 
@@ -265,10 +265,10 @@ export const MerchantReviews: React.FC<MerchantReviewsProps> = ({
                   </div>
                 )}
 
-                {isFiveStar && (
+                {isGooglePromoter && (
                   <div className="text-xs text-emerald-800 bg-emerald-50/50 p-3 rounded-2xl border border-emerald-100 flex items-center justify-between">
                     <span>
-                      Avaliação máxima! O cliente recebeu a sugestão respeitosa de avaliar também no Google.
+                      Avaliação positiva (4–5 estrelas)! O cliente foi convidado a avaliar também no Google.
                     </span>
                     {business.googleReviewUrl && (
                       <a

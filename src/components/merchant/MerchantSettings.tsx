@@ -15,7 +15,9 @@ import {
   Save,
   Link,
   Shield,
-  Upload
+  Upload,
+  Loader2,
+  Trash2
 } from 'lucide-react';
 import { Business } from '../../types';
 import { updateBusiness, uploadImage } from '../../lib/dbService';
@@ -67,6 +69,7 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
   const publicReviewUrl = getPublicReviewUrl(slug || business.slug);
 
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const handleLogoFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -75,7 +78,7 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
     setUploadingLogo(true);
     try {
       const currentMerchantId = business.id;
-      const fileExt = file.name.split('.').pop();
+      const fileExt = file.name.split('.').pop() || 'png';
       const filePath = `logos/${currentMerchantId}-${Date.now()}.${fileExt}`;
       
       const { data: uploadData, error: uploadError } = await supabase.storage
@@ -117,6 +120,9 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
       console.error('Logo upload error:', err);
       alert('Erro ao enviar imagem para o Supabase Storage: ' + (err.message || err));
     } finally {
+      if (event.target) {
+        event.target.value = '';
+      }
       setUploadingLogo(false);
     }
   };
@@ -345,22 +351,51 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
                   </label>
                   <div className="flex gap-2 items-center mb-2">
                     {logoUrl ? (
-                      <img src={logoUrl} alt="Logo" className="w-10 h-10 rounded-xl object-cover border border-slate-200 shrink-0" />
+                      <div className="relative group shrink-0">
+                        <img src={logoUrl} alt="Logo" className="w-12 h-12 rounded-xl object-contain bg-slate-50 border border-slate-200" />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setLogoUrl('');
+                            updateBusiness(business.id, { logoUrl: '' });
+                            if (onBusinessUpdated) onBusinessUpdated({ ...business, logoUrl: '' });
+                          }}
+                          className="absolute -top-1.5 -right-1.5 bg-rose-500 hover:bg-rose-600 text-white rounded-full p-1 shadow-sm transition"
+                          title="Remover logótipo"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
                     ) : (
-                      <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-400 shrink-0 text-xs font-bold">
+                      <div className="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500 shrink-0 text-xs font-bold border border-slate-200">
                         {name.slice(0, 2).toUpperCase()}
                       </div>
                     )}
-                    <label className="cursor-pointer py-2 px-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0">
-                      <Upload className="w-3.5 h-3.5" />
-                      <span>Carregar Ficheiro</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handleLogoFileUpload}
-                        className="hidden"
-                      />
-                    </label>
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploadingLogo}
+                      className="py-2.5 px-3.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 disabled:opacity-50 cursor-pointer shadow-2xs"
+                    >
+                      {uploadingLogo ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
+                          <span>A enviar para a nuvem...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="w-4 h-4" />
+                          <span>Carregar Ficheiro</span>
+                        </>
+                      )}
+                    </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleLogoFileUpload}
+                      style={{ display: 'none' }}
+                    />
                   </div>
                   <input
                     type="url"
