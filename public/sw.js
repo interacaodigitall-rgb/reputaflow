@@ -1,5 +1,5 @@
-// Service Worker for ReputaFlow PWA
-const CACHE_NAME = 'reputaflow-v1';
+// Service Worker for ReputaFlow / GlowfyHub PWA
+const CACHE_NAME = 'glowfyhub-v2';
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',
@@ -34,15 +34,17 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Only handle GET requests and skip chrome-extension/firebase API routes
+  // Only handle GET requests and skip chrome-extension, API, and database routes
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
-  
+
   if (
     url.pathname.startsWith('/api') ||
+    url.hostname.includes('supabase.co') ||
     url.hostname.includes('firestore.googleapis.com') ||
     url.hostname.includes('firebaseio.com') ||
-    url.hostname.includes('identitytoolkit.googleapis.com')
+    url.hostname.includes('identitytoolkit.googleapis.com') ||
+    url.searchParams.has('_t')
   ) {
     return;
   }

@@ -533,7 +533,7 @@ export async function submitReview(
     });
   } catch (err) {}
 
-  const list = getCached<Review[]>(LOCAL_STORAGE_KEY_REVIEWS, INITIAL_REVIEWS);
+  const list = getCached<Review[]>(LOCAL_STORAGE_KEY_REVIEWS, []);
   setCached(LOCAL_STORAGE_KEY_REVIEWS, [payload, ...list]);
 
   if (data.customerName || data.customerPhone) {
@@ -571,15 +571,15 @@ export async function deleteReview(reviewId: string): Promise<void> {
     });
   } catch (err) {}
 
-  const cachedReviews = getCached<Review[]>(LOCAL_STORAGE_KEY_REVIEWS, INITIAL_REVIEWS);
+  const cachedReviews = getCached<Review[]>(LOCAL_STORAGE_KEY_REVIEWS, []);
   const updatedReviews = cachedReviews.filter((r) => r.id !== reviewId);
   setCached(LOCAL_STORAGE_KEY_REVIEWS, updatedReviews);
 
-  const cachedFeedback = getCached<Feedback[]>(LOCAL_STORAGE_KEY_FEEDBACK, INITIAL_FEEDBACK);
+  const cachedFeedback = getCached<Feedback[]>(LOCAL_STORAGE_KEY_FEEDBACK, []);
   const updatedFeedback = cachedFeedback.filter((f) => f.reviewId !== reviewId);
   setCached(LOCAL_STORAGE_KEY_FEEDBACK, updatedFeedback);
 
-  const cachedCases = getCached<RecoveryCase[]>(LOCAL_STORAGE_KEY_RECOVERY, INITIAL_RECOVERY_CASES);
+  const cachedCases = getCached<RecoveryCase[]>(LOCAL_STORAGE_KEY_RECOVERY, []);
   const updatedCases = cachedCases.filter((c) => c.reviewId !== reviewId);
   setCached(LOCAL_STORAGE_KEY_RECOVERY, updatedCases);
 
@@ -613,13 +613,13 @@ export async function clearAllReviews(businessId?: string): Promise<void> {
   } catch (err) {}
 
   if (businessId) {
-    const cachedReviews = getCached<Review[]>(LOCAL_STORAGE_KEY_REVIEWS, INITIAL_REVIEWS);
+    const cachedReviews = getCached<Review[]>(LOCAL_STORAGE_KEY_REVIEWS, []);
     setCached(LOCAL_STORAGE_KEY_REVIEWS, cachedReviews.filter((r) => !isMatchingBusiness(r.businessId, businessId)));
 
-    const cachedFeedback = getCached<Feedback[]>(LOCAL_STORAGE_KEY_FEEDBACK, INITIAL_FEEDBACK);
+    const cachedFeedback = getCached<Feedback[]>(LOCAL_STORAGE_KEY_FEEDBACK, []);
     setCached(LOCAL_STORAGE_KEY_FEEDBACK, cachedFeedback.filter((f) => !isMatchingBusiness(f.businessId, businessId)));
 
-    const cachedCases = getCached<RecoveryCase[]>(LOCAL_STORAGE_KEY_RECOVERY, INITIAL_RECOVERY_CASES);
+    const cachedCases = getCached<RecoveryCase[]>(LOCAL_STORAGE_KEY_RECOVERY, []);
     setCached(LOCAL_STORAGE_KEY_RECOVERY, cachedCases.filter((c) => !isMatchingBusiness(c.businessId, businessId)));
   } else {
     setCached(LOCAL_STORAGE_KEY_REVIEWS, []);
@@ -757,10 +757,10 @@ export async function submitFeedbackAndRecovery(params: {
     } catch (e) {}
   }
 
-  const fbList = getCached<Feedback[]>(LOCAL_STORAGE_KEY_FEEDBACK, INITIAL_FEEDBACK);
+  const fbList = getCached<Feedback[]>(LOCAL_STORAGE_KEY_FEEDBACK, []);
   setCached(LOCAL_STORAGE_KEY_FEEDBACK, [fbPayload as any, ...fbList]);
 
-  const caseList = getCached<RecoveryCase[]>(LOCAL_STORAGE_KEY_RECOVERY, INITIAL_RECOVERY_CASES);
+  const caseList = getCached<RecoveryCase[]>(LOCAL_STORAGE_KEY_RECOVERY, []);
   setCached(LOCAL_STORAGE_KEY_RECOVERY, [casePayload as any, ...caseList]);
 
   notifyDataChanged();
@@ -803,7 +803,7 @@ export function subscribeCustomers(businessId: string | null, callback: (custome
       } catch (e) {}
     }
 
-    const cached = getCached<Customer[]>(LOCAL_STORAGE_KEY_CUSTOMERS, INITIAL_CUSTOMERS);
+    const cached = getCached<Customer[]>(LOCAL_STORAGE_KEY_CUSTOMERS, []);
     const filtered = cached.filter((c) => isMatchingBusiness(c.businessId, businessId));
     filtered.sort((a, b) => new Date(b.lastReviewAt || b.createdAt).getTime() - new Date(a.lastReviewAt || a.createdAt).getTime());
     callback(filtered);
@@ -863,7 +863,7 @@ export async function upsertCustomerByPhone(params: {
     } catch (e) {}
   }
 
-  const list = getCached<Customer[]>(LOCAL_STORAGE_KEY_CUSTOMERS, INITIAL_CUSTOMERS);
+  const list = getCached<Customer[]>(LOCAL_STORAGE_KEY_CUSTOMERS, []);
   setCached(LOCAL_STORAGE_KEY_CUSTOMERS, [payload as any, ...list]);
   notifyDataChanged();
   return targetId;
@@ -883,7 +883,7 @@ export async function updateCustomer(id: string, data: Partial<Customer>): Promi
     } catch (e) {}
   }
 
-  const list = getCached<Customer[]>(LOCAL_STORAGE_KEY_CUSTOMERS, INITIAL_CUSTOMERS);
+  const list = getCached<Customer[]>(LOCAL_STORAGE_KEY_CUSTOMERS, []);
   const updated = list.map((c) => (c.id === id ? { ...c, ...data, updatedAt: new Date().toISOString() } : c));
   setCached(LOCAL_STORAGE_KEY_CUSTOMERS, updated);
   notifyDataChanged();
@@ -968,7 +968,7 @@ export async function updateRecoveryCaseStatus(
     } catch (e) {}
   }
 
-  const list = getCached<RecoveryCase[]>(LOCAL_STORAGE_KEY_RECOVERY, INITIAL_RECOVERY_CASES);
+  const list = getCached<RecoveryCase[]>(LOCAL_STORAGE_KEY_RECOVERY, []);
   const updated = list.map((c) => (c.id === caseId ? { ...c, status, ...(notes ? { notes } : {}), updatedAt: new Date().toISOString() } : c));
   setCached(LOCAL_STORAGE_KEY_RECOVERY, updated);
 

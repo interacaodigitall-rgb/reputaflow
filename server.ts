@@ -43,11 +43,16 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 // Serve uploaded media statically
 app.use('/uploads', express.static(UPLOADS_DIR));
 
-// Enable CORS for external access from Vercel, mobile clients, and cross-origin previews
+// Enable CORS & disable HTTP caching for API endpoints
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  if (req.path.startsWith('/api')) {
+    res.header('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.header('Pragma', 'no-cache');
+    res.header('Expires', '0');
+  }
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
