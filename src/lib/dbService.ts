@@ -19,6 +19,20 @@ import {
 import { supabase, isSupabaseConfigured, uploadToSupabaseStorage } from './supabase';
 
 // ==========================================
+// PURGE LEGACY LOCALSTORAGE ON BOOT (MANDATORY RULE #2)
+// ==========================================
+if (typeof window !== 'undefined') {
+  try {
+    localStorage.removeItem('reputaflow_reviews');
+    localStorage.removeItem('reviews');
+    localStorage.removeItem('reputaflow_cache_reviews');
+    localStorage.removeItem('reputaflow_cache_feedback');
+    localStorage.removeItem('reputaflow_cache_recovery');
+    localStorage.removeItem('reputaflow_cache_customers');
+  } catch (e) {}
+}
+
+// ==========================================
 // CENTRALIZED NO-CACHE HTTP CLIENT
 // ==========================================
 async function apiFetch(endpoint: string, options: RequestInit = {}): Promise<Response> {
@@ -36,7 +50,7 @@ async function apiFetch(endpoint: string, options: RequestInit = {}): Promise<Re
 }
 
 // ==========================================
-// BULLETPROOF IMAGE UPLOAD SERVICE (SUPABASE STORAGE)
+// IMAGE UPLOAD SERVICE (SUPABASE STORAGE)
 // ==========================================
 export async function uploadImage(file: File): Promise<string> {
   if (isSupabaseConfigured()) {
@@ -140,14 +154,9 @@ export function isMatchingBusiness(itemBizId: string | undefined, targetBizId: s
 }
 
 // ==========================================
-// LOCAL STORAGE CACHE HELPERS
+// LOCAL STORAGE CACHE HELPERS (BUSINESS ONLY)
 // ==========================================
 const LOCAL_STORAGE_KEY_BIZ = 'reputaflow_cache_businesses';
-const LOCAL_STORAGE_KEY_REVIEWS = 'reputaflow_cache_reviews';
-const LOCAL_STORAGE_KEY_FEEDBACK = 'reputaflow_cache_feedback';
-const LOCAL_STORAGE_KEY_CUSTOMERS = 'reputaflow_cache_customers';
-const LOCAL_STORAGE_KEY_RECOVERY = 'reputaflow_cache_recovery';
-const LOCAL_STORAGE_KEY_INTERACTIONS = 'reputaflow_cache_interactions';
 
 function getCached<T>(key: string, fallback: T): T {
   try {
@@ -173,6 +182,50 @@ export function notifyDataChanged() {
 // ==========================================
 // BUSINESSES
 // ==========================================
+export function subscribeBusinesses(callback: (businesses: Business[]) => void) {
+  const fetchAll = async () => {
+    const list = await getAllBusinesses();
+    callback(list);
+  };
+  fetchAll();
+
+  if (isSupabaseConfigured()) {
+    const channel = supabase
+      .channel('sub_businesses')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'businesses' }, () => {
+        fetchAll();
+      })
+      .subscribe();
+
+    const handleSync = () => fetchAll();
+    if (typeof window !== 'undefined') {
+      window.addEventListener('reputaflow_live_sync', handleSync);
+    }
+
+    return () => {
+      supabase.removeChannel(channel);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('reputaflow_live_sync', handleSync);
+      }
+    };
+  }
+
+  const handleSync = () => fetchAll();
+  if (typeof window !== 'undefined') {
+    window.addEventListener('reputaflow_live_sync', handleSync);
+  }
+  return () => {
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('reputaflow_live_sync', handleSync);
+    }
+  };
+}
+
+export async function getBusinessBySlug(slug: string): Promise<Business | null> {
+  const all = await getAllBusinesses();
+  return all.find((b) => b.slug === slug || b.id === slug) || null;
+}
+
 export function getLocalBusinesses(): Business[] {
   return getCached<Business[]>(LOCAL_STORAGE_KEY_BIZ, REGISTERED_BUSINESSES);
 }
@@ -218,140 +271,35 @@ export async function getAllBusinesses(): Promise<Business[]> {
   return getCached<Business[]>(LOCAL_STORAGE_KEY_BIZ, REGISTERED_BUSINESSES);
 }
 
-export async function getBusinessBySlug(slug: string): Promise<Business | null> {
-  if (!slug) return null;
-  const cleanSlug = slug.toLowerCase().trim();
+export async function createBusiness(data: Omit<Business, 'id' | 'createdAt' | 'updatedAt'>): Promise<Business> {
+  const id = `biz_${normalizeKey(data.name || 'loja')}_${Date.now().toString(36)}`;
+  const now = new Date().toISOString();
 
-  if (isSupabaseConfigured()) {
-    try {
-      const { data, error } = await supabase
-        .from('businesses')
-        .select('*')
-        .or(`slug.eq.${cleanSlug},id.eq.${cleanSlug}`)
-        .limit(1);
-
-      if (!error && data && data.length > 0) {
-        const b = data[0];
-        return {
-          id: b.id,
-          name: b.name,
-          slug: b.slug,
-          category: b.category,
-          phone: b.phone,
-          email: b.email,
-          address: b.address,
-          logoUrl: b.logo_url || b.logoUrl,
-          googleReviewUrl: b.google_review_url || b.googleReviewUrl,
-          status: b.status || 'active',
-          planId: b.plan_id || b.planId || 'pro',
-          ownerId: b.owner_id || b.ownerId || 'admin',
-          createdAt: b.created_at || b.createdAt || new Date().toISOString(),
-          currency: b.currency || 'EUR'
-        };
-      }
-    } catch (e) {}
-  }
-
-  try {
-    const res = await apiFetch(`/api/businesses/${encodeURIComponent(cleanSlug)}`);
-    if (res.ok) {
-      const biz: Business = await res.json();
-      if (biz) return biz;
-    }
-  } catch (e) {}
-
-  const list = getCached<Business[]>(LOCAL_STORAGE_KEY_BIZ, REGISTERED_BUSINESSES);
-  const found = list.find((b) => b && (b.slug === cleanSlug || b.id === cleanSlug));
-  return found || null;
-}
-
-export async function getBusinessById(id: string): Promise<Business | null> {
-  return getBusinessBySlug(id);
-}
-
-export function subscribeBusinesses(callback: (businesses: Business[]) => void) {
-  callback(getCached<Business[]>(LOCAL_STORAGE_KEY_BIZ, REGISTERED_BUSINESSES));
-
-  const fetchLatest = async () => {
-    if (isSupabaseConfigured()) {
-      try {
-        const { data, error } = await supabase.from('businesses').select('*');
-        if (!error && data && data.length > 0) {
-          const mapped: Business[] = data.map((b: any) => ({
-            id: b.id,
-            name: b.name,
-            slug: b.slug,
-            category: b.category,
-            phone: b.phone,
-            email: b.email,
-            address: b.address,
-            logoUrl: b.logo_url || b.logoUrl,
-            googleReviewUrl: b.google_review_url || b.googleReviewUrl,
-            status: b.status || 'active',
-            planId: b.plan_id || b.planId || 'pro',
-            ownerId: b.owner_id || b.ownerId || 'admin',
-            createdAt: b.created_at || b.createdAt || new Date().toISOString(),
-            currency: b.currency || 'EUR'
-          }));
-          setCached(LOCAL_STORAGE_KEY_BIZ, mapped);
-          callback(mapped);
-          return;
-        }
-      } catch (e) {}
-    }
-
-    try {
-      const res = await apiFetch('/api/businesses');
-      if (res.ok) {
-        const data: Business[] = await res.json();
-        if (Array.isArray(data) && data.length > 0) {
-          setCached(LOCAL_STORAGE_KEY_BIZ, data);
-          callback(data);
-        }
-      }
-    } catch (e) {}
+  const payload: Business = {
+    ...data,
+    id,
+    createdAt: now,
+    updatedAt: now
   };
-
-  fetchLatest();
-
-  if (isSupabaseConfigured()) {
-    const channelName = `sub_biz_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const channel = supabase
-      .channel(channelName)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'businesses' }, () => {
-        fetchLatest();
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }
-
-  const interval = setInterval(fetchLatest, 3000);
-  return () => clearInterval(interval);
-}
-
-export async function createBusiness(data: Omit<Business, 'id'>, customId?: string): Promise<string> {
-  const targetId = customId || `biz_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
-  const payload = { ...data, id: targetId, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
 
   if (isSupabaseConfigured()) {
     try {
       await supabase.from('businesses').insert([{
-        id: targetId,
+        id,
         name: data.name,
-        slug: data.slug,
-        category: data.category || '',
-        phone: data.phone || '',
-        email: data.email || '',
-        address: data.address || '',
-        logo_url: data.logoUrl || '',
-        google_review_url: data.googleReviewUrl || '',
+        slug: data.slug || id,
+        category: data.category,
+        phone: data.phone,
+        email: data.email,
+        address: data.address,
+        logo_url: data.logoUrl,
+        google_review_url: data.googleReviewUrl,
         status: data.status || 'active',
         plan_id: data.planId || 'pro',
         owner_id: data.ownerId || 'admin',
-        currency: data.currency || 'EUR'
+        currency: data.currency || 'EUR',
+        created_at: now,
+        updated_at: now
       }]);
     } catch (e) {}
   }
@@ -367,13 +315,13 @@ export async function createBusiness(data: Omit<Business, 'id'>, customId?: stri
   const list = getCached<Business[]>(LOCAL_STORAGE_KEY_BIZ, REGISTERED_BUSINESSES);
   setCached(LOCAL_STORAGE_KEY_BIZ, [payload, ...list]);
   notifyDataChanged();
-  return targetId;
+  return payload;
 }
 
 export async function updateBusiness(id: string, data: Partial<Business>): Promise<void> {
   if (isSupabaseConfigured()) {
     try {
-      const dbPayload: any = {};
+      const dbPayload: any = { updated_at: new Date().toISOString() };
       if (data.name !== undefined) dbPayload.name = data.name;
       if (data.slug !== undefined) dbPayload.slug = data.slug;
       if (data.category !== undefined) dbPayload.category = data.category;
@@ -382,7 +330,8 @@ export async function updateBusiness(id: string, data: Partial<Business>): Promi
       if (data.address !== undefined) dbPayload.address = data.address;
       if (data.logoUrl !== undefined) dbPayload.logo_url = data.logoUrl;
       if (data.googleReviewUrl !== undefined) dbPayload.google_review_url = data.googleReviewUrl;
-      if (data.currency !== undefined) dbPayload.currency = data.currency;
+      if (data.status !== undefined) dbPayload.status = data.status;
+      if (data.planId !== undefined) dbPayload.plan_id = data.planId;
 
       await supabase.from('businesses').update(dbPayload).eq('id', id);
     } catch (e) {}
@@ -419,7 +368,7 @@ export async function deleteBusiness(id: string): Promise<void> {
 }
 
 // ==========================================
-// REVIEWS (SUPABASE DIRECT QUERY & REALTIME)
+// REVIEWS (SUPABASE DIRECT QUERY & REALTIME - STRICT MANDATORY RULES)
 // ==========================================
 export function subscribeReviews(businessId: string | null, callback: (reviews: Review[]) => void) {
   const fetchFromSupabase = async () => {
@@ -442,7 +391,6 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
             createdAt: r.created_at || r.createdAt || new Date().toISOString()
           }));
           mapped.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-          setCached(LOCAL_STORAGE_KEY_REVIEWS, mapped);
           callback(mapped);
           return;
         }
@@ -457,7 +405,6 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
       if (res.ok) {
         const data: Review[] = await res.json();
         if (Array.isArray(data)) {
-          setCached(LOCAL_STORAGE_KEY_REVIEWS, data);
           const filtered = data.filter((r) => isMatchingBusiness(r.businessId, businessId));
           filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
           callback(filtered);
@@ -466,30 +413,40 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
       }
     } catch (e) {}
 
-    const cached = getCached<Review[]>(LOCAL_STORAGE_KEY_REVIEWS, []);
-    const filtered = cached.filter((r) => isMatchingBusiness(r.businessId, businessId));
-    filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    callback(filtered);
+    // RULE #1: NEVER return mock data or legacy localStorage when empty! Return [] directly!
+    callback([]);
   };
 
   fetchFromSupabase();
 
+  let channel: any = null;
+  // RULE #3: Realtime listener on 'realtime_reviews' listening to ALL events ('*'), including DELETE
   if (isSupabaseConfigured()) {
-    const channelName = `sub_reviews_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const channel = supabase
-      .channel(channelName)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'reviews' }, () => {
+    channel = supabase
+      .channel('realtime_reviews')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reviews' }, (payload) => {
+        console.log('Realtime reviews postgres_changes event:', payload);
         fetchFromSupabase();
       })
       .subscribe();
+  }
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+  const handleSyncEvent = () => fetchFromSupabase();
+  if (typeof window !== 'undefined') {
+    window.addEventListener('reputaflow_live_sync', handleSyncEvent);
   }
 
   const interval = setInterval(fetchFromSupabase, 3000);
-  return () => clearInterval(interval);
+
+  return () => {
+    if (channel) {
+      supabase.removeChannel(channel);
+    }
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('reputaflow_live_sync', handleSyncEvent);
+    }
+    clearInterval(interval);
+  };
 }
 
 export async function submitReview(
@@ -533,9 +490,6 @@ export async function submitReview(
     });
   } catch (err) {}
 
-  const list = getCached<Review[]>(LOCAL_STORAGE_KEY_REVIEWS, []);
-  setCached(LOCAL_STORAGE_KEY_REVIEWS, [payload, ...list]);
-
   if (data.customerName || data.customerPhone) {
     upsertCustomerByPhone({
       businessId: data.businessId,
@@ -571,18 +525,6 @@ export async function deleteReview(reviewId: string): Promise<void> {
     });
   } catch (err) {}
 
-  const cachedReviews = getCached<Review[]>(LOCAL_STORAGE_KEY_REVIEWS, []);
-  const updatedReviews = cachedReviews.filter((r) => r.id !== reviewId);
-  setCached(LOCAL_STORAGE_KEY_REVIEWS, updatedReviews);
-
-  const cachedFeedback = getCached<Feedback[]>(LOCAL_STORAGE_KEY_FEEDBACK, []);
-  const updatedFeedback = cachedFeedback.filter((f) => f.reviewId !== reviewId);
-  setCached(LOCAL_STORAGE_KEY_FEEDBACK, updatedFeedback);
-
-  const cachedCases = getCached<RecoveryCase[]>(LOCAL_STORAGE_KEY_RECOVERY, []);
-  const updatedCases = cachedCases.filter((c) => c.reviewId !== reviewId);
-  setCached(LOCAL_STORAGE_KEY_RECOVERY, updatedCases);
-
   notifyDataChanged();
 }
 
@@ -612,21 +554,6 @@ export async function clearAllReviews(businessId?: string): Promise<void> {
     await apiFetch(url, { method: 'DELETE' });
   } catch (err) {}
 
-  if (businessId) {
-    const cachedReviews = getCached<Review[]>(LOCAL_STORAGE_KEY_REVIEWS, []);
-    setCached(LOCAL_STORAGE_KEY_REVIEWS, cachedReviews.filter((r) => !isMatchingBusiness(r.businessId, businessId)));
-
-    const cachedFeedback = getCached<Feedback[]>(LOCAL_STORAGE_KEY_FEEDBACK, []);
-    setCached(LOCAL_STORAGE_KEY_FEEDBACK, cachedFeedback.filter((f) => !isMatchingBusiness(f.businessId, businessId)));
-
-    const cachedCases = getCached<RecoveryCase[]>(LOCAL_STORAGE_KEY_RECOVERY, []);
-    setCached(LOCAL_STORAGE_KEY_RECOVERY, cachedCases.filter((c) => !isMatchingBusiness(c.businessId, businessId)));
-  } else {
-    setCached(LOCAL_STORAGE_KEY_REVIEWS, []);
-    setCached(LOCAL_STORAGE_KEY_FEEDBACK, []);
-    setCached(LOCAL_STORAGE_KEY_RECOVERY, []);
-  }
-
   notifyDataChanged();
 }
 
@@ -648,50 +575,70 @@ export function subscribeFeedback(businessId: string | null, callback: (feedback
             businessId: f.business_id || f.businessId || '',
             reviewId: f.review_id || f.reviewId || '',
             customerId: f.customer_id || f.customerId || '',
-            customerName: f.customer_name || f.customerName || '',
+            customerName: f.customer_name || f.customerName || 'Cliente',
             customerPhone: f.customer_phone || f.customerPhone || '',
             customerEmail: f.customer_email || f.customerEmail || '',
             rating: Number(f.rating || 1),
             question1: f.question1 || '',
             question2: f.question2 || '',
-            question3WantsContact: Boolean(f.question3_wants_contact || f.question3WantsContact),
+            question3WantsContact: Boolean(f.question3_wants_contact ?? f.question3WantsContact ?? true),
             createdAt: f.created_at || f.createdAt || new Date().toISOString()
           }));
           mapped.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-          setCached(LOCAL_STORAGE_KEY_FEEDBACK, mapped);
           callback(mapped);
           return;
         }
-      } catch (e) {}
+      } catch (err) {
+        console.warn('Supabase feedback fetch error:', err);
+      }
     }
 
-    const cached = getCached<Feedback[]>(LOCAL_STORAGE_KEY_FEEDBACK, []);
-    const filtered = cached.filter((f) => isMatchingBusiness(f.businessId, businessId));
-    filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    callback(filtered);
+    try {
+      const url = businessId ? `/api/feedback?businessId=${encodeURIComponent(businessId)}` : '/api/feedback';
+      const res = await apiFetch(url);
+      if (res.ok) {
+        const data: Feedback[] = await res.json();
+        if (Array.isArray(data)) {
+          const filtered = data.filter((f) => isMatchingBusiness(f.businessId, businessId));
+          filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          callback(filtered);
+          return;
+        }
+      }
+    } catch (e) {}
+
+    callback([]);
   };
 
   fetchFromSupabase();
 
+  let channel: any = null;
   if (isSupabaseConfigured()) {
-    const channelName = `sub_feedback_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const channel = supabase
-      .channel(channelName)
+    channel = supabase
+      .channel('realtime_feedback')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'feedback' }, () => {
         fetchFromSupabase();
       })
       .subscribe();
+  }
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+  const handleSyncEvent = () => fetchFromSupabase();
+  if (typeof window !== 'undefined') {
+    window.addEventListener('reputaflow_live_sync', handleSyncEvent);
   }
 
   const interval = setInterval(fetchFromSupabase, 3000);
-  return () => clearInterval(interval);
+
+  return () => {
+    if (channel) supabase.removeChannel(channel);
+    if (typeof window !== 'undefined') window.removeEventListener('reputaflow_live_sync', handleSyncEvent);
+    clearInterval(interval);
+  };
 }
 
-export async function submitFeedbackAndRecovery(params: {
+export const submitFeedbackAndRecovery = submitNegativeFeedback;
+
+export async function submitNegativeFeedback(params: {
   businessId: string;
   reviewId: string;
   customerName: string;
@@ -757,12 +704,6 @@ export async function submitFeedbackAndRecovery(params: {
     } catch (e) {}
   }
 
-  const fbList = getCached<Feedback[]>(LOCAL_STORAGE_KEY_FEEDBACK, []);
-  setCached(LOCAL_STORAGE_KEY_FEEDBACK, [fbPayload as any, ...fbList]);
-
-  const caseList = getCached<RecoveryCase[]>(LOCAL_STORAGE_KEY_RECOVERY, []);
-  setCached(LOCAL_STORAGE_KEY_RECOVERY, [casePayload as any, ...caseList]);
-
   notifyDataChanged();
   return { feedbackId: fbId, caseId, customerId };
 }
@@ -796,37 +737,53 @@ export function subscribeCustomers(businessId: string | null, callback: (custome
             updatedAt: c.updated_at || c.updatedAt || new Date().toISOString()
           }));
           mapped.sort((a, b) => new Date(b.lastReviewAt || b.createdAt).getTime() - new Date(a.lastReviewAt || a.createdAt).getTime());
-          setCached(LOCAL_STORAGE_KEY_CUSTOMERS, mapped);
           callback(mapped);
           return;
         }
       } catch (e) {}
     }
 
-    const cached = getCached<Customer[]>(LOCAL_STORAGE_KEY_CUSTOMERS, []);
-    const filtered = cached.filter((c) => isMatchingBusiness(c.businessId, businessId));
-    filtered.sort((a, b) => new Date(b.lastReviewAt || b.createdAt).getTime() - new Date(a.lastReviewAt || a.createdAt).getTime());
-    callback(filtered);
+    try {
+      const url = businessId ? `/api/customers?businessId=${encodeURIComponent(businessId)}` : '/api/customers';
+      const res = await apiFetch(url);
+      if (res.ok) {
+        const data: Customer[] = await res.json();
+        if (Array.isArray(data)) {
+          const filtered = data.filter((c) => isMatchingBusiness(c.businessId, businessId));
+          filtered.sort((a, b) => new Date(b.lastReviewAt || b.createdAt).getTime() - new Date(a.lastReviewAt || a.createdAt).getTime());
+          callback(filtered);
+          return;
+        }
+      }
+    } catch (e) {}
+
+    callback([]);
   };
 
   fetchFromSupabase();
 
+  let channel: any = null;
   if (isSupabaseConfigured()) {
-    const channelName = `sub_customers_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const channel = supabase
-      .channel(channelName)
+    channel = supabase
+      .channel('realtime_customers')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'customers' }, () => {
         fetchFromSupabase();
       })
       .subscribe();
+  }
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+  const handleSyncEvent = () => fetchFromSupabase();
+  if (typeof window !== 'undefined') {
+    window.addEventListener('reputaflow_live_sync', handleSyncEvent);
   }
 
   const interval = setInterval(fetchFromSupabase, 3000);
-  return () => clearInterval(interval);
+
+  return () => {
+    if (channel) supabase.removeChannel(channel);
+    if (typeof window !== 'undefined') window.removeEventListener('reputaflow_live_sync', handleSyncEvent);
+    clearInterval(interval);
+  };
 }
 
 export async function upsertCustomerByPhone(params: {
@@ -863,8 +820,6 @@ export async function upsertCustomerByPhone(params: {
     } catch (e) {}
   }
 
-  const list = getCached<Customer[]>(LOCAL_STORAGE_KEY_CUSTOMERS, []);
-  setCached(LOCAL_STORAGE_KEY_CUSTOMERS, [payload as any, ...list]);
   notifyDataChanged();
   return targetId;
 }
@@ -883,9 +838,6 @@ export async function updateCustomer(id: string, data: Partial<Customer>): Promi
     } catch (e) {}
   }
 
-  const list = getCached<Customer[]>(LOCAL_STORAGE_KEY_CUSTOMERS, []);
-  const updated = list.map((c) => (c.id === id ? { ...c, ...data, updatedAt: new Date().toISOString() } : c));
-  setCached(LOCAL_STORAGE_KEY_CUSTOMERS, updated);
   notifyDataChanged();
 }
 
@@ -919,37 +871,53 @@ export function subscribeRecoveryCases(businessId: string | null, callback: (cas
             updatedAt: c.updated_at || c.updatedAt || new Date().toISOString()
           }));
           mapped.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-          setCached(LOCAL_STORAGE_KEY_RECOVERY, mapped);
           callback(mapped);
           return;
         }
       } catch (e) {}
     }
 
-    const cached = getCached<RecoveryCase[]>(LOCAL_STORAGE_KEY_RECOVERY, []);
-    const filtered = cached.filter((c) => isMatchingBusiness(c.businessId, businessId));
-    filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    callback(filtered);
+    try {
+      const url = businessId ? `/api/recovery-cases?businessId=${encodeURIComponent(businessId)}` : '/api/recovery-cases';
+      const res = await apiFetch(url);
+      if (res.ok) {
+        const data: RecoveryCase[] = await res.json();
+        if (Array.isArray(data)) {
+          const filtered = data.filter((c) => isMatchingBusiness(c.businessId, businessId));
+          filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          callback(filtered);
+          return;
+        }
+      }
+    } catch (e) {}
+
+    callback([]);
   };
 
   fetchFromSupabase();
 
+  let channel: any = null;
   if (isSupabaseConfigured()) {
-    const channelName = `sub_recovery_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const channel = supabase
-      .channel(channelName)
+    channel = supabase
+      .channel('realtime_recovery_cases')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'recovery_cases' }, () => {
         fetchFromSupabase();
       })
       .subscribe();
+  }
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+  const handleSyncEvent = () => fetchFromSupabase();
+  if (typeof window !== 'undefined') {
+    window.addEventListener('reputaflow_live_sync', handleSyncEvent);
   }
 
   const interval = setInterval(fetchFromSupabase, 3000);
-  return () => clearInterval(interval);
+
+  return () => {
+    if (channel) supabase.removeChannel(channel);
+    if (typeof window !== 'undefined') window.removeEventListener('reputaflow_live_sync', handleSyncEvent);
+    clearInterval(interval);
+  };
 }
 
 export async function updateRecoveryCaseStatus(
@@ -967,10 +935,6 @@ export async function updateRecoveryCaseStatus(
       }).eq('id', caseId);
     } catch (e) {}
   }
-
-  const list = getCached<RecoveryCase[]>(LOCAL_STORAGE_KEY_RECOVERY, []);
-  const updated = list.map((c) => (c.id === caseId ? { ...c, status, ...(notes ? { notes } : {}), updatedAt: new Date().toISOString() } : c));
-  setCached(LOCAL_STORAGE_KEY_RECOVERY, updated);
 
   if (customerId) {
     let customerStatus: Customer['status'] = 'in_recovery';
