@@ -271,20 +271,40 @@ export async function createBusiness(data: Omit<Business, 'id' | 'createdAt' | '
 export async function updateBusiness(id: string, data: Partial<Business>): Promise<void> {
   if (isSupabaseConfigured()) {
     try {
-      const dbPayload: any = { updated_at: new Date().toISOString() };
+      const now = new Date().toISOString();
+      const dbPayload: any = {
+        id,
+        updated_at: now,
+        updatedAt: now
+      };
       if (data.name !== undefined) dbPayload.name = data.name;
       if (data.slug !== undefined) dbPayload.slug = data.slug;
       if (data.category !== undefined) dbPayload.category = data.category;
       if (data.phone !== undefined) dbPayload.phone = data.phone;
       if (data.email !== undefined) dbPayload.email = data.email;
       if (data.address !== undefined) dbPayload.address = data.address;
-      if (data.logoUrl !== undefined) dbPayload.logo_url = data.logoUrl;
-      if (data.googleReviewUrl !== undefined) dbPayload.google_review_url = data.googleReviewUrl;
+      if (data.logoUrl !== undefined) {
+        dbPayload.logo_url = data.logoUrl;
+        dbPayload.logoUrl = data.logoUrl;
+      }
+      if (data.googleReviewUrl !== undefined) {
+        dbPayload.google_review_url = data.googleReviewUrl;
+        dbPayload.googleReviewUrl = data.googleReviewUrl;
+      }
       if (data.status !== undefined) dbPayload.status = data.status;
-      if (data.planId !== undefined) dbPayload.plan_id = data.planId;
+      if (data.planId !== undefined) {
+        dbPayload.plan_id = data.planId;
+        dbPayload.planId = data.planId;
+      }
+      if (data.currency !== undefined) dbPayload.currency = data.currency;
 
-      await supabase.from('businesses').update(dbPayload).eq('id', id);
-    } catch (e) {}
+      const { error } = await supabase.from('businesses').upsert([dbPayload], { onConflict: 'id' });
+      if (error) {
+        console.warn('Supabase update business error:', error);
+      }
+    } catch (e) {
+      console.warn('Supabase update business exception:', e);
+    }
   }
 
   try {
@@ -294,6 +314,12 @@ export async function updateBusiness(id: string, data: Partial<Business>): Promi
       body: JSON.stringify(data)
     });
   } catch (err) {}
+
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.removeItem(LOCAL_STORAGE_KEY_BIZ);
+    } catch (e) {}
+  }
 
   const list = getCached<Business[]>(LOCAL_STORAGE_KEY_BIZ, REGISTERED_BUSINESSES);
   const updatedList = list.map((b) => (b.id === id ? { ...b, ...data, updatedAt: new Date().toISOString() } : b));
