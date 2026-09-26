@@ -96,10 +96,14 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
         .getPublicUrl(filePath);
       const publicUrl = publicData.publicUrl;
 
-      await supabase
-        .from('merchants')
-        .update({ logo_url: publicUrl })
-        .eq('id', currentMerchantId);
+      try {
+        await supabase
+          .from('businesses')
+          .update({ logo_url: publicUrl, updated_at: new Date().toISOString() })
+          .eq('id', currentMerchantId);
+      } catch (e) {
+        console.warn('Direct business update error:', e);
+      }
 
       await updateBusiness(business.id, { logoUrl: publicUrl });
 

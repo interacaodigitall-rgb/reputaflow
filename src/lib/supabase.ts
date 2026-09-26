@@ -1,11 +1,18 @@
 import { createClient } from '@supabase/supabase-js';
 
-const rawUrl = (import.meta as any).env?.VITE_SUPABASE_URL;
-const rawKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY;
+function cleanSupabaseUrl(url?: string): string {
+  if (!url || typeof url !== 'string' || !url.trim()) {
+    return 'https://ltpxwagdnrtuulzhfdjk.supabase.co';
+  }
+  return url.trim().replace(/\/rest\/v1\/?$/i, '').replace(/\/+$/, '') || 'https://ltpxwagdnrtuulzhfdjk.supabase.co';
+}
 
-const supabaseUrl = rawUrl && rawUrl.trim() ? rawUrl : 'https://ltpxwagdnrtuulzhfdjk.supabase.co';
+const rawUrl = (import.meta as any).env?.VITE_SUPABASE_URL || (typeof process !== 'undefined' ? process.env?.VITE_SUPABASE_URL : '');
+const rawKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || (typeof process !== 'undefined' ? process.env?.VITE_SUPABASE_ANON_KEY : '');
+
+const supabaseUrl = cleanSupabaseUrl(rawUrl);
 // Provide a fallback dummy string so createClient does not throw 'supabaseKey is required' when key is not set
-const supabaseAnonKey = rawKey && rawKey.trim() ? rawKey : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.placeholder_key';
+const supabaseAnonKey = rawKey && rawKey.trim() ? rawKey.trim() : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.placeholder_key';
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 

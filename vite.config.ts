@@ -17,6 +17,14 @@ export default defineConfig(() => {
         },
       }),
     ],
+    define: {
+      'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(
+        (process.env.VITE_SUPABASE_URL || 'https://ltpxwagdnrtuulzhfdjk.supabase.co')
+          .replace(/\/rest\/v1\/?$/i, '')
+          .replace(/\/+$/, '')
+      ),
+      'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(process.env.VITE_SUPABASE_ANON_KEY || ''),
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

@@ -84,17 +84,12 @@ export async function uploadImage(file: File, businessId?: string): Promise<stri
 
   try {
     await supabase
-      .from('merchants')
-      .update({ logo_url: publicUrl })
-      .eq('id', currentMerchantId);
-  } catch (e) {}
-
-  try {
-    await supabase
       .from('businesses')
-      .update({ logo_url: publicUrl, logoUrl: publicUrl })
+      .update({ logo_url: publicUrl, updated_at: new Date().toISOString() })
       .eq('id', currentMerchantId);
-  } catch (e) {}
+  } catch (e) {
+    console.warn('Supabase business logo update warning:', e);
+  }
 
   return publicUrl;
 }
@@ -295,8 +290,7 @@ export async function updateBusiness(id: string, data: Partial<Business>): Promi
       const now = new Date().toISOString();
       const dbPayload: any = {
         id,
-        updated_at: now,
-        updatedAt: now
+        updated_at: now
       };
       if (data.name !== undefined) dbPayload.name = data.name;
       if (data.slug !== undefined) dbPayload.slug = data.slug;
@@ -306,16 +300,16 @@ export async function updateBusiness(id: string, data: Partial<Business>): Promi
       if (data.address !== undefined) dbPayload.address = data.address;
       if (data.logoUrl !== undefined) {
         dbPayload.logo_url = data.logoUrl;
-        dbPayload.logoUrl = data.logoUrl;
       }
       if (data.googleReviewUrl !== undefined) {
         dbPayload.google_review_url = data.googleReviewUrl;
-        dbPayload.googleReviewUrl = data.googleReviewUrl;
       }
       if (data.status !== undefined) dbPayload.status = data.status;
       if (data.planId !== undefined) {
         dbPayload.plan_id = data.planId;
-        dbPayload.planId = data.planId;
+      }
+      if (data.ownerId !== undefined) {
+        dbPayload.owner_id = data.ownerId;
       }
       if (data.currency !== undefined) dbPayload.currency = data.currency;
 
