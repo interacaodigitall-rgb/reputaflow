@@ -52,81 +52,31 @@ async function apiFetch(endpoint: string, options: RequestInit = {}): Promise<Re
 // ==========================================
 // IMAGE UPLOAD SERVICE (SUPABASE STORAGE)
 // ==========================================
-export async function uploadImage(file: File): Promise<string> {
-  if (isSupabaseConfigured()) {
-    try {
-      const url = await uploadToSupabaseStorage(file);
-      if (url) return url;
-    } catch (err) {
-      console.warn('Supabase Storage upload error:', err);
-    }
+export async function uploadImage(file: File, businessId?: string): Promise<string> {
+  if (!isSupabaseConfigured()) {
+    throw new Error('Supabase Storage não está configurado.');
   }
 
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = async () => {
-        try {
-          const canvas = document.createElement('canvas');
-          let width = img.width;
-          let height = img.height;
-          const MAX_WIDTH = 800;
-          const MAX_HEIGHT = 800;
+  const fileExt = file.name.split('.').pop() || 'png';
+  const fileName = `${businessId || 'merchant'}-${Date.now()}.${fileExt}`;
 
-          if (width > height) {
-            if (width > MAX_WIDTH) {
-              height = Math.round((height * MAX_WIDTH) / width);
-              width = MAX_WIDTH;
-            }
-          } else {
-            if (height > MAX_HEIGHT) {
-              width = Math.round((width * MAX_HEIGHT) / height);
-              height = MAX_HEIGHT;
-            }
-          }
+  const { data, error } = await supabase.storage
+    .from('uploads')
+    .upload(fileName, file, { upsert: true });
 
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.drawImage(img, 0, 0, width, height);
-          }
+  if (error) {
+    throw new Error(`Erro no Supabase Storage: ${error.message}`);
+  }
 
-          const base64Data = canvas.toDataURL('image/jpeg', 0.85);
+  const { data: publicData } = supabase.storage
+    .from('uploads')
+    .getPublicUrl(fileName);
 
-          try {
-            const res = await apiFetch('/api/upload', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                image: base64Data,
-                filename: file.name
-              })
-            });
+  if (!publicData?.publicUrl) {
+    throw new Error('Não foi possível obter a URL pública da imagem.');
+  }
 
-            if (res.ok) {
-              const data = await res.json();
-              if (data.url) {
-                resolve(data.url);
-                return;
-              }
-            }
-          } catch (netErr) {}
-
-          resolve(base64Data);
-        } catch {
-          resolve(e.target?.result as string || '');
-        }
-      };
-      img.onerror = () => {
-        resolve(e.target?.result as string || '');
-      };
-      img.src = e.target?.result as string;
-    };
-    reader.onerror = () => resolve('');
-    reader.readAsDataURL(file);
-  });
+  return publicData.publicUrl;
 }
 
 // ==========================================
