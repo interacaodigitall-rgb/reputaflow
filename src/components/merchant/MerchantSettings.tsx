@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { QRCodeSVG } from 'qrcode.react';
 import {
@@ -42,6 +42,18 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
   const [logoUrl, setLogoUrl] = useState(business.logoUrl || '');
   const [googleReviewUrl, setGoogleReviewUrl] = useState(business.googleReviewUrl || '');
   const [currency, setCurrency] = useState<'EUR' | 'BRL'>(business.currency || 'EUR');
+
+  useEffect(() => {
+    setName(business.name);
+    setSlug(business.slug);
+    setCategory(business.category || '');
+    setPhone(business.phone);
+    setEmail(business.email);
+    setAddress(business.address);
+    setLogoUrl(business.logoUrl || '');
+    setGoogleReviewUrl(business.googleReviewUrl || '');
+    setCurrency(business.currency || 'EUR');
+  }, [business]);
 
   const [saving, setSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
