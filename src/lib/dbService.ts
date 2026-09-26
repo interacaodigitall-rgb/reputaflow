@@ -466,7 +466,7 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
       }
     } catch (e) {}
 
-    const cached = getCached<Review[]>(LOCAL_STORAGE_KEY_REVIEWS, INITIAL_REVIEWS);
+    const cached = getCached<Review[]>(LOCAL_STORAGE_KEY_REVIEWS, []);
     const filtered = cached.filter((r) => isMatchingBusiness(r.businessId, businessId));
     filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     callback(filtered);
@@ -665,7 +665,7 @@ export function subscribeFeedback(businessId: string | null, callback: (feedback
       } catch (e) {}
     }
 
-    const cached = getCached<Feedback[]>(LOCAL_STORAGE_KEY_FEEDBACK, INITIAL_FEEDBACK);
+    const cached = getCached<Feedback[]>(LOCAL_STORAGE_KEY_FEEDBACK, []);
     const filtered = cached.filter((f) => isMatchingBusiness(f.businessId, businessId));
     filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     callback(filtered);
@@ -926,7 +926,7 @@ export function subscribeRecoveryCases(businessId: string | null, callback: (cas
       } catch (e) {}
     }
 
-    const cached = getCached<RecoveryCase[]>(LOCAL_STORAGE_KEY_RECOVERY, INITIAL_RECOVERY_CASES);
+    const cached = getCached<RecoveryCase[]>(LOCAL_STORAGE_KEY_RECOVERY, []);
     const filtered = cached.filter((c) => isMatchingBusiness(c.businessId, businessId));
     filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     callback(filtered);
