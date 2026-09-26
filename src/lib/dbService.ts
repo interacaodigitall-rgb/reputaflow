@@ -57,26 +57,46 @@ export async function uploadImage(file: File, businessId?: string): Promise<stri
     throw new Error('Supabase Storage não está configurado.');
   }
 
+  const currentMerchantId = businessId || 'merchant';
   const fileExt = file.name.split('.').pop() || 'png';
-  const fileName = `${businessId || 'merchant'}-${Date.now()}.${fileExt}`;
+  const filePath = `logos/${currentMerchantId}-${Date.now()}.${fileExt}`;
 
-  const { data, error } = await supabase.storage
+  const { data: uploadData, error: uploadError } = await supabase.storage
     .from('uploads')
-    .upload(fileName, file, { upsert: true });
+    .upload(filePath, file, { 
+      cacheControl: '3600', 
+      upsert: true 
+    });
 
-  if (error) {
-    throw new Error(`Erro no Supabase Storage: ${error.message}`);
+  if (uploadError) {
+    console.error("Erro no upload do Storage:", uploadError);
+    throw new Error("Erro ao enviar imagem para a nuvem: " + uploadError.message);
   }
 
   const { data: publicData } = supabase.storage
     .from('uploads')
-    .getPublicUrl(fileName);
+    .getPublicUrl(filePath);
+  const publicUrl = publicData.publicUrl;
 
-  if (!publicData?.publicUrl) {
+  if (!publicUrl) {
     throw new Error('Não foi possível obter a URL pública da imagem.');
   }
 
-  return publicData.publicUrl;
+  try {
+    await supabase
+      .from('merchants')
+      .update({ logo_url: publicUrl })
+      .eq('id', currentMerchantId);
+  } catch (e) {}
+
+  try {
+    await supabase
+      .from('businesses')
+      .update({ logo_url: publicUrl, logoUrl: publicUrl })
+      .eq('id', currentMerchantId);
+  } catch (e) {}
+
+  return publicUrl;
 }
 
 // ==========================================

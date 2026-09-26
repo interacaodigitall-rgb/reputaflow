@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { Business } from '../../types';
 import { updateBusiness, uploadImage } from '../../lib/dbService';
+import { supabase } from '../../lib/supabase';
 import { getPublicReviewUrl } from '../../lib/urlHelper';
 
 interface MerchantSettingsProps {
@@ -67,25 +68,52 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
 
   const [uploadingLogo, setUploadingLogo] = useState(false);
 
-  const handleLogoFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setUploadingLogo(true);
-      try {
-        const url = await uploadImage(file, business.id);
-        setLogoUrl(url);
-        await updateBusiness(business.id, { logoUrl: url });
-        if (onBusinessUpdated) {
-          onBusinessUpdated({ ...business, logoUrl: url });
-        }
-        setSavedSuccess(true);
-        setTimeout(() => setSavedSuccess(false), 3000);
-      } catch (err: any) {
-        console.error('Logo upload error:', err);
-        alert('Erro ao enviar imagem para o Supabase Storage. Verifique se o bucket "uploads" existe.');
-      } finally {
-        setUploadingLogo(false);
+  const handleLogoFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setUploadingLogo(true);
+    try {
+      const currentMerchantId = business.id;
+      const fileExt = file.name.split('.').pop();
+      const filePath = `logos/${currentMerchantId}-${Date.now()}.${fileExt}`;
+      
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('uploads')
+        .upload(filePath, file, { 
+          cacheControl: '3600', 
+          upsert: true 
+        });
+
+      if (uploadError) {
+        console.error("Erro no upload do Storage:", uploadError);
+        alert("Erro ao enviar imagem para a nuvem: " + uploadError.message);
+        return;
       }
+
+      const { data: publicData } = supabase.storage
+        .from('uploads')
+        .getPublicUrl(filePath);
+      const publicUrl = publicData.publicUrl;
+
+      await supabase
+        .from('merchants')
+        .update({ logo_url: publicUrl })
+        .eq('id', currentMerchantId);
+
+      await updateBusiness(business.id, { logoUrl: publicUrl });
+
+      setLogoUrl(publicUrl);
+      if (onBusinessUpdated) {
+        onBusinessUpdated({ ...business, logoUrl: publicUrl });
+      }
+      setSavedSuccess(true);
+      setTimeout(() => setSavedSuccess(false), 3000);
+    } catch (err: any) {
+      console.error('Logo upload error:', err);
+      alert('Erro ao enviar imagem para o Supabase Storage: ' + (err.message || err));
+    } finally {
+      setUploadingLogo(false);
     }
   };
 
