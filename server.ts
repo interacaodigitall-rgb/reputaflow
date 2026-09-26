@@ -11,7 +11,7 @@ import {
   updateBusinessSql,
   deleteBusinessSql
 } from './src/db/businesses.ts';
-import { getReviewsSql, createReviewSql } from './src/db/reviews.ts';
+import { getReviewsSql, createReviewSql, deleteReviewSql, clearReviewsSql } from './src/db/reviews.ts';
 import { getFeedbackSql, createFeedbackSql } from './src/db/feedback.ts';
 import { getCustomersSql, upsertCustomerSql } from './src/db/customers.ts';
 import {
@@ -227,6 +227,30 @@ app.post('/api/reviews', async (req, res) => {
   } catch (error: any) {
     console.error('Failed to create review:', error);
     res.status(500).json({ error: error.message || 'Failed to create review' });
+  }
+});
+
+// DELETE /api/reviews/:id
+app.delete('/api/reviews/:id', async (req, res) => {
+  const id = req.params.id;
+  try {
+    await deleteReviewSql(id);
+    res.json({ success: true, deletedId: id });
+  } catch (error: any) {
+    console.error('Failed to delete review:', error);
+    res.status(500).json({ error: error.message || 'Failed to delete review' });
+  }
+});
+
+// DELETE /api/reviews (bulk delete)
+app.delete('/api/reviews', async (req, res) => {
+  const bizId = req.query.businessId as string | undefined;
+  try {
+    await clearReviewsSql(bizId);
+    res.json({ success: true, businessId: bizId || 'all' });
+  } catch (error: any) {
+    console.error('Failed to clear reviews:', error);
+    res.status(500).json({ error: error.message || 'Failed to clear reviews' });
   }
 });
 

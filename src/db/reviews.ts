@@ -42,3 +42,24 @@ export async function createReviewSql(data: any) {
     throw new Error('Database query failed', { cause: error });
   }
 }
+
+export async function deleteReviewSql(id: string) {
+  try {
+    return await db.delete(reviews).where(eq(reviews.id, id));
+  } catch (error) {
+    console.error('Database delete failed in deleteReviewSql:', error);
+    throw new Error('Database delete failed', { cause: error });
+  }
+}
+
+export async function clearReviewsSql(businessId?: string) {
+  try {
+    if (businessId) {
+      return await db.delete(reviews).where(eq(reviews.businessId, businessId));
+    }
+    return await db.delete(reviews);
+  } catch (error) {
+    console.error('Database delete failed in clearReviewsSql:', error);
+    throw new Error('Database delete failed', { cause: error });
+  }
+}

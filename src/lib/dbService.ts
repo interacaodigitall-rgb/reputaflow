@@ -552,6 +552,84 @@ export async function submitReview(
   return { reviewId: targetId };
 }
 
+export async function deleteReview(reviewId: string): Promise<void> {
+  if (isSupabaseConfigured()) {
+    try {
+      await Promise.all([
+        supabase.from('reviews').delete().eq('id', reviewId),
+        supabase.from('feedback').delete().eq('review_id', reviewId),
+        supabase.from('recovery_cases').delete().eq('review_id', reviewId)
+      ]);
+    } catch (e) {
+      console.warn('Supabase delete review error:', e);
+    }
+  }
+
+  try {
+    await apiFetch(`/api/reviews/${encodeURIComponent(reviewId)}`, {
+      method: 'DELETE'
+    });
+  } catch (err) {}
+
+  const cachedReviews = getCached<Review[]>(LOCAL_STORAGE_KEY_REVIEWS, INITIAL_REVIEWS);
+  const updatedReviews = cachedReviews.filter((r) => r.id !== reviewId);
+  setCached(LOCAL_STORAGE_KEY_REVIEWS, updatedReviews);
+
+  const cachedFeedback = getCached<Feedback[]>(LOCAL_STORAGE_KEY_FEEDBACK, INITIAL_FEEDBACK);
+  const updatedFeedback = cachedFeedback.filter((f) => f.reviewId !== reviewId);
+  setCached(LOCAL_STORAGE_KEY_FEEDBACK, updatedFeedback);
+
+  const cachedCases = getCached<RecoveryCase[]>(LOCAL_STORAGE_KEY_RECOVERY, INITIAL_RECOVERY_CASES);
+  const updatedCases = cachedCases.filter((c) => c.reviewId !== reviewId);
+  setCached(LOCAL_STORAGE_KEY_RECOVERY, updatedCases);
+
+  notifyDataChanged();
+}
+
+export async function clearAllReviews(businessId?: string): Promise<void> {
+  if (isSupabaseConfigured()) {
+    try {
+      if (businessId) {
+        await Promise.all([
+          supabase.from('reviews').delete().or(`merchant_id.eq.${businessId},business_id.eq.${businessId},businessId.eq.${businessId}`),
+          supabase.from('feedback').delete().or(`business_id.eq.${businessId},businessId.eq.${businessId}`),
+          supabase.from('recovery_cases').delete().or(`business_id.eq.${businessId},businessId.eq.${businessId}`)
+        ]);
+      } else {
+        await Promise.all([
+          supabase.from('reviews').delete().gte('rating', 0),
+          supabase.from('feedback').delete().gte('rating', 0),
+          supabase.from('recovery_cases').delete().gte('rating', 0)
+        ]);
+      }
+    } catch (e) {
+      console.warn('Supabase clear all reviews error:', e);
+    }
+  }
+
+  try {
+    const url = businessId ? `/api/reviews?businessId=${encodeURIComponent(businessId)}` : '/api/reviews';
+    await apiFetch(url, { method: 'DELETE' });
+  } catch (err) {}
+
+  if (businessId) {
+    const cachedReviews = getCached<Review[]>(LOCAL_STORAGE_KEY_REVIEWS, INITIAL_REVIEWS);
+    setCached(LOCAL_STORAGE_KEY_REVIEWS, cachedReviews.filter((r) => !isMatchingBusiness(r.businessId, businessId)));
+
+    const cachedFeedback = getCached<Feedback[]>(LOCAL_STORAGE_KEY_FEEDBACK, INITIAL_FEEDBACK);
+    setCached(LOCAL_STORAGE_KEY_FEEDBACK, cachedFeedback.filter((f) => !isMatchingBusiness(f.businessId, businessId)));
+
+    const cachedCases = getCached<RecoveryCase[]>(LOCAL_STORAGE_KEY_RECOVERY, INITIAL_RECOVERY_CASES);
+    setCached(LOCAL_STORAGE_KEY_RECOVERY, cachedCases.filter((c) => !isMatchingBusiness(c.businessId, businessId)));
+  } else {
+    setCached(LOCAL_STORAGE_KEY_REVIEWS, []);
+    setCached(LOCAL_STORAGE_KEY_FEEDBACK, []);
+    setCached(LOCAL_STORAGE_KEY_RECOVERY, []);
+  }
+
+  notifyDataChanged();
+}
+
 // ==========================================
 // FEEDBACK & RECOVERY
 // ==========================================
