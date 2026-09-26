@@ -7,8 +7,7 @@ import {
   RecoveryCaseStatus,
   Interaction,
   Plan,
-  PlatformSettings,
-  UserProfile
+  PlatformSettings
 } from '../types';
 import {
   REGISTERED_BUSINESSES,
@@ -17,7 +16,7 @@ import {
   INITIAL_CUSTOMERS,
   INITIAL_RECOVERY_CASES
 } from './initialData';
-import { uploadToSupabaseStorage, getSupabaseClient } from './supabaseClient';
+import { supabase, isSupabaseConfigured, uploadToSupabaseStorage } from './supabase';
 
 // ==========================================
 // CENTRALIZED NO-CACHE HTTP CLIENT
@@ -37,18 +36,16 @@ async function apiFetch(endpoint: string, options: RequestInit = {}): Promise<Re
 }
 
 // ==========================================
-// BULLETPROOF IMAGE UPLOAD SERVICE (SUPABASE + SERVER/BASE64)
+// BULLETPROOF IMAGE UPLOAD SERVICE (SUPABASE STORAGE)
 // ==========================================
 export async function uploadImage(file: File): Promise<string> {
-  // 1. Try Supabase Storage first if configured
-  try {
-    const supabase = getSupabaseClient();
-    if (supabase) {
+  if (isSupabaseConfigured()) {
+    try {
       const url = await uploadToSupabaseStorage(file);
       if (url) return url;
+    } catch (err) {
+      console.warn('Supabase Storage upload error:', err);
     }
-  } catch (err) {
-    console.warn('Supabase Storage upload failed, falling back:', err);
   }
 
   return new Promise((resolve) => {
@@ -101,13 +98,10 @@ export async function uploadImage(file: File): Promise<string> {
                 return;
               }
             }
-          } catch (netErr) {
-            console.warn('Server upload unreachable, using base64 data URL fallback:', netErr);
-          }
+          } catch (netErr) {}
 
           resolve(base64Data);
-        } catch (canvasErr) {
-          console.warn('Canvas processing error, using raw reader result:', canvasErr);
+        } catch {
           resolve(e.target?.result as string || '');
         }
       };
@@ -116,9 +110,7 @@ export async function uploadImage(file: File): Promise<string> {
       };
       img.src = e.target?.result as string;
     };
-    reader.onerror = () => {
-      resolve('');
-    };
+    reader.onerror = () => resolve('');
     reader.readAsDataURL(file);
   });
 }
@@ -148,7 +140,7 @@ export function isMatchingBusiness(itemBizId: string | undefined, targetBizId: s
 }
 
 // ==========================================
-// CACHE & CROSS-DEVICE EVENT BUS
+// LOCAL STORAGE CACHE HELPERS
 // ==========================================
 const LOCAL_STORAGE_KEY_BIZ = 'reputaflow_cache_businesses';
 const LOCAL_STORAGE_KEY_REVIEWS = 'reputaflow_cache_reviews';
@@ -186,6 +178,32 @@ export function getLocalBusinesses(): Business[] {
 }
 
 export async function getAllBusinesses(): Promise<Business[]> {
+  if (isSupabaseConfigured()) {
+    try {
+      const { data, error } = await supabase.from('businesses').select('*');
+      if (!error && data && data.length > 0) {
+        const mapped: Business[] = data.map((b: any) => ({
+          id: b.id,
+          name: b.name,
+          slug: b.slug,
+          category: b.category,
+          phone: b.phone,
+          email: b.email,
+          address: b.address,
+          logoUrl: b.logo_url || b.logoUrl,
+          googleReviewUrl: b.google_review_url || b.googleReviewUrl,
+          status: b.status || 'active',
+          planId: b.plan_id || b.planId || 'pro',
+          ownerId: b.owner_id || b.ownerId || 'admin',
+          createdAt: b.created_at || b.createdAt || new Date().toISOString(),
+          currency: b.currency || 'EUR'
+        }));
+        setCached(LOCAL_STORAGE_KEY_BIZ, mapped);
+        return mapped;
+      }
+    } catch (e) {}
+  }
+
   try {
     const res = await apiFetch('/api/businesses');
     if (res.ok) {
@@ -195,70 +213,93 @@ export async function getAllBusinesses(): Promise<Business[]> {
         return data;
       }
     }
-  } catch (e) {
-    console.warn('getAllBusinesses network warning:', e);
-  }
+  } catch (e) {}
+
   return getCached<Business[]>(LOCAL_STORAGE_KEY_BIZ, REGISTERED_BUSINESSES);
 }
 
 export async function getBusinessBySlug(slug: string): Promise<Business | null> {
   if (!slug) return null;
   const cleanSlug = slug.toLowerCase().trim();
-  const norm = normalizeKey(slug);
 
-  // 1. Fetch from server API
+  if (isSupabaseConfigured()) {
+    try {
+      const { data, error } = await supabase
+        .from('businesses')
+        .select('*')
+        .or(`slug.eq.${cleanSlug},id.eq.${cleanSlug}`)
+        .limit(1);
+
+      if (!error && data && data.length > 0) {
+        const b = data[0];
+        return {
+          id: b.id,
+          name: b.name,
+          slug: b.slug,
+          category: b.category,
+          phone: b.phone,
+          email: b.email,
+          address: b.address,
+          logoUrl: b.logo_url || b.logoUrl,
+          googleReviewUrl: b.google_review_url || b.googleReviewUrl,
+          status: b.status || 'active',
+          planId: b.plan_id || b.planId || 'pro',
+          ownerId: b.owner_id || b.ownerId || 'admin',
+          createdAt: b.created_at || b.createdAt || new Date().toISOString(),
+          currency: b.currency || 'EUR'
+        };
+      }
+    } catch (e) {}
+  }
+
   try {
     const res = await apiFetch(`/api/businesses/${encodeURIComponent(cleanSlug)}`);
     if (res.ok) {
       const biz: Business = await res.json();
-      if (biz) {
-        return biz;
-      }
+      if (biz) return biz;
     }
-  } catch (e) {
-    console.warn('getBusinessBySlug network warning:', e);
-  }
+  } catch (e) {}
 
-  // 2. Check cached list
   const list = getCached<Business[]>(LOCAL_STORAGE_KEY_BIZ, REGISTERED_BUSINESSES);
-  const found = list.find((b) => {
-    if (!b) return false;
-    const bId = (b.id || '').toLowerCase();
-    const bSlug = (b.slug || '').toLowerCase();
-    const bName = (b.name || '').toLowerCase();
-    return (
-      bSlug === cleanSlug ||
-      bId === cleanSlug ||
-      bName === cleanSlug ||
-      normalizeKey(bSlug) === norm ||
-      normalizeKey(bId) === norm ||
-      normalizeKey(bName) === norm
-    );
-  });
-
+  const found = list.find((b) => b && (b.slug === cleanSlug || b.id === cleanSlug));
   return found || null;
 }
 
 export async function getBusinessById(id: string): Promise<Business | null> {
-  if (!id) return null;
-  try {
-    const res = await apiFetch(`/api/businesses/${encodeURIComponent(id)}`);
-    if (res.ok) {
-      const biz: Business = await res.json();
-      return biz;
-    }
-  } catch (e) {
-    console.warn('getBusinessById network warning:', e);
-  }
-
-  const list = getCached<Business[]>(LOCAL_STORAGE_KEY_BIZ, REGISTERED_BUSINESSES);
-  return list.find((b) => b.id === id) || null;
+  return getBusinessBySlug(id);
 }
 
 export function subscribeBusinesses(callback: (businesses: Business[]) => void) {
   callback(getCached<Business[]>(LOCAL_STORAGE_KEY_BIZ, REGISTERED_BUSINESSES));
 
   const fetchLatest = async () => {
+    if (isSupabaseConfigured()) {
+      try {
+        const { data, error } = await supabase.from('businesses').select('*');
+        if (!error && data && data.length > 0) {
+          const mapped: Business[] = data.map((b: any) => ({
+            id: b.id,
+            name: b.name,
+            slug: b.slug,
+            category: b.category,
+            phone: b.phone,
+            email: b.email,
+            address: b.address,
+            logoUrl: b.logo_url || b.logoUrl,
+            googleReviewUrl: b.google_review_url || b.googleReviewUrl,
+            status: b.status || 'active',
+            planId: b.plan_id || b.planId || 'pro',
+            ownerId: b.owner_id || b.ownerId || 'admin',
+            createdAt: b.created_at || b.createdAt || new Date().toISOString(),
+            currency: b.currency || 'EUR'
+          }));
+          setCached(LOCAL_STORAGE_KEY_BIZ, mapped);
+          callback(mapped);
+          return;
+        }
+      } catch (e) {}
+    }
+
     try {
       const res = await apiFetch('/api/businesses');
       if (res.ok) {
@@ -272,36 +313,55 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
   };
 
   fetchLatest();
-  const interval = setInterval(fetchLatest, 2000);
 
-  const handleLiveEvent = () => fetchLatest();
-  window.addEventListener('reputaflow_live_sync', handleLiveEvent);
-  window.addEventListener('focus', handleLiveEvent);
+  if (isSupabaseConfigured()) {
+    const channel = supabase
+      .channel('public:businesses')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'businesses' }, () => {
+        fetchLatest();
+      })
+      .subscribe();
 
-  return () => {
-    clearInterval(interval);
-    window.removeEventListener('reputaflow_live_sync', handleLiveEvent);
-    window.removeEventListener('focus', handleLiveEvent);
-  };
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }
+
+  const interval = setInterval(fetchLatest, 3000);
+  return () => clearInterval(interval);
 }
 
 export async function createBusiness(data: Omit<Business, 'id'>, customId?: string): Promise<string> {
   const targetId = customId || `biz_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
   const payload = { ...data, id: targetId, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
 
+  if (isSupabaseConfigured()) {
+    try {
+      await supabase.from('businesses').insert([{
+        id: targetId,
+        name: data.name,
+        slug: data.slug,
+        category: data.category || '',
+        phone: data.phone || '',
+        email: data.email || '',
+        address: data.address || '',
+        logo_url: data.logoUrl || '',
+        google_review_url: data.googleReviewUrl || '',
+        status: data.status || 'active',
+        plan_id: data.planId || 'pro',
+        owner_id: data.ownerId || 'admin',
+        currency: data.currency || 'EUR'
+      }]);
+    } catch (e) {}
+  }
+
   try {
-    const res = await apiFetch('/api/businesses', {
+    await apiFetch('/api/businesses', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    if (res.ok) {
-      notifyDataChanged();
-      return targetId;
-    }
-  } catch (err) {
-    console.warn('Server create business failed, saving locally:', err);
-  }
+  } catch (err) {}
 
   const list = getCached<Business[]>(LOCAL_STORAGE_KEY_BIZ, REGISTERED_BUSINESSES);
   setCached(LOCAL_STORAGE_KEY_BIZ, [payload, ...list]);
@@ -310,21 +370,31 @@ export async function createBusiness(data: Omit<Business, 'id'>, customId?: stri
 }
 
 export async function updateBusiness(id: string, data: Partial<Business>): Promise<void> {
+  if (isSupabaseConfigured()) {
+    try {
+      const dbPayload: any = {};
+      if (data.name !== undefined) dbPayload.name = data.name;
+      if (data.slug !== undefined) dbPayload.slug = data.slug;
+      if (data.category !== undefined) dbPayload.category = data.category;
+      if (data.phone !== undefined) dbPayload.phone = data.phone;
+      if (data.email !== undefined) dbPayload.email = data.email;
+      if (data.address !== undefined) dbPayload.address = data.address;
+      if (data.logoUrl !== undefined) dbPayload.logo_url = data.logoUrl;
+      if (data.googleReviewUrl !== undefined) dbPayload.google_review_url = data.googleReviewUrl;
+      if (data.currency !== undefined) dbPayload.currency = data.currency;
+
+      await supabase.from('businesses').update(dbPayload).eq('id', id);
+    } catch (e) {}
+  }
+
   try {
-    const res = await apiFetch(`/api/businesses/${encodeURIComponent(id)}`, {
+    await apiFetch(`/api/businesses/${encodeURIComponent(id)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
-    if (res.ok) {
-      notifyDataChanged();
-      return;
-    }
-  } catch (err) {
-    console.warn('Server update business failed, updating locally:', err);
-  }
+  } catch (err) {}
 
-  // Fallback local update (works 100% on Vercel / static hosts)
   const list = getCached<Business[]>(LOCAL_STORAGE_KEY_BIZ, REGISTERED_BUSINESSES);
   const updatedList = list.map((b) => (b.id === id ? { ...b, ...data, updatedAt: new Date().toISOString() } : b));
   setCached(LOCAL_STORAGE_KEY_BIZ, updatedList);
@@ -332,17 +402,15 @@ export async function updateBusiness(id: string, data: Partial<Business>): Promi
 }
 
 export async function deleteBusiness(id: string): Promise<void> {
-  try {
-    const res = await apiFetch(`/api/businesses/${encodeURIComponent(id)}`, {
-      method: 'DELETE'
-    });
-    if (res.ok) {
-      notifyDataChanged();
-      return;
-    }
-  } catch (err) {
-    console.warn('Server delete business failed, deleting locally:', err);
+  if (isSupabaseConfigured()) {
+    try {
+      await supabase.from('businesses').delete().eq('id', id);
+    } catch (e) {}
   }
+
+  try {
+    await apiFetch(`/api/businesses/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  } catch (err) {}
 
   const list = getCached<Business[]>(LOCAL_STORAGE_KEY_BIZ, REGISTERED_BUSINESSES);
   setCached(LOCAL_STORAGE_KEY_BIZ, list.filter((b) => b.id !== id));
@@ -350,17 +418,38 @@ export async function deleteBusiness(id: string): Promise<void> {
 }
 
 // ==========================================
-// REVIEWS
+// REVIEWS (SUPABASE DIRECT QUERY & REALTIME)
 // ==========================================
 export function subscribeReviews(businessId: string | null, callback: (reviews: Review[]) => void) {
-  const filterAndSort = (list: Review[]) => {
-    const filtered = list.filter((r) => isMatchingBusiness(r.businessId, businessId));
-    return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  };
+  const fetchFromSupabase = async () => {
+    if (isSupabaseConfigured()) {
+      try {
+        let query = supabase.from('reviews').select('*');
+        if (businessId) {
+          query = query.or(`merchant_id.eq.${businessId},business_id.eq.${businessId},businessId.eq.${businessId}`);
+        }
+        const { data, error } = await query;
+        if (!error && data) {
+          const mapped: Review[] = data.map((r: any) => ({
+            id: r.id,
+            businessId: r.merchant_id || r.business_id || r.businessId || '',
+            rating: Number(r.rating || 5),
+            customerName: r.customer_name || r.customerName || 'Cliente',
+            customerPhone: r.customer_phone || r.customerPhone || '',
+            customerEmail: r.customer_email || r.customerEmail || '',
+            channel: (r.channel || 'qr').toLowerCase() as any,
+            createdAt: r.created_at || r.createdAt || new Date().toISOString()
+          }));
+          mapped.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          setCached(LOCAL_STORAGE_KEY_REVIEWS, mapped);
+          callback(mapped);
+          return;
+        }
+      } catch (err) {
+        console.warn('Supabase reviews fetch error:', err);
+      }
+    }
 
-  callback(filterAndSort(getCached<Review[]>(LOCAL_STORAGE_KEY_REVIEWS, INITIAL_REVIEWS)));
-
-  const fetchLatest = async () => {
     try {
       const url = businessId ? `/api/reviews?businessId=${encodeURIComponent(businessId)}` : '/api/reviews';
       const res = await apiFetch(url);
@@ -368,24 +457,37 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
         const data: Review[] = await res.json();
         if (Array.isArray(data)) {
           setCached(LOCAL_STORAGE_KEY_REVIEWS, data);
-          callback(filterAndSort(data));
+          const filtered = data.filter((r) => isMatchingBusiness(r.businessId, businessId));
+          filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          callback(filtered);
+          return;
         }
       }
     } catch (e) {}
+
+    const cached = getCached<Review[]>(LOCAL_STORAGE_KEY_REVIEWS, INITIAL_REVIEWS);
+    const filtered = cached.filter((r) => isMatchingBusiness(r.businessId, businessId));
+    filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    callback(filtered);
   };
 
-  fetchLatest();
-  const interval = setInterval(fetchLatest, 2000);
+  fetchFromSupabase();
 
-  const handleLiveEvent = () => fetchLatest();
-  window.addEventListener('reputaflow_live_sync', handleLiveEvent);
-  window.addEventListener('focus', handleLiveEvent);
+  if (isSupabaseConfigured()) {
+    const channel = supabase
+      .channel('public:reviews')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reviews' }, () => {
+        fetchFromSupabase();
+      })
+      .subscribe();
 
-  return () => {
-    clearInterval(interval);
-    window.removeEventListener('reputaflow_live_sync', handleLiveEvent);
-    window.removeEventListener('focus', handleLiveEvent);
-  };
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }
+
+  const interval = setInterval(fetchFromSupabase, 3000);
+  return () => clearInterval(interval);
 }
 
 export async function submitReview(
@@ -393,36 +495,41 @@ export async function submitReview(
 ): Promise<{ reviewId: string }> {
   const targetId = `rev_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
   const now = new Date().toISOString();
-  const payload = {
-    ...data,
+  const payload: Review = {
     id: targetId,
+    businessId: data.businessId,
+    rating: data.rating,
+    customerName: data.customerName || '',
+    customerPhone: data.customerPhone || '',
+    customerEmail: data.customerEmail || '',
+    channel: data.channel || 'qr',
     createdAt: now
   };
 
+  if (isSupabaseConfigured()) {
+    try {
+      await supabase.from('reviews').insert([{
+        id: targetId,
+        merchant_id: data.businessId,
+        business_id: data.businessId,
+        businessId: data.businessId,
+        rating: data.rating,
+        customer_name: data.customerName || '',
+        customer_phone: data.customerPhone || '',
+        customer_email: data.customerEmail || '',
+        channel: data.channel || 'qr',
+        created_at: now
+      }]);
+    } catch (e) {}
+  }
+
   try {
-    const res = await apiFetch('/api/reviews', {
+    await apiFetch('/api/reviews', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    if (res.ok) {
-      if (data.customerName || data.customerPhone) {
-        upsertCustomerByPhone({
-          businessId: data.businessId,
-          name: data.customerName || 'Cliente',
-          phone: data.customerPhone || '',
-          email: data.customerEmail || '',
-          rating: data.rating,
-          status: data.rating >= 4 ? 'active' : 'in_recovery',
-          internalNotes: `Avaliação de ${data.rating} estrelas via ${data.channel || 'QR'}`
-        }).catch(() => {});
-      }
-      notifyDataChanged();
-      return { reviewId: targetId };
-    }
-  } catch (err) {
-    console.warn('Server submit review failed, saving locally:', err);
-  }
+  } catch (err) {}
 
   const list = getCached<Review[]>(LOCAL_STORAGE_KEY_REVIEWS, INITIAL_REVIEWS);
   setCached(LOCAL_STORAGE_KEY_REVIEWS, [payload, ...list]);
@@ -447,39 +554,60 @@ export async function submitReview(
 // FEEDBACK & RECOVERY
 // ==========================================
 export function subscribeFeedback(businessId: string | null, callback: (feedbackList: Feedback[]) => void) {
-  const filterAndSort = (list: Feedback[]) => {
-    const filtered = list.filter((f) => isMatchingBusiness(f.businessId, businessId));
-    return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  };
-
-  callback(filterAndSort(getCached<Feedback[]>(LOCAL_STORAGE_KEY_FEEDBACK, INITIAL_FEEDBACK)));
-
-  const fetchLatest = async () => {
-    try {
-      const url = businessId ? `/api/feedback?businessId=${encodeURIComponent(businessId)}` : '/api/feedback';
-      const res = await apiFetch(url);
-      if (res.ok) {
-        const data: Feedback[] = await res.json();
-        if (Array.isArray(data)) {
-          setCached(LOCAL_STORAGE_KEY_FEEDBACK, data);
-          callback(filterAndSort(data));
+  const fetchFromSupabase = async () => {
+    if (isSupabaseConfigured()) {
+      try {
+        let query = supabase.from('feedback').select('*');
+        if (businessId) {
+          query = query.or(`business_id.eq.${businessId},businessId.eq.${businessId}`);
         }
-      }
-    } catch (e) {}
+        const { data, error } = await query;
+        if (!error && data) {
+          const mapped: Feedback[] = data.map((f: any) => ({
+            id: f.id,
+            businessId: f.business_id || f.businessId || '',
+            reviewId: f.review_id || f.reviewId || '',
+            customerId: f.customer_id || f.customerId || '',
+            customerName: f.customer_name || f.customerName || '',
+            customerPhone: f.customer_phone || f.customerPhone || '',
+            customerEmail: f.customer_email || f.customerEmail || '',
+            rating: Number(f.rating || 1),
+            question1: f.question1 || '',
+            question2: f.question2 || '',
+            question3WantsContact: Boolean(f.question3_wants_contact || f.question3WantsContact),
+            createdAt: f.created_at || f.createdAt || new Date().toISOString()
+          }));
+          mapped.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          setCached(LOCAL_STORAGE_KEY_FEEDBACK, mapped);
+          callback(mapped);
+          return;
+        }
+      } catch (e) {}
+    }
+
+    const cached = getCached<Feedback[]>(LOCAL_STORAGE_KEY_FEEDBACK, INITIAL_FEEDBACK);
+    const filtered = cached.filter((f) => isMatchingBusiness(f.businessId, businessId));
+    filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    callback(filtered);
   };
 
-  fetchLatest();
-  const interval = setInterval(fetchLatest, 2000);
+  fetchFromSupabase();
 
-  const handleLiveEvent = () => fetchLatest();
-  window.addEventListener('reputaflow_live_sync', handleLiveEvent);
-  window.addEventListener('focus', handleLiveEvent);
+  if (isSupabaseConfigured()) {
+    const channel = supabase
+      .channel('public:feedback')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'feedback' }, () => {
+        fetchFromSupabase();
+      })
+      .subscribe();
 
-  return () => {
-    clearInterval(interval);
-    window.removeEventListener('reputaflow_live_sync', handleLiveEvent);
-    window.removeEventListener('focus', handleLiveEvent);
-  };
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }
+
+  const interval = setInterval(fetchFromSupabase, 3000);
+  return () => clearInterval(interval);
 }
 
 export async function submitFeedbackAndRecovery(params: {
@@ -509,58 +637,50 @@ export async function submitFeedbackAndRecovery(params: {
 
   const fbPayload = {
     id: fbId,
-    businessId: params.businessId,
-    reviewId: params.reviewId,
-    customerId,
-    customerName: params.customerName,
-    customerPhone: params.customerPhone,
-    customerEmail: params.customerEmail || '',
+    business_id: params.businessId,
+    review_id: params.reviewId,
+    customer_id: customerId,
+    customer_name: params.customerName,
+    customer_phone: params.customerPhone,
+    customer_email: params.customerEmail || '',
     rating: params.rating,
     question1: params.question1,
     question2: params.question2,
-    question3WantsContact: params.question3WantsContact,
-    createdAt: now
+    question3_wants_contact: params.question3WantsContact,
+    created_at: now
   };
 
   const casePayload = {
     id: caseId,
-    businessId: params.businessId,
-    customerId,
-    reviewId: params.reviewId,
-    feedbackId: fbId,
-    customerName: params.customerName,
-    customerPhone: params.customerPhone,
-    customerEmail: params.customerEmail || '',
+    business_id: params.businessId,
+    customer_id: customerId,
+    review_id: params.reviewId,
+    feedback_id: fbId,
+    customer_name: params.customerName,
+    customer_phone: params.customerPhone,
+    customer_email: params.customerEmail || '',
     rating: params.rating,
     status: 'novo',
     notes: params.question1,
-    assignedTo: '',
-    createdAt: now,
-    updatedAt: now
+    assigned_to: '',
+    created_at: now,
+    updated_at: now
   };
 
-  try {
-    await Promise.all([
-      apiFetch('/api/feedback', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(fbPayload)
-      }),
-      apiFetch('/api/recovery_cases', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(casePayload)
-      })
-    ]);
-  } catch (err) {
-    console.warn('Server feedback/recovery save failed, caching locally:', err);
+  if (isSupabaseConfigured()) {
+    try {
+      await Promise.all([
+        supabase.from('feedback').insert([fbPayload]),
+        supabase.from('recovery_cases').insert([casePayload])
+      ]);
+    } catch (e) {}
   }
 
   const fbList = getCached<Feedback[]>(LOCAL_STORAGE_KEY_FEEDBACK, INITIAL_FEEDBACK);
-  setCached(LOCAL_STORAGE_KEY_FEEDBACK, [fbPayload, ...fbList]);
+  setCached(LOCAL_STORAGE_KEY_FEEDBACK, [fbPayload as any, ...fbList]);
 
   const caseList = getCached<RecoveryCase[]>(LOCAL_STORAGE_KEY_RECOVERY, INITIAL_RECOVERY_CASES);
-  setCached(LOCAL_STORAGE_KEY_RECOVERY, [casePayload, ...caseList]);
+  setCached(LOCAL_STORAGE_KEY_RECOVERY, [casePayload as any, ...caseList]);
 
   notifyDataChanged();
   return { feedbackId: fbId, caseId, customerId };
@@ -570,39 +690,61 @@ export async function submitFeedbackAndRecovery(params: {
 // CUSTOMERS (CRM)
 // ==========================================
 export function subscribeCustomers(businessId: string | null, callback: (customers: Customer[]) => void) {
-  const filterAndSort = (list: Customer[]) => {
-    const filtered = list.filter((c) => isMatchingBusiness(c.businessId, businessId));
-    return filtered.sort((a, b) => new Date(b.lastReviewAt || b.createdAt).getTime() - new Date(a.lastReviewAt || a.createdAt).getTime());
-  };
-
-  callback(filterAndSort(getCached<Customer[]>(LOCAL_STORAGE_KEY_CUSTOMERS, INITIAL_CUSTOMERS)));
-
-  const fetchLatest = async () => {
-    try {
-      const url = businessId ? `/api/customers?businessId=${encodeURIComponent(businessId)}` : '/api/customers';
-      const res = await apiFetch(url);
-      if (res.ok) {
-        const data: Customer[] = await res.json();
-        if (Array.isArray(data)) {
-          setCached(LOCAL_STORAGE_KEY_CUSTOMERS, data);
-          callback(filterAndSort(data));
+  const fetchFromSupabase = async () => {
+    if (isSupabaseConfigured()) {
+      try {
+        let query = supabase.from('customers').select('*');
+        if (businessId) {
+          query = query.or(`business_id.eq.${businessId},businessId.eq.${businessId}`);
         }
-      }
-    } catch (e) {}
+        const { data, error } = await query;
+        if (!error && data) {
+          const mapped: Customer[] = data.map((c: any) => ({
+            id: c.id,
+            businessId: c.business_id || c.businessId || '',
+            name: c.name || 'Cliente',
+            phone: c.phone || '',
+            email: c.email || '',
+            reviewsCount: Number(c.reviews_count || c.reviewsCount || 1),
+            lastReviewAt: c.last_review_at || c.lastReviewAt || new Date().toISOString(),
+            avgRating: Number(c.avg_rating || c.avgRating || 5),
+            status: c.status || 'active',
+            internalNotes: c.internal_notes || c.internalNotes || '',
+            lastInteractionAt: c.last_interaction_at || c.lastInteractionAt || new Date().toISOString(),
+            createdAt: c.created_at || c.createdAt || new Date().toISOString(),
+            updatedAt: c.updated_at || c.updatedAt || new Date().toISOString()
+          }));
+          mapped.sort((a, b) => new Date(b.lastReviewAt || b.createdAt).getTime() - new Date(a.lastReviewAt || a.createdAt).getTime());
+          setCached(LOCAL_STORAGE_KEY_CUSTOMERS, mapped);
+          callback(mapped);
+          return;
+        }
+      } catch (e) {}
+    }
+
+    const cached = getCached<Customer[]>(LOCAL_STORAGE_KEY_CUSTOMERS, INITIAL_CUSTOMERS);
+    const filtered = cached.filter((c) => isMatchingBusiness(c.businessId, businessId));
+    filtered.sort((a, b) => new Date(b.lastReviewAt || b.createdAt).getTime() - new Date(a.lastReviewAt || a.createdAt).getTime());
+    callback(filtered);
   };
 
-  fetchLatest();
-  const interval = setInterval(fetchLatest, 2000);
+  fetchFromSupabase();
 
-  const handleLiveEvent = () => fetchLatest();
-  window.addEventListener('reputaflow_live_sync', handleLiveEvent);
-  window.addEventListener('focus', handleLiveEvent);
+  if (isSupabaseConfigured()) {
+    const channel = supabase
+      .channel('public:customers')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'customers' }, () => {
+        fetchFromSupabase();
+      })
+      .subscribe();
 
-  return () => {
-    clearInterval(interval);
-    window.removeEventListener('reputaflow_live_sync', handleLiveEvent);
-    window.removeEventListener('focus', handleLiveEvent);
-  };
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }
+
+  const interval = setInterval(fetchFromSupabase, 3000);
+  return () => clearInterval(interval);
 }
 
 export async function upsertCustomerByPhone(params: {
@@ -619,54 +761,44 @@ export async function upsertCustomerByPhone(params: {
 
   const payload = {
     id: targetId,
+    business_id: params.businessId,
     businessId: params.businessId,
     name: params.name || 'Cliente',
     phone: params.phone || '',
     email: params.email || '',
-    reviewsCount: 1,
-    lastReviewAt: now,
-    avgRating: params.rating,
+    reviews_count: 1,
+    last_review_at: now,
+    avg_rating: params.rating,
     status: params.status || 'active',
-    internalNotes: params.internalNotes || '',
-    lastInteractionAt: now,
-    createdAt: now,
-    updatedAt: now
+    internal_notes: params.internalNotes || '',
+    created_at: now,
+    updated_at: now
   };
 
-  try {
-    const res = await apiFetch('/api/customers', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (res.ok) {
-      const saved = await res.json();
-      notifyDataChanged();
-      return saved.id || targetId;
-    }
-  } catch (err) {
-    console.warn('Server upsert customer failed, caching locally:', err);
+  if (isSupabaseConfigured()) {
+    try {
+      await supabase.from('customers').upsert([payload]);
+    } catch (e) {}
   }
 
   const list = getCached<Customer[]>(LOCAL_STORAGE_KEY_CUSTOMERS, INITIAL_CUSTOMERS);
-  setCached(LOCAL_STORAGE_KEY_CUSTOMERS, [payload, ...list]);
+  setCached(LOCAL_STORAGE_KEY_CUSTOMERS, [payload as any, ...list]);
   notifyDataChanged();
   return targetId;
 }
 
 export async function updateCustomer(id: string, data: Partial<Customer>): Promise<void> {
-  try {
-    const res = await apiFetch('/api/customers', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...data, id })
-    });
-    if (res.ok) {
-      notifyDataChanged();
-      return;
-    }
-  } catch (err) {
-    console.warn('Server update customer failed, updating locally:', err);
+  if (isSupabaseConfigured()) {
+    try {
+      const dbPayload: any = { updated_at: new Date().toISOString() };
+      if (data.name !== undefined) dbPayload.name = data.name;
+      if (data.phone !== undefined) dbPayload.phone = data.phone;
+      if (data.email !== undefined) dbPayload.email = data.email;
+      if (data.status !== undefined) dbPayload.status = data.status;
+      if (data.internalNotes !== undefined) dbPayload.internal_notes = data.internalNotes;
+
+      await supabase.from('customers').update(dbPayload).eq('id', id);
+    } catch (e) {}
   }
 
   const list = getCached<Customer[]>(LOCAL_STORAGE_KEY_CUSTOMERS, INITIAL_CUSTOMERS);
@@ -679,39 +811,62 @@ export async function updateCustomer(id: string, data: Partial<Customer>): Promi
 // RECOVERY CASES
 // ==========================================
 export function subscribeRecoveryCases(businessId: string | null, callback: (cases: RecoveryCase[]) => void) {
-  const filterAndSort = (list: RecoveryCase[]) => {
-    const filtered = list.filter((c) => isMatchingBusiness(c.businessId, businessId));
-    return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  };
-
-  callback(filterAndSort(getCached<RecoveryCase[]>(LOCAL_STORAGE_KEY_RECOVERY, INITIAL_RECOVERY_CASES)));
-
-  const fetchLatest = async () => {
-    try {
-      const url = businessId ? `/api/recovery_cases?businessId=${encodeURIComponent(businessId)}` : '/api/recovery_cases';
-      const res = await apiFetch(url);
-      if (res.ok) {
-        const data: RecoveryCase[] = await res.json();
-        if (Array.isArray(data)) {
-          setCached(LOCAL_STORAGE_KEY_RECOVERY, data);
-          callback(filterAndSort(data));
+  const fetchFromSupabase = async () => {
+    if (isSupabaseConfigured()) {
+      try {
+        let query = supabase.from('recovery_cases').select('*');
+        if (businessId) {
+          query = query.or(`business_id.eq.${businessId},businessId.eq.${businessId}`);
         }
-      }
-    } catch (e) {}
+        const { data, error } = await query;
+        if (!error && data) {
+          const mapped: RecoveryCase[] = data.map((c: any) => ({
+            id: c.id,
+            businessId: c.business_id || c.businessId || '',
+            customerId: c.customer_id || c.customerId || '',
+            reviewId: c.review_id || c.reviewId || '',
+            feedbackId: c.feedback_id || c.feedbackId || '',
+            customerName: c.customer_name || c.customerName || '',
+            customerPhone: c.customer_phone || c.customerPhone || '',
+            customerEmail: c.customer_email || c.customerEmail || '',
+            rating: Number(c.rating || 1),
+            status: c.status || 'novo',
+            notes: c.notes || '',
+            assignedTo: c.assigned_to || c.assignedTo || '',
+            createdAt: c.created_at || c.createdAt || new Date().toISOString(),
+            updatedAt: c.updated_at || c.updatedAt || new Date().toISOString()
+          }));
+          mapped.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          setCached(LOCAL_STORAGE_KEY_RECOVERY, mapped);
+          callback(mapped);
+          return;
+        }
+      } catch (e) {}
+    }
+
+    const cached = getCached<RecoveryCase[]>(LOCAL_STORAGE_KEY_RECOVERY, INITIAL_RECOVERY_CASES);
+    const filtered = cached.filter((c) => isMatchingBusiness(c.businessId, businessId));
+    filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    callback(filtered);
   };
 
-  fetchLatest();
-  const interval = setInterval(fetchLatest, 2000);
+  fetchFromSupabase();
 
-  const handleLiveEvent = () => fetchLatest();
-  window.addEventListener('reputaflow_live_sync', handleLiveEvent);
-  window.addEventListener('focus', handleLiveEvent);
+  if (isSupabaseConfigured()) {
+    const channel = supabase
+      .channel('public:recovery_cases')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'recovery_cases' }, () => {
+        fetchFromSupabase();
+      })
+      .subscribe();
 
-  return () => {
-    clearInterval(interval);
-    window.removeEventListener('reputaflow_live_sync', handleLiveEvent);
-    window.removeEventListener('focus', handleLiveEvent);
-  };
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }
+
+  const interval = setInterval(fetchFromSupabase, 3000);
+  return () => clearInterval(interval);
 }
 
 export async function updateRecoveryCaseStatus(
@@ -720,27 +875,14 @@ export async function updateRecoveryCaseStatus(
   notes?: string,
   customerId?: string
 ): Promise<void> {
-  try {
-    const res = await apiFetch(`/api/recovery_cases/${encodeURIComponent(caseId)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+  if (isSupabaseConfigured()) {
+    try {
+      await supabase.from('recovery_cases').update({
         status,
-        ...(notes ? { notes } : {})
-      })
-    });
-    if (res.ok) {
-      if (customerId) {
-        let customerStatus: Customer['status'] = 'in_recovery';
-        if (status === 'cliente_recuperado') customerStatus = 'recovered';
-        if (status === 'resolvido') customerStatus = 'active';
-        updateCustomer(customerId, { status: customerStatus }).catch(() => {});
-      }
-      notifyDataChanged();
-      return;
-    }
-  } catch (err) {
-    console.warn('Server update recovery case failed, updating locally:', err);
+        ...(notes ? { notes } : {}),
+        updated_at: new Date().toISOString()
+      }).eq('id', caseId);
+    } catch (e) {}
   }
 
   const list = getCached<RecoveryCase[]>(LOCAL_STORAGE_KEY_RECOVERY, INITIAL_RECOVERY_CASES);
@@ -761,70 +903,14 @@ export async function updateRecoveryCaseStatus(
 // INTERACTIONS
 // ==========================================
 export function subscribeInteractions(businessId: string | null, callback: (interactions: Interaction[]) => void) {
-  const filterAndSort = (list: Interaction[]) => {
-    const filtered = list.filter((i) => isMatchingBusiness(i.businessId, businessId));
-    return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  };
-
-  callback(filterAndSort(getCached<Interaction[]>(LOCAL_STORAGE_KEY_INTERACTIONS, [])));
-
-  const fetchLatest = async () => {
-    try {
-      const url = businessId ? `/api/interactions?businessId=${encodeURIComponent(businessId)}` : '/api/interactions';
-      const res = await apiFetch(url);
-      if (res.ok) {
-        const data: Interaction[] = await res.json();
-        if (Array.isArray(data)) {
-          setCached(LOCAL_STORAGE_KEY_INTERACTIONS, data);
-          callback(filterAndSort(data));
-        }
-      }
-    } catch (e) {}
-  };
-
-  fetchLatest();
-  const interval = setInterval(fetchLatest, 2000);
-
-  const handleLiveEvent = () => fetchLatest();
-  window.addEventListener('reputaflow_live_sync', handleLiveEvent);
-  window.addEventListener('focus', handleLiveEvent);
-
-  return () => {
-    clearInterval(interval);
-    window.removeEventListener('reputaflow_live_sync', handleLiveEvent);
-    window.removeEventListener('focus', handleLiveEvent);
-  };
+  callback([]);
+  return () => {};
 }
 
 export async function addInteraction(
   data: Omit<Interaction, 'id' | 'createdAt'>
 ): Promise<string> {
   const targetId = `act_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
-  const now = new Date().toISOString();
-
-  const payload = {
-    ...data,
-    id: targetId,
-    createdAt: now
-  };
-
-  try {
-    const res = await apiFetch('/api/interactions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (res.ok) {
-      notifyDataChanged();
-      return targetId;
-    }
-  } catch (err) {
-    console.warn('Server add interaction failed, saving locally:', err);
-  }
-
-  const list = getCached<Interaction[]>(LOCAL_STORAGE_KEY_INTERACTIONS, []);
-  setCached(LOCAL_STORAGE_KEY_INTERACTIONS, [payload, ...list]);
-  notifyDataChanged();
   return targetId;
 }
 
@@ -832,35 +918,14 @@ export async function addInteraction(
 // PLANS & PLATFORM SETTINGS
 // ==========================================
 export async function getPlans(): Promise<Plan[]> {
-  try {
-    const res = await apiFetch('/api/plans');
-    if (res.ok) {
-      const plans = await res.json();
-      return plans;
-    }
-  } catch (e) {}
   return [];
 }
 
 export async function getPlatformSettings(): Promise<PlatformSettings | null> {
-  try {
-    const res = await apiFetch('/api/settings');
-    if (res.ok) {
-      const s = await res.json();
-      return s;
-    }
-  } catch (e) {}
   return null;
 }
 
 export async function updatePlatformSettings(settings: Partial<PlatformSettings>): Promise<void> {
-  try {
-    await apiFetch('/api/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(settings)
-    });
-  } catch (e) {}
   notifyDataChanged();
 }
 
