@@ -140,8 +140,9 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
   fetchAll();
 
   if (isSupabaseConfigured()) {
+    const channelName = `sub_businesses_${Math.random().toString(36).substring(2, 8)}`;
     const channel = supabase
-      .channel('sub_businesses')
+      .channel(channelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'businesses' }, () => {
         fetchAll();
       })
@@ -398,8 +399,9 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
   let channel: any = null;
   // RULE #3: Realtime listener on 'realtime_reviews' listening to ALL events ('*'), including DELETE
   if (isSupabaseConfigured()) {
+    const channelName = `realtime_reviews_${Math.random().toString(36).substring(2, 8)}`;
     channel = supabase
-      .channel('realtime_reviews')
+      .channel(channelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reviews' }, (payload) => {
         console.log('Realtime reviews postgres_changes event:', payload);
         fetchFromSupabase();
@@ -590,8 +592,9 @@ export function subscribeFeedback(businessId: string | null, callback: (feedback
 
   let channel: any = null;
   if (isSupabaseConfigured()) {
+    const channelName = `realtime_feedback_${Math.random().toString(36).substring(2, 8)}`;
     channel = supabase
-      .channel('realtime_feedback')
+      .channel(channelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'feedback' }, () => {
         fetchFromSupabase();
       })
@@ -740,8 +743,9 @@ export function subscribeCustomers(businessId: string | null, callback: (custome
 
   let channel: any = null;
   if (isSupabaseConfigured()) {
+    const channelName = `realtime_customers_${Math.random().toString(36).substring(2, 8)}`;
     channel = supabase
-      .channel('realtime_customers')
+      .channel(channelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'customers' }, () => {
         fetchFromSupabase();
       })
@@ -874,8 +878,9 @@ export function subscribeRecoveryCases(businessId: string | null, callback: (cas
 
   let channel: any = null;
   if (isSupabaseConfigured()) {
+    const channelName = `realtime_recovery_cases_${Math.random().toString(36).substring(2, 8)}`;
     channel = supabase
-      .channel('realtime_recovery_cases')
+      .channel(channelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'recovery_cases' }, () => {
         fetchFromSupabase();
       })

@@ -74,6 +74,12 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
       try {
         const url = await uploadImage(file, business.id);
         setLogoUrl(url);
+        await updateBusiness(business.id, { logoUrl: url });
+        if (onBusinessUpdated) {
+          onBusinessUpdated({ ...business, logoUrl: url });
+        }
+        setSavedSuccess(true);
+        setTimeout(() => setSavedSuccess(false), 3000);
       } catch (err: any) {
         console.error('Logo upload error:', err);
         alert('Erro ao enviar imagem para o Supabase Storage. Verifique se o bucket "uploads" existe.');
