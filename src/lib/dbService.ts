@@ -315,8 +315,9 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
   fetchLatest();
 
   if (isSupabaseConfigured()) {
+    const channelName = `sub_biz_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const channel = supabase
-      .channel('public:businesses')
+      .channel(channelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'businesses' }, () => {
         fetchLatest();
       })
@@ -474,8 +475,9 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
   fetchFromSupabase();
 
   if (isSupabaseConfigured()) {
+    const channelName = `sub_reviews_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const channel = supabase
-      .channel('public:reviews')
+      .channel(channelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reviews' }, () => {
         fetchFromSupabase();
       })
@@ -594,8 +596,9 @@ export function subscribeFeedback(businessId: string | null, callback: (feedback
   fetchFromSupabase();
 
   if (isSupabaseConfigured()) {
+    const channelName = `sub_feedback_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const channel = supabase
-      .channel('public:feedback')
+      .channel(channelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'feedback' }, () => {
         fetchFromSupabase();
       })
@@ -731,8 +734,9 @@ export function subscribeCustomers(businessId: string | null, callback: (custome
   fetchFromSupabase();
 
   if (isSupabaseConfigured()) {
+    const channelName = `sub_customers_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const channel = supabase
-      .channel('public:customers')
+      .channel(channelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'customers' }, () => {
         fetchFromSupabase();
       })
@@ -853,8 +857,9 @@ export function subscribeRecoveryCases(businessId: string | null, callback: (cas
   fetchFromSupabase();
 
   if (isSupabaseConfigured()) {
+    const channelName = `sub_recovery_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const channel = supabase
-      .channel('public:recovery_cases')
+      .channel(channelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'recovery_cases' }, () => {
         fetchFromSupabase();
       })
