@@ -12,7 +12,6 @@ import {
 import { auth, googleProvider } from '../lib/firebase';
 import { UserRole, Business, UserProfile } from '../types';
 import { subscribeBusinesses, updateBusiness } from '../lib/dbService';
-import { bootstrapSeedData } from '../lib/seed';
 
 interface AuthContextType {
   currentUser: FirebaseUser | null;
@@ -31,22 +30,49 @@ interface AuthContextType {
 }
 
 const ADMIN_EMAILS = ['interacaodigitall@gmail.com', 'reputa@glowfyhub.com', 'eunawebse@gmail.com'];
+const SESSION_USER_KEY = 'reputaflow_session_user';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(() => {
+    try {
+      const stored = localStorage.getItem(SESSION_USER_KEY);
+      if (stored) {
+        return JSON.parse(stored);
+      }
+    } catch {}
+    return null;
+  });
+
   const [currentRole, setCurrentRole] = useState<UserRole>('merchant');
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [selectedBusiness, setSelectedBusiness] = useState<Business | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Monitor Firebase Auth state
+  // Helper to persist user session across browser reloads
+  const persistSessionUser = (user: any) => {
+    try {
+      if (user && user.email) {
+        localStorage.setItem(SESSION_USER_KEY, JSON.stringify({
+          uid: user.uid,
+          email: user.email,
+          displayName: user.displayName || user.email.split('@')[0],
+          emailVerified: user.emailVerified || true
+        }));
+      } else {
+        localStorage.removeItem(SESSION_USER_KEY);
+      }
+    } catch {}
+  };
+
+  // Monitor Auth state
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setCurrentUser(user);
-      if (user) {
-        // Sync user profile to Cloud SQL database
+      if (user && !user.isAnonymous) {
+        setCurrentUser(user);
+        persistSessionUser(user);
+
         if (user.email) {
           fetch('/api/users/sync', {
             method: 'POST',
@@ -59,16 +85,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }).catch(() => {});
         }
 
-        // STRICT: Only explicitly listed administrator emails can ever obtain super_admin role
         const isAdmin = Boolean(
           user.email && ADMIN_EMAILS.map(e => e.toLowerCase()).includes(user.email.toLowerCase().trim())
         );
-        if (isAdmin) {
-          setCurrentRole('super_admin');
-        } else {
-          setCurrentRole('merchant');
-        }
+        setCurrentRole(isAdmin ? 'super_admin' : 'merchant');
       } else {
+        // If we have a saved session in localStorage, maintain the session on page reload
+        try {
+          const stored = localStorage.getItem(SESSION_USER_KEY);
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            if (parsed && parsed.email) {
+              setCurrentUser(parsed);
+              const isAdmin = Boolean(
+                parsed.email && ADMIN_EMAILS.map(e => e.toLowerCase()).includes(parsed.email.toLowerCase().trim())
+              );
+              setCurrentRole(isAdmin ? 'super_admin' : 'merchant');
+              setLoading(false);
+              return;
+            }
+          }
+        } catch {}
+
         setCurrentRole('merchant');
         signInAnonymously(auth).catch(() => {});
       }
@@ -78,7 +116,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, []);
 
-  // Listen to businesses from server API
+  // Listen to businesses
   useEffect(() => {
     const unsubscribe = subscribeBusinesses((bizList) => {
       setBusinesses(bizList);
@@ -88,7 +126,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const userEmail = currentUser.email.toLowerCase().trim();
             const isAdmin = ADMIN_EMAILS.map(e => e.toLowerCase()).includes(userEmail);
             if (!isAdmin) {
-              // It's a merchant! Lock them to their specific business
               const matched = bizList.find((b) => {
                 const bEmail = (b.email || '').toLowerCase().trim();
                 const bSlug = (b.slug || '').toLowerCase().trim();
@@ -115,7 +152,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signInWithGoogle = async () => {
     try {
-      await signInWithPopup(auth, googleProvider);
+      const res = await signInWithPopup(auth, googleProvider);
+      if (res.user) {
+        persistSessionUser(res.user);
+      }
     } catch (err) {
       console.error('Login error:', err);
       throw err;
@@ -125,9 +165,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signInWithEmail = async (email: string, password: string) => {
     const cleanEmail = email.trim().toLowerCase();
     try {
-      await signInWithEmailAndPassword(auth, cleanEmail, password);
+      const userCred = await signInWithEmailAndPassword(auth, cleanEmail, password);
+      if (userCred.user) {
+        setCurrentUser(userCred.user);
+        persistSessionUser(userCred.user);
+      }
     } catch (err: any) {
-      // Check if email belongs to a registered merchant with a matching temporary password
       let matchingBiz = businesses.find((b) => b.email?.toLowerCase().trim() === cleanEmail);
       if (!matchingBiz) {
         try {
@@ -147,21 +190,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           err.code === 'auth/wrong-password')
       ) {
         try {
-          // Auto register this credential on Firebase Auth for immediate seamless access
-          await createUserWithEmailAndPassword(auth, cleanEmail, password);
+          const signUpCred = await createUserWithEmailAndPassword(auth, cleanEmail, password);
+          if (signUpCred.user) {
+            setCurrentUser(signUpCred.user);
+            persistSessionUser(signUpCred.user);
+          }
           return;
         } catch (signUpErr: any) {
           if (signUpErr.code === 'auth/email-already-in-use') {
             try {
-              await signInWithEmailAndPassword(auth, cleanEmail, password);
+              const signInCred = await signInWithEmailAndPassword(auth, cleanEmail, password);
+              if (signInCred.user) {
+                setCurrentUser(signInCred.user);
+                persistSessionUser(signInCred.user);
+              }
               return;
             } catch {}
           }
-          console.warn('Auto register fallback:', signUpErr);
         }
       }
 
-      // Resilient fallback local authentication
+      // Local fallback credential verification
       const merchantBiz = matchingBiz || businesses.find(b => b.email?.toLowerCase().trim() === cleanEmail) || (cleanEmail.includes('comercio') || cleanEmail.includes('comerciante') ? businesses[0] : null);
       if (merchantBiz && (merchantBiz.password === password || password === 'reputa123' || password === 'admin123')) {
         const mockUser: any = {
@@ -173,6 +222,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setCurrentUser(mockUser);
         setCurrentRole('merchant');
         setSelectedBusiness(merchantBiz);
+        persistSessionUser(mockUser);
         return;
       }
 
@@ -186,6 +236,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setCurrentUser(mockUser);
         setCurrentRole('merchant');
         setSelectedBusiness(matchingBiz);
+        persistSessionUser(mockUser);
         return;
       }
 
@@ -198,6 +249,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
         setCurrentUser(mockAdmin);
         setCurrentRole('super_admin');
+        persistSessionUser(mockAdmin);
         return;
       }
 
@@ -207,6 +259,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signOut = async () => {
+    try {
+      localStorage.removeItem(SESSION_USER_KEY);
+    } catch {}
     try {
       await fbSignOut(auth);
     } catch (err) {
@@ -221,7 +276,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!auth.currentUser) throw new Error('Utilizador não autenticado');
     try {
       await updatePassword(auth.currentUser, newPassword);
-      // Synchronize in businesses if it's a merchant to allow mobile logins too
       if (currentRole === 'merchant' && selectedBusiness?.id) {
         await updateBusiness(selectedBusiness.id, { password: newPassword });
       }
@@ -231,7 +285,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // STRICT: Only users whose email is in ADMIN_EMAILS are ever super_admin
   const isSuperAdmin = Boolean(
     currentUser?.email && ADMIN_EMAILS.map(e => e.toLowerCase()).includes(currentUser.email.toLowerCase().trim())
   );
@@ -245,7 +298,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const setSelectedBusinessSafely = (biz: Business | null) => {
-    // If user is a merchant, prevent switching to other businesses
     if (!isSuperAdmin && currentUser?.email && biz) {
       const userEmail = currentUser.email.toLowerCase().trim();
       const isOwner =
