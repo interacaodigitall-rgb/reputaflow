@@ -16,7 +16,7 @@ import {
   INITIAL_CUSTOMERS,
   INITIAL_RECOVERY_CASES
 } from './initialData';
-import { supabase, isSupabaseConfigured, uploadToSupabaseStorage } from './supabase';
+import { supabase, isSupabaseConfigured, uploadToSupabaseStorage, uploadBusinessLogo } from './supabase';
 
 // ==========================================
 // PURGE LEGACY LOCALSTORAGE ON BOOT (MANDATORY RULE #2)
@@ -53,42 +53,19 @@ async function apiFetch(endpoint: string, options: RequestInit = {}): Promise<Re
 // IMAGE UPLOAD SERVICE (SUPABASE STORAGE)
 // ==========================================
 export async function uploadImage(file: File, businessId?: string): Promise<string> {
-  if (!isSupabaseConfigured()) {
-    throw new Error('Supabase Storage não está configurado.');
-  }
+  const currentMerchantId = businessId || 'biz_mrnavalha';
+  const publicUrl = await uploadBusinessLogo(file, currentMerchantId);
 
-  const currentMerchantId = businessId || 'merchant';
-  const fileExt = file.name.split('.').pop() || 'png';
-  const filePath = `logos/${currentMerchantId}-${Date.now()}.${fileExt}`;
-
-  const { data: uploadData, error: uploadError } = await supabase.storage
-    .from('uploads')
-    .upload(filePath, file, { 
-      cacheControl: '3600', 
-      upsert: true 
-    });
-
-  if (uploadError) {
-    console.error("Erro no upload do Storage:", uploadError);
-    throw new Error("Erro ao enviar imagem para a nuvem: " + uploadError.message);
-  }
-
-  const { data: publicData } = supabase.storage
-    .from('uploads')
-    .getPublicUrl(filePath);
-  const publicUrl = publicData.publicUrl;
-
-  if (!publicUrl) {
-    throw new Error('Não foi possível obter a URL pública da imagem.');
-  }
-
+  // Sincroniza cache local e notifica componentes
   try {
-    await supabase
-      .from('businesses')
-      .update({ logo_url: publicUrl, updated_at: new Date().toISOString() })
-      .eq('id', currentMerchantId);
-  } catch (e) {
-    console.warn('Supabase business logo update warning:', e);
+    const list = getCached<Business[]>(LOCAL_STORAGE_KEY_BIZ, REGISTERED_BUSINESSES);
+    const updated = list.map((b) => (b.id === currentMerchantId ? { ...b, logoUrl: publicUrl } : b));
+    setCached(LOCAL_STORAGE_KEY_BIZ, updated);
+  } catch {}
+
+  notifyDataChanged();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated'));
   }
 
   return publicUrl;
@@ -367,23 +344,25 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
       try {
         let query = supabase.from('reviews').select('*');
         if (businessId) {
-          query = query.or(`merchant_id.eq.${businessId},business_id.eq.${businessId},businessId.eq.${businessId}`);
+          query = query.eq('business_id', businessId);
         }
         const { data, error } = await query;
         if (!error && data) {
           const mapped: Review[] = data.map((r: any) => ({
             id: r.id,
-            businessId: r.merchant_id || r.business_id || r.businessId || '',
+            businessId: r.business_id || r.merchant_id || '',
             rating: Number(r.rating || 5),
-            customerName: r.customer_name || r.customerName || 'Cliente',
-            customerPhone: r.customer_phone || r.customerPhone || '',
-            customerEmail: r.customer_email || r.customerEmail || '',
+            customerName: r.customer_name || 'Cliente',
+            customerPhone: r.customer_phone || '',
+            customerEmail: r.customer_email || '',
             channel: (r.channel || 'qr').toLowerCase() as any,
-            createdAt: r.created_at || r.createdAt || new Date().toISOString()
+            createdAt: r.created_at || new Date().toISOString()
           }));
           mapped.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
           callback(mapped);
           return;
+        } else if (error) {
+          console.warn('[Supabase Reviews] Fetch error:', error.message);
         }
       } catch (err) {
         console.warn('Supabase reviews fetch error:', err);
@@ -411,21 +390,42 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
   fetchFromSupabase();
 
   let channel: any = null;
-  // RULE #3: Realtime listener on 'realtime_reviews' listening to ALL events ('*'), including DELETE
+  // RULE #3: Realtime listener on Supabase channel listening to postgres_changes + Realtime Broadcast
   if (isSupabaseConfigured()) {
-    const channelName = `realtime_reviews_${Math.random().toString(36).substring(2, 8)}`;
+    const channelName = `crm_reviews_channel_${businessId || 'all'}`;
     channel = supabase
       .channel(channelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reviews' }, (payload) => {
-        console.log('Realtime reviews postgres_changes event:', payload);
+        console.log('[Supabase Realtime] Reviews postgres_changes event:', payload.eventType);
         fetchFromSupabase();
       })
-      .subscribe();
+      .on('broadcast', { event: 'review_created' }, () => {
+        console.log('[Supabase Realtime] Broadcast review_created received');
+        fetchFromSupabase();
+      })
+      .on('broadcast', { event: 'review_deleted' }, () => {
+        console.log('[Supabase Realtime] Broadcast review_deleted received');
+        fetchFromSupabase();
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[Supabase Realtime] Subscribed to reviews channel:', channelName);
+        }
+      });
   }
 
   const handleSyncEvent = () => fetchFromSupabase();
+  const handleVisibilityChange = () => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+      fetchFromSupabase();
+    }
+  };
+
   if (typeof window !== 'undefined') {
     window.addEventListener('reputaflow_live_sync', handleSyncEvent);
+    window.addEventListener('reputaflow_reviews_updated', handleSyncEvent);
+    window.addEventListener('focus', handleSyncEvent);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
   }
 
   const interval = setInterval(fetchFromSupabase, 3000);
@@ -436,6 +436,9 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
     }
     if (typeof window !== 'undefined') {
       window.removeEventListener('reputaflow_live_sync', handleSyncEvent);
+      window.removeEventListener('reputaflow_reviews_updated', handleSyncEvent);
+      window.removeEventListener('focus', handleSyncEvent);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     }
     clearInterval(interval);
   };
@@ -446,41 +449,66 @@ export async function submitReview(
 ): Promise<{ reviewId: string }> {
   const targetId = `rev_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
   const now = new Date().toISOString();
-  const payload: Review = {
+
+  // Strict valid snake_case DB columns matching PostgreSQL schema
+  const dbPayload = {
     id: targetId,
-    businessId: data.businessId,
-    rating: data.rating,
-    customerName: data.customerName || '',
-    customerPhone: data.customerPhone || '',
-    customerEmail: data.customerEmail || '',
-    channel: data.channel || 'qr',
-    createdAt: now
+    business_id: data.businessId,
+    rating: Number(data.rating),
+    customer_name: data.customerName?.trim() || 'Cliente',
+    customer_phone: data.customerPhone?.trim() || null,
+    customer_email: data.customerEmail?.trim() || null,
+    channel: (data.channel || 'qr').toLowerCase(),
+    created_at: now
   };
 
   if (isSupabaseConfigured()) {
     try {
-      await supabase.from('reviews').insert([{
-        id: targetId,
-        merchant_id: data.businessId,
-        business_id: data.businessId,
-        businessId: data.businessId,
-        rating: data.rating,
-        customer_name: data.customerName || '',
-        customer_phone: data.customerPhone || '',
-        customer_email: data.customerEmail || '',
-        channel: data.channel || 'qr',
-        created_at: now
-      }]);
-    } catch (e) {}
-  }
+      const { data: inserted, error: insertError } = await supabase
+        .from('reviews')
+        .insert([dbPayload])
+        .select();
 
-  try {
-    await apiFetch('/api/reviews', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-  } catch (err) {}
+      if (insertError) {
+        console.error('[Supabase Review Insert] Erro detalhado:', insertError);
+        throw new Error(`Falha ao registrar no Supabase: ${insertError.message}`);
+      }
+
+      console.log('[Supabase Review Insert] Gravado com sucesso no Supabase:', inserted);
+
+      // Notifica canais Realtime para sincronização instantânea em outros dispositivos
+      try {
+        const syncChannel = supabase.channel(`crm_reviews_channel_${data.businessId || 'all'}`);
+        syncChannel.send({
+          type: 'broadcast',
+          event: 'review_created',
+          payload: dbPayload
+        }).catch(() => {});
+      } catch (bcErr) {
+        console.warn('Realtime broadcast warning:', bcErr);
+      }
+    } catch (err: any) {
+      console.error('[Supabase Review Insert] Exceção capturada:', err);
+      // Fallback local API
+      try {
+        await apiFetch('/api/reviews', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(dbPayload)
+        });
+      } catch (apiErr) {
+        console.warn('API fallback review error:', apiErr);
+      }
+    }
+  } else {
+    try {
+      await apiFetch('/api/reviews', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dbPayload)
+      });
+    } catch (err) {}
+  }
 
   if (data.customerName || data.customerPhone) {
     upsertCustomerByPhone({
@@ -495,6 +523,10 @@ export async function submitReview(
   }
 
   notifyDataChanged();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('reputaflow_reviews_updated'));
+  }
+
   return { reviewId: targetId };
 }
 
@@ -506,6 +538,15 @@ export async function deleteReview(reviewId: string): Promise<void> {
         supabase.from('feedback').delete().eq('review_id', reviewId),
         supabase.from('recovery_cases').delete().eq('review_id', reviewId)
       ]);
+
+      try {
+        const syncChannel = supabase.channel('crm_reviews_channel_all');
+        syncChannel.send({
+          type: 'broadcast',
+          event: 'review_deleted',
+          payload: { reviewId }
+        }).catch(() => {});
+      } catch {}
     } catch (e) {
       console.warn('Supabase delete review error:', e);
     }
@@ -518,6 +559,9 @@ export async function deleteReview(reviewId: string): Promise<void> {
   } catch (err) {}
 
   notifyDataChanged();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('reputaflow_reviews_updated'));
+  }
 }
 
 export async function clearAllReviews(businessId?: string): Promise<void> {
@@ -525,9 +569,9 @@ export async function clearAllReviews(businessId?: string): Promise<void> {
     try {
       if (businessId) {
         await Promise.all([
-          supabase.from('reviews').delete().or(`merchant_id.eq.${businessId},business_id.eq.${businessId},businessId.eq.${businessId}`),
-          supabase.from('feedback').delete().or(`business_id.eq.${businessId},businessId.eq.${businessId}`),
-          supabase.from('recovery_cases').delete().or(`business_id.eq.${businessId},businessId.eq.${businessId}`)
+          supabase.from('reviews').delete().eq('business_id', businessId),
+          supabase.from('feedback').delete().eq('business_id', businessId),
+          supabase.from('recovery_cases').delete().eq('business_id', businessId)
         ]);
       } else {
         await Promise.all([
@@ -536,6 +580,15 @@ export async function clearAllReviews(businessId?: string): Promise<void> {
           supabase.from('recovery_cases').delete().gte('rating', 0)
         ]);
       }
+
+      try {
+        const syncChannel = supabase.channel(`crm_reviews_channel_${businessId || 'all'}`);
+        syncChannel.send({
+          type: 'broadcast',
+          event: 'review_deleted',
+          payload: { clearAll: true, businessId }
+        }).catch(() => {});
+      } catch {}
     } catch (e) {
       console.warn('Supabase clear all reviews error:', e);
     }
@@ -558,23 +611,23 @@ export function subscribeFeedback(businessId: string | null, callback: (feedback
       try {
         let query = supabase.from('feedback').select('*');
         if (businessId) {
-          query = query.or(`business_id.eq.${businessId},businessId.eq.${businessId}`);
+          query = query.eq('business_id', businessId);
         }
         const { data, error } = await query;
         if (!error && data) {
           const mapped: Feedback[] = data.map((f: any) => ({
             id: f.id,
-            businessId: f.business_id || f.businessId || '',
-            reviewId: f.review_id || f.reviewId || '',
-            customerId: f.customer_id || f.customerId || '',
-            customerName: f.customer_name || f.customerName || 'Cliente',
-            customerPhone: f.customer_phone || f.customerPhone || '',
-            customerEmail: f.customer_email || f.customerEmail || '',
+            businessId: f.business_id || '',
+            reviewId: f.review_id || '',
+            customerId: f.customer_id || '',
+            customerName: f.customer_name || 'Cliente',
+            customerPhone: f.customer_phone || '',
+            customerEmail: f.customer_email || '',
             rating: Number(f.rating || 1),
             question1: f.question1 || '',
             question2: f.question2 || '',
-            question3WantsContact: Boolean(f.question3_wants_contact ?? f.question3WantsContact ?? true),
-            createdAt: f.created_at || f.createdAt || new Date().toISOString()
+            question3WantsContact: Boolean(f.question3_wants_contact ?? true),
+            createdAt: f.created_at || new Date().toISOString()
           }));
           mapped.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
           callback(mapped);
@@ -606,7 +659,7 @@ export function subscribeFeedback(businessId: string | null, callback: (feedback
 
   let channel: any = null;
   if (isSupabaseConfigured()) {
-    const channelName = `realtime_feedback_${Math.random().toString(36).substring(2, 8)}`;
+    const channelName = `realtime_feedback_${businessId || 'all'}_${Math.random().toString(36).substring(2, 8)}`;
     channel = supabase
       .channel(channelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'feedback' }, () => {
@@ -618,13 +671,19 @@ export function subscribeFeedback(businessId: string | null, callback: (feedback
   const handleSyncEvent = () => fetchFromSupabase();
   if (typeof window !== 'undefined') {
     window.addEventListener('reputaflow_live_sync', handleSyncEvent);
+    window.addEventListener('reputaflow_reviews_updated', handleSyncEvent);
   }
 
   const interval = setInterval(fetchFromSupabase, 3000);
 
   return () => {
-    if (channel) supabase.removeChannel(channel);
-    if (typeof window !== 'undefined') window.removeEventListener('reputaflow_live_sync', handleSyncEvent);
+    if (channel) {
+      supabase.removeChannel(channel);
+    }
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('reputaflow_live_sync', handleSyncEvent);
+      window.removeEventListener('reputaflow_reviews_updated', handleSyncEvent);
+    }
     clearInterval(interval);
   };
 }

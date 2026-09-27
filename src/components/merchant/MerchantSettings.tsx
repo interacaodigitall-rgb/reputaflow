@@ -21,8 +21,9 @@ import {
 } from 'lucide-react';
 import { Business } from '../../types';
 import { updateBusiness, uploadImage } from '../../lib/dbService';
-import { supabase } from '../../lib/supabase';
+import { supabase, uploadBusinessLogo } from '../../lib/supabase';
 import { getPublicReviewUrl } from '../../lib/urlHelper';
+import { BusinessLogo } from '../common/BusinessLogo';
 
 interface MerchantSettingsProps {
   business: Business;
@@ -77,37 +78,10 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
 
     setUploadingLogo(true);
     try {
-      const currentMerchantId = business.id;
-      const fileExt = file.name.split('.').pop() || 'png';
-      const filePath = `logos/${currentMerchantId}-${Date.now()}.${fileExt}`;
-      
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('uploads')
-        .upload(filePath, file, { 
-          cacheControl: '3600', 
-          upsert: true 
-        });
+      // Função modular de upload que grava no Storage e atualiza a coluna logo_url no Supabase
+      const publicUrl = await uploadBusinessLogo(file, business.id);
 
-      if (uploadError) {
-        console.error("Erro no upload do Storage:", uploadError);
-        alert("Erro ao enviar imagem para a nuvem: " + uploadError.message);
-        return;
-      }
-
-      const { data: publicData } = supabase.storage
-        .from('uploads')
-        .getPublicUrl(filePath);
-      const publicUrl = publicData.publicUrl;
-
-      try {
-        await supabase
-          .from('businesses')
-          .update({ logo_url: publicUrl, updated_at: new Date().toISOString() })
-          .eq('id', currentMerchantId);
-      } catch (e) {
-        console.warn('Direct business update error:', e);
-      }
-
+      // Sincroniza o estado da aplicação e banco local/API
       await updateBusiness(business.id, { logoUrl: publicUrl });
 
       setLogoUrl(publicUrl);
@@ -352,7 +326,7 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
                   <div className="flex gap-2 items-center mb-2">
                     {logoUrl ? (
                       <div className="relative group shrink-0">
-                        <img src={logoUrl} alt="Logo" className="w-12 h-12 rounded-xl object-contain bg-slate-50 border border-slate-200" />
+                        <BusinessLogo url={logoUrl} name={name} size="md" rounded="rounded-xl" className="w-12 h-12" />
                         <button
                           type="button"
                           onClick={() => {
@@ -367,9 +341,7 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
                         </button>
                       </div>
                     ) : (
-                      <div className="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500 shrink-0 text-xs font-bold border border-slate-200">
-                        {name.slice(0, 2).toUpperCase()}
-                      </div>
+                      <BusinessLogo url="" name={name} size="md" rounded="rounded-xl" className="w-12 h-12" />
                     )}
                     <button
                       type="button"

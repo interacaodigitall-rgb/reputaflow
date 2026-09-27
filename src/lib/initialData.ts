@@ -6,7 +6,7 @@ export const REGISTERED_BUSINESSES: Business[] = [
     name: 'Mr. Navalha',
     slug: 'mrnavalha',
     category: 'Barbearia & Estética',
-    logoUrl: '',
+    logoUrl: 'https://ltpxwagdnrtuulzhfdjk.supabase.co/storage/v1/object/public/uploads/logos/MISTER_VETOR-removebg-preview.png',
     phone: '+351 937 472 634',
     email: 'contacto@misternavalha.com',
     address: 'R. António Sérgio 20, 6300-685 Guarda, Portugal',

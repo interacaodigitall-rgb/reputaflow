@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { BrandLogo } from './BrandLogo';
+import { BusinessLogo } from './BusinessLogo';
 import { PWAInstallButton } from './PWAInstallButton';
 
 interface HeaderProps {
@@ -116,17 +117,12 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
             ) : (
               <div className="py-1.5 px-2.5 sm:px-3 bg-slate-100 text-slate-900 rounded-xl border border-slate-200 text-xs font-bold truncate max-w-[140px] sm:max-w-[200px] flex items-center gap-1.5 min-h-[38px]">
-                {selectedBusiness?.logoUrl && (
-                  <img
-                    src={selectedBusiness.logoUrl}
-                    alt={selectedBusiness.name}
-                    className="w-4 h-4 rounded-md object-cover shrink-0"
-                    referrerPolicy="no-referrer"
-                    onError={(e) => {
-                      (e.target as HTMLElement).style.display = 'none';
-                    }}
-                  />
-                )}
+                <BusinessLogo
+                  url={selectedBusiness?.logoUrl}
+                  name={selectedBusiness?.name}
+                  size="xs"
+                  rounded="rounded-md"
+                />
                 <span className="truncate">{selectedBusiness?.name || 'A carregar...'}</span>
               </div>
             )}
@@ -284,14 +280,12 @@ export const Header: React.FC<HeaderProps> = ({
                   ) : (
                     <div className="py-2.5 px-3 bg-slate-800 text-white rounded-xl border border-slate-700 text-xs font-bold flex items-center justify-between gap-2 min-h-[44px]">
                       <div className="flex items-center gap-2 truncate">
-                        {selectedBusiness?.logoUrl && (
-                          <img
-                            src={selectedBusiness.logoUrl}
-                            alt={selectedBusiness.name}
-                            className="w-5 h-5 rounded-md object-cover shrink-0"
-                            referrerPolicy="no-referrer"
-                          />
-                        )}
+                        <BusinessLogo
+                          url={selectedBusiness?.logoUrl}
+                          name={selectedBusiness?.name}
+                          size="xs"
+                          rounded="rounded-md"
+                        />
                         <span className="truncate">{selectedBusiness?.name || 'Comércio'}</span>
                       </div>
                       <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0"></span>

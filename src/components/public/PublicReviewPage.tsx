@@ -4,6 +4,7 @@ import { Star, CheckCircle2, Phone, User, Mail, ArrowRight, ExternalLink, Shield
 import { Business } from '../../types';
 import { getBusinessBySlug, submitReview, submitFeedbackAndRecovery, getLocalBusinesses } from '../../lib/dbService';
 import { REGISTERED_BUSINESSES } from '../../lib/initialData';
+import { BusinessLogo } from '../common/BusinessLogo';
 
 interface PublicReviewPageProps {
   slug?: string;
@@ -40,12 +41,6 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
   const [isCompleted, setIsCompleted] = useState(false);
   const [isRecoveryOpen, setIsRecoveryOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [logoError, setLogoError] = useState(false);
-
-  // Reset logo error whenever the active business changes
-  useEffect(() => {
-    setLogoError(false);
-  }, [business?.id, business?.logoUrl]);
 
   const fetchBusiness = async () => {
     if (businessOverride) {
@@ -105,23 +100,25 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
     // Regra: 4 e 5 estrelas vão para o Google Reviews
     if (selectedRating >= 4) {
       setSubmitting(true);
-      setIsCompleted(true);
 
       let targetUrl = business.googleReviewUrl ? business.googleReviewUrl.trim() : '';
       if (targetUrl && !/^https?:\/\//i.test(targetUrl)) {
         targetUrl = 'https://' + targetUrl;
       }
 
+      // CRÍTICO: Primeiro assegura a gravação no Supabase antes de descarregar a página
       try {
         await submitReview({
           businessId: business.id,
           rating: selectedRating,
           channel: 'qr'
         });
+        console.log('[Review Page] Avaliação enviada e confirmada no Supabase!');
       } catch (err) {
         console.warn('Review submission error:', err);
       } finally {
         setSubmitting(false);
+        setIsCompleted(true);
       }
 
       if (targetUrl) {
@@ -135,7 +132,7 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
               console.error('Redirection blocked by browser:', err2);
             }
           }
-        }, 500);
+        }, 1200);
       }
     } else {
       // 1, 2 ou 3 estrelas abrem o questionário interno do sistema do comércio
@@ -273,20 +270,13 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
           {/* Business Header & Logo */}
           <div className="px-6 pt-8 pb-4 text-center">
             <div className="w-20 h-20 mx-auto rounded-2xl bg-white shadow-md border-2 border-white ring-2 ring-slate-100 flex items-center justify-center overflow-hidden p-1">
-              {business.logoUrl && !logoError ? (
-                <img
-                  src={business.logoUrl}
-                  alt={business.name}
-                  onError={() => setLogoError(true)}
-                  referrerPolicy="no-referrer"
-                  crossOrigin="anonymous"
-                  className="w-full h-full object-contain rounded-xl"
-                />
-              ) : (
-                <div className="w-full h-full rounded-xl bg-gradient-to-br from-indigo-600 to-indigo-800 text-white font-black text-2xl flex items-center justify-center shadow-inner">
-                  {business.name.slice(0, 2).toUpperCase()}
-                </div>
-              )}
+              <BusinessLogo
+                url={business.logoUrl}
+                name={business.name}
+                size="xl"
+                rounded="rounded-2xl"
+                className="w-full h-full"
+              />
             </div>
             <h1 className="mt-4 text-xl font-extrabold text-slate-900 tracking-tight">
               {business.name}
@@ -583,9 +573,11 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
                   </div>
 
                   {/* 5 Stars Rating Bar */}
-                  <div className="flex justify-center items-center gap-2 sm:gap-3 py-3">
+                  <div className="flex justify-center items-center gap-2 sm:gap-3 py-3 select-none">
                     {[1, 2, 3, 4, 5].map((star) => {
-                      const isLit = (hoveredRating || selectedRating) >= star;
+                      const activeRating = hoveredRating > 0 ? hoveredRating : selectedRating;
+                      const isLit = activeRating >= star;
+                      const isSelectedExact = selectedRating === star;
                       return (
                         <button
                           key={star}
@@ -594,15 +586,24 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
                           disabled={submitting}
                           onMouseEnter={() => setHoveredRating(star)}
                           onMouseLeave={() => setHoveredRating(0)}
-                          onClick={() => handleSelectStar(star)}
-                          className="p-1 sm:p-2 rounded-2xl transition-all duration-150 transform hover:scale-110 active:scale-95 focus:outline-none cursor-pointer"
+                          onTouchStart={() => {
+                            setHoveredRating(0);
+                            handleSelectStar(star);
+                          }}
+                          onClick={() => {
+                            setHoveredRating(0);
+                            handleSelectStar(star);
+                          }}
+                          className={`p-1.5 sm:p-2.5 rounded-2xl transition-all duration-150 transform hover:scale-110 active:scale-95 focus:outline-none cursor-pointer ${
+                            isSelectedExact ? 'bg-amber-50/90 ring-2 ring-amber-400/60 shadow-sm' : ''
+                          }`}
                           aria-label={`${star} estrelas`}
                         >
                           <Star
                             className={`w-10 h-10 sm:w-12 sm:h-12 transition-all ${
                               isLit
-                                ? 'fill-amber-400 text-amber-400 drop-shadow-md scale-105'
-                                : 'text-slate-200 fill-slate-50 hover:text-slate-300'
+                                ? 'fill-amber-400 text-amber-400 drop-shadow-[0_2px_8px_rgba(251,191,36,0.6)] scale-105'
+                                : 'text-slate-300 fill-slate-100 hover:text-slate-400'
                             }`}
                           />
                         </button>
@@ -626,8 +627,8 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
                         {ratingDescriptions[hoveredRating || selectedRating]}
                       </motion.span>
                     ) : (
-                      <span className="text-[11px] text-slate-400">
-                        Toque numa estrela para selecionar
+                      <span className="text-[11px] text-slate-400 font-medium">
+                        Toque nas estrelas para selecionar
                       </span>
                     )}
                   </div>
@@ -663,7 +664,7 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
                         onClick={handleConfirmRating}
                         className="w-full py-3.5 px-5 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white font-extrabold rounded-2xl text-sm shadow-lg shadow-indigo-600/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
                       >
-                        <span>Continuar Avaliação ({selectedRating} {selectedRating === 1 ? 'estrela' : 'estrelas'})</span>
+                        <span>Responder Questionário ({selectedRating} {selectedRating === 1 ? 'estrela' : 'estrelas'})</span>
                         <ArrowRight className="w-4 h-4" />
                       </motion.button>
                     ) : (

@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { Business, Review, Customer, RecoveryCase, Feedback } from '../../types';
 import { getPublicReviewUrl } from '../../lib/urlHelper';
+import { BusinessLogo } from '../common/BusinessLogo';
 
 interface MerchantDashboardProps {
   business: Business;
@@ -101,19 +102,28 @@ export const MerchantDashboard: React.FC<MerchantDashboardProps> = ({
         </div>
 
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/10 backdrop-blur rounded-full text-xs font-medium text-indigo-200">
-              <Building className="w-3.5 h-3.5" />
-              <span>{business.category || 'Espaço Comercial'}</span>
-              <span className="w-1 h-1 rounded-full bg-emerald-400"></span>
-              <span className="text-emerald-300">Ativo</span>
+          <div className="flex items-center gap-4 sm:gap-5">
+            <BusinessLogo
+              url={business.logoUrl}
+              name={business.name}
+              size="lg"
+              rounded="rounded-2xl"
+              className="w-16 h-16 sm:w-20 sm:h-20 shadow-lg border-2 border-white/20 shrink-0"
+            />
+            <div className="space-y-1.5 min-w-0">
+              <div className="inline-flex items-center gap-2 px-3 py-0.5 bg-white/10 backdrop-blur rounded-full text-xs font-medium text-indigo-200">
+                <Building className="w-3.5 h-3.5" />
+                <span>{business.category || 'Espaço Comercial'}</span>
+                <span className="w-1 h-1 rounded-full bg-emerald-400"></span>
+                <span className="text-emerald-300">Ativo</span>
+              </div>
+              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight truncate">
+                {business.name}
+              </h1>
+              <p className="text-slate-300 text-xs sm:text-sm max-w-xl line-clamp-2 sm:line-clamp-none">
+                Monitorize avaliações em tempo real, proteja a sua reputação pública e recupere clientes insatisfeitos antes que virem reclamações.
+              </p>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-              {business.name}
-            </h1>
-            <p className="text-slate-300 text-sm max-w-xl">
-              Monitorize avaliações em tempo real, proteja a sua reputação pública e recupere clientes insatisfeitos antes que virem reclamações.
-            </p>
           </div>
 
           {/* Quick Review Share Actions */}

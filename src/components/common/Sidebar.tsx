@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { BrandLogo } from './BrandLogo';
+import { BusinessLogo } from './BusinessLogo';
 import { PWAInstallButton } from './PWAInstallButton';
 
 interface SidebarProps {
@@ -104,17 +105,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
           ) : (
             <div className="py-2 px-3 bg-slate-800/90 text-white rounded-xl border border-slate-700/80 text-xs font-bold truncate flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 truncate min-w-0">
-                {selectedBusiness?.logoUrl && (
-                  <img
-                    src={selectedBusiness.logoUrl}
-                    alt={selectedBusiness.name}
-                    className="w-6 h-6 rounded-lg object-cover shrink-0 border border-slate-600"
-                    referrerPolicy="no-referrer"
-                    onError={(e) => {
-                      (e.target as HTMLElement).style.display = 'none';
-                    }}
-                  />
-                )}
+                <BusinessLogo
+                  url={selectedBusiness?.logoUrl}
+                  name={selectedBusiness?.name}
+                  size="xs"
+                  rounded="rounded-lg"
+                />
                 <span className="truncate">{selectedBusiness?.name || 'A carregar comércio...'}</span>
               </div>
               <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0 ml-1 animate-pulse"></span>

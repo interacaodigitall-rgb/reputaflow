@@ -33,6 +33,7 @@ import {
 } from '../../lib/dbService';
 import { getPublicReviewUrl } from '../../lib/urlHelper';
 import { QrCodeModal } from '../common/QrCodeModal';
+import { BusinessLogo } from '../common/BusinessLogo';
 
 interface SuperAdminDashboardProps {
   businesses: Business[];
@@ -455,8 +456,18 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                   {filteredBusinesses.map((b) => (
                     <tr key={b.id} className="hover:bg-slate-50/70 transition">
                       <td className="py-3.5 px-4">
-                        <div className="font-bold text-slate-900">{b.name}</div>
-                        <div className="text-[11px] text-slate-400 font-mono">?b={b.slug}</div>
+                        <div className="flex items-center gap-3">
+                          <BusinessLogo
+                            url={b.logoUrl}
+                            name={b.name}
+                            size="sm"
+                            rounded="rounded-lg"
+                          />
+                          <div>
+                            <div className="font-bold text-slate-900">{b.name}</div>
+                            <div className="text-[11px] text-slate-400 font-mono">?b={b.slug}</div>
+                          </div>
+                        </div>
                       </td>
                       <td className="py-3.5 px-4 text-slate-700">
                         {b.category || 'Não definido'}

@@ -12,6 +12,22 @@ export default defineConfig(() => {
       VitePWA({
         injectRegister: null,
         manifest: false, // Handled dynamically via /public/manifest.json and pwaManager.ts
+        workbox: {
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,webp}'],
+          runtimeCaching: [
+            {
+              urlPattern: ({ request }) => request.destination === 'image',
+              handler: 'StaleWhileRevalidate',
+              options: {
+                cacheName: 'images-cache',
+                expiration: {
+                  maxEntries: 50,
+                  maxAgeSeconds: 30 * 24 * 60 * 60,
+                },
+              },
+            },
+          ],
+        },
         devOptions: {
           enabled: false,
         },
