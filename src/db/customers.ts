@@ -21,35 +21,46 @@ export async function getCustomersSql(businessId?: string) {
 export async function upsertCustomerSql(data: any) {
   try {
     const id = data.id || `cust_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+    const bizId = data.businessId || data.business_id;
+    const custName = data.name || data.customerName || data.customer_name || 'Cliente';
+    const custPhone = data.phone || data.customerPhone || data.customer_phone || '';
+    const custEmail = data.email || data.customerEmail || data.customer_email || null;
+    const revCount = data.reviewsCount || data.reviews_count || 1;
+    const lastRevAt = data.lastReviewAt || data.last_review_at ? new Date(data.lastReviewAt || data.last_review_at) : new Date();
+    const rating = data.avgRating || data.avg_rating || data.rating || 5;
+    const custStatus = data.status || 'active';
+    const notes = data.internalNotes || data.internal_notes || data.notes || null;
+    const lastInteract = data.lastInteractionAt || data.last_interaction_at ? new Date(data.lastInteractionAt || data.last_interaction_at) : new Date();
+
     const result = await db
       .insert(customers)
       .values({
         id,
-        businessId: data.businessId,
-        name: data.name,
-        phone: data.phone,
-        email: data.email || null,
-        reviewsCount: data.reviewsCount || 1,
-        lastReviewAt: data.lastReviewAt ? new Date(data.lastReviewAt) : new Date(),
-        avgRating: data.avgRating || 5,
-        status: data.status || 'active',
-        internalNotes: data.internalNotes || null,
-        lastInteractionAt: data.lastInteractionAt ? new Date(data.lastInteractionAt) : new Date(),
-        createdAt: data.createdAt ? new Date(data.createdAt) : new Date(),
+        businessId: bizId,
+        name: custName,
+        phone: custPhone,
+        email: custEmail,
+        reviewsCount: revCount,
+        lastReviewAt: lastRevAt,
+        avgRating: Number(rating),
+        status: custStatus,
+        internalNotes: notes,
+        lastInteractionAt: lastInteract,
+        createdAt: data.createdAt || data.created_at ? new Date(data.createdAt || data.created_at) : new Date(),
         updatedAt: new Date()
       })
       .onConflictDoUpdate({
         target: customers.id,
         set: {
-          name: data.name,
-          phone: data.phone,
-          email: data.email,
-          reviewsCount: data.reviewsCount,
-          lastReviewAt: data.lastReviewAt ? new Date(data.lastReviewAt) : new Date(),
-          avgRating: data.avgRating,
-          status: data.status,
-          internalNotes: data.internalNotes,
-          lastInteractionAt: data.lastInteractionAt ? new Date(data.lastInteractionAt) : new Date(),
+          name: custName,
+          phone: custPhone,
+          email: custEmail,
+          reviewsCount: revCount,
+          lastReviewAt: lastRevAt,
+          avgRating: Number(rating),
+          status: custStatus,
+          internalNotes: notes,
+          lastInteractionAt: lastInteract,
           updatedAt: new Date()
         }
       })

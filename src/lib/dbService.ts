@@ -453,6 +453,22 @@ export async function submitReview(
   // Strict valid snake_case DB columns matching PostgreSQL schema
   const dbPayload = {
     id: targetId,
+    businessId: data.businessId,
+    business_id: data.businessId,
+    rating: Number(data.rating),
+    customerName: data.customerName?.trim() || 'Cliente',
+    customer_name: data.customerName?.trim() || 'Cliente',
+    customerPhone: data.customerPhone?.trim() || null,
+    customer_phone: data.customerPhone?.trim() || null,
+    customerEmail: data.customerEmail?.trim() || null,
+    customer_email: data.customerEmail?.trim() || null,
+    channel: (data.channel || 'qr').toLowerCase(),
+    createdAt: now,
+    created_at: now
+  };
+
+  const supabasePayload = {
+    id: targetId,
     business_id: data.businessId,
     rating: Number(data.rating),
     customer_name: data.customerName?.trim() || 'Cliente',
@@ -466,7 +482,7 @@ export async function submitReview(
     try {
       const { data: inserted, error: insertError } = await supabase
         .from('reviews')
-        .insert([dbPayload])
+        .insert([supabasePayload])
         .select();
 
       if (insertError) {
@@ -482,7 +498,7 @@ export async function submitReview(
         syncChannel.send({
           type: 'broadcast',
           event: 'review_created',
-          payload: dbPayload
+          payload: supabasePayload
         }).catch(() => {});
       } catch (bcErr) {
         console.warn('Realtime broadcast warning:', bcErr);
@@ -717,43 +733,108 @@ export async function submitNegativeFeedback(params: {
 
   const fbPayload = {
     id: fbId,
+    businessId: params.businessId,
     business_id: params.businessId,
+    reviewId: params.reviewId,
     review_id: params.reviewId,
+    customerId: customerId,
     customer_id: customerId,
+    customerName: params.customerName,
     customer_name: params.customerName,
+    customerPhone: params.customerPhone,
     customer_phone: params.customerPhone,
+    customerEmail: params.customerEmail || '',
     customer_email: params.customerEmail || '',
     rating: params.rating,
     question1: params.question1,
     question2: params.question2,
+    question3WantsContact: params.question3WantsContact,
     question3_wants_contact: params.question3WantsContact,
+    createdAt: now,
     created_at: now
   };
 
   const casePayload = {
     id: caseId,
+    businessId: params.businessId,
     business_id: params.businessId,
+    customerId: customerId,
     customer_id: customerId,
+    reviewId: params.reviewId,
     review_id: params.reviewId,
+    feedbackId: fbId,
     feedback_id: fbId,
+    customerName: params.customerName,
     customer_name: params.customerName,
+    customerPhone: params.customerPhone,
     customer_phone: params.customerPhone,
+    customerEmail: params.customerEmail || '',
     customer_email: params.customerEmail || '',
     rating: params.rating,
     status: 'novo',
     notes: params.question1,
+    assignedTo: '',
     assigned_to: '',
+    createdAt: now,
     created_at: now,
+    updatedAt: now,
     updated_at: now
   };
 
   if (isSupabaseConfigured()) {
     try {
       await Promise.all([
-        supabase.from('feedback').insert([fbPayload]),
-        supabase.from('recovery_cases').insert([casePayload])
+        supabase.from('feedback').insert([{
+          id: fbId,
+          business_id: params.businessId,
+          review_id: params.reviewId,
+          customer_id: customerId,
+          customer_name: params.customerName,
+          customer_phone: params.customerPhone,
+          customer_email: params.customerEmail || '',
+          rating: params.rating,
+          question1: params.question1,
+          question2: params.question2,
+          question3_wants_contact: params.question3WantsContact,
+          created_at: now
+        }]),
+        supabase.from('recovery_cases').insert([{
+          id: caseId,
+          business_id: params.businessId,
+          customer_id: customerId,
+          review_id: params.reviewId,
+          feedback_id: fbId,
+          customer_name: params.customerName,
+          customer_phone: params.customerPhone,
+          customer_email: params.customerEmail || '',
+          rating: params.rating,
+          status: 'novo',
+          notes: params.question1,
+          assigned_to: '',
+          created_at: now,
+          updated_at: now
+        }])
       ]);
-    } catch (e) {}
+    } catch (e) {
+      console.warn('Supabase feedback insert warning:', e);
+    }
+  }
+
+  try {
+    await Promise.all([
+      apiFetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fbPayload)
+      }),
+      apiFetch('/api/recovery_cases', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(casePayload)
+      })
+    ]);
+  } catch (err) {
+    console.warn('API feedback sync error:', err);
   }
 
   notifyDataChanged();
@@ -853,24 +934,55 @@ export async function upsertCustomerByPhone(params: {
 
   const payload = {
     id: targetId,
-    business_id: params.businessId,
     businessId: params.businessId,
+    business_id: params.businessId,
     name: params.name || 'Cliente',
     phone: params.phone || '',
     email: params.email || '',
+    reviewsCount: 1,
     reviews_count: 1,
+    lastReviewAt: now,
     last_review_at: now,
+    avgRating: params.rating,
     avg_rating: params.rating,
     status: params.status || 'active',
+    internalNotes: params.internalNotes || '',
     internal_notes: params.internalNotes || '',
+    createdAt: now,
     created_at: now,
+    updatedAt: now,
     updated_at: now
   };
 
   if (isSupabaseConfigured()) {
     try {
-      await supabase.from('customers').upsert([payload]);
-    } catch (e) {}
+      await supabase.from('customers').upsert([{
+        id: targetId,
+        business_id: params.businessId,
+        name: params.name || 'Cliente',
+        phone: params.phone || '',
+        email: params.email || '',
+        reviews_count: 1,
+        last_review_at: now,
+        avg_rating: params.rating,
+        status: params.status || 'active',
+        internal_notes: params.internalNotes || '',
+        created_at: now,
+        updated_at: now
+      }]);
+    } catch (e) {
+      console.warn('Supabase customer upsert warning:', e);
+    }
+  }
+
+  try {
+    await apiFetch('/api/customers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+  } catch (err) {
+    console.warn('API customer upsert error:', err);
   }
 
   notifyDataChanged();

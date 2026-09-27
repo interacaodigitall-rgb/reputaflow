@@ -25,17 +25,17 @@ export async function createFeedbackSql(data: any) {
       .insert(feedback)
       .values({
         id,
-        businessId: data.businessId,
-        reviewId: data.reviewId,
-        customerId: data.customerId || null,
-        customerName: data.customerName,
-        customerPhone: data.customerPhone,
-        customerEmail: data.customerEmail || null,
-        rating: data.rating,
-        question1: data.question1,
-        question2: data.question2,
-        question3WantsContact: Boolean(data.question3WantsContact),
-        createdAt: data.createdAt ? new Date(data.createdAt) : new Date()
+        businessId: data.businessId || data.business_id,
+        reviewId: data.reviewId || data.review_id,
+        customerId: data.customerId || data.customer_id || null,
+        customerName: data.customerName || data.customer_name || 'Cliente',
+        customerPhone: data.customerPhone || data.customer_phone || '',
+        customerEmail: data.customerEmail || data.customer_email || null,
+        rating: Number(data.rating),
+        question1: data.question1 || '',
+        question2: data.question2 || '',
+        question3WantsContact: data.question3WantsContact !== undefined ? Boolean(data.question3WantsContact) : (data.question3_wants_contact !== undefined ? Boolean(data.question3_wants_contact) : true),
+        createdAt: data.createdAt || data.created_at ? new Date(data.createdAt || data.created_at) : new Date()
       })
       .returning();
 

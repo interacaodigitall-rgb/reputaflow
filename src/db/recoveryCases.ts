@@ -25,18 +25,18 @@ export async function createRecoveryCaseSql(data: any) {
       .insert(recoveryCases)
       .values({
         id,
-        businessId: data.businessId,
-        customerId: data.customerId || null,
-        reviewId: data.reviewId,
-        feedbackId: data.feedbackId || null,
-        customerName: data.customerName,
-        customerPhone: data.customerPhone,
-        customerEmail: data.customerEmail || null,
-        rating: data.rating,
+        businessId: data.businessId || data.business_id,
+        customerId: data.customerId || data.customer_id || null,
+        reviewId: data.reviewId || data.review_id,
+        feedbackId: data.feedbackId || data.feedback_id || null,
+        customerName: data.customerName || data.customer_name || 'Cliente',
+        customerPhone: data.customerPhone || data.customer_phone || '',
+        customerEmail: data.customerEmail || data.customer_email || null,
+        rating: Number(data.rating),
         status: data.status || 'novo',
         notes: data.notes || null,
-        assignedTo: data.assignedTo || null,
-        createdAt: data.createdAt ? new Date(data.createdAt) : new Date(),
+        assignedTo: data.assignedTo || data.assigned_to || null,
+        createdAt: data.createdAt || data.created_at ? new Date(data.createdAt || data.created_at) : new Date(),
         updatedAt: new Date()
       })
       .returning();
