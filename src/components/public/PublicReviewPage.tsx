@@ -635,43 +635,19 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
 
                   {/* Action Button: Avaliar */}
                   <div className="pt-2">
-                    {selectedRating >= 4 ? (
-                      <motion.button
-                        type="button"
-                        id="confirm-rating-btn"
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        disabled={submitting}
-                        onClick={handleConfirmRating}
-                        className="w-full py-3.5 px-5 bg-gradient-to-r from-amber-500 via-amber-600 to-amber-700 hover:from-amber-600 hover:to-amber-800 active:scale-[0.98] text-white font-extrabold rounded-2xl text-sm shadow-lg shadow-amber-500/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                      >
-                        {submitting ? (
-                          <span>A registar avaliação...</span>
-                        ) : (
-                          <>
-                            <span>Avaliar no Google ({selectedRating} {selectedRating === 1 ? 'estrela' : 'estrelas'})</span>
-                            <ExternalLink className="w-4 h-4" />
-                          </>
-                        )}
-                      </motion.button>
-                    ) : selectedRating >= 1 ? (
-                      <motion.button
-                        type="button"
-                        id="confirm-rating-btn"
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        disabled={submitting}
-                        onClick={handleConfirmRating}
-                        className="w-full py-3.5 px-5 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white font-extrabold rounded-2xl text-sm shadow-lg shadow-indigo-600/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                      >
-                        <span>Responder Questionário ({selectedRating} {selectedRating === 1 ? 'estrela' : 'estrelas'})</span>
-                        <ArrowRight className="w-4 h-4" />
-                      </motion.button>
-                    ) : (
-                      <div className="py-3 px-4 bg-slate-100 text-slate-400 font-semibold rounded-2xl text-xs flex items-center justify-center gap-1.5 cursor-not-allowed select-none">
-                        <span>Selecione as estrelas e clique em Avaliar</span>
-                      </div>
-                    )}
+                    <button
+                      type="button"
+                      id="confirm-rating-btn"
+                      disabled={selectedRating < 1 || submitting}
+                      onClick={handleConfirmRating}
+                      className={`w-full py-3.5 px-5 font-extrabold rounded-2xl text-sm transition-all flex items-center justify-center ${
+                        selectedRating >= 1 && !submitting
+                          ? 'bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white shadow-lg shadow-indigo-600/25 cursor-pointer'
+                          : 'bg-slate-100 text-slate-400 cursor-not-allowed select-none'
+                      }`}
+                    >
+                      {submitting ? 'A registar avaliação...' : 'Avaliar'}
+                    </button>
                   </div>
 
                   <div className="pt-2 flex items-center justify-center gap-2 text-[11px] text-slate-600">
