@@ -30,7 +30,24 @@ import {
 
 import firebaseConfig from '../../firebase-applet-config.json';
 
-export { firebaseConfig };
+export {
+  firebaseConfig,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  query,
+  where,
+  orderBy,
+  onSnapshot,
+  serverTimestamp,
+  Timestamp,
+  getDocFromServer
+};
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
