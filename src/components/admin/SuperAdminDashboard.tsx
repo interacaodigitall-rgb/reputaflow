@@ -21,7 +21,10 @@ import {
   Copy,
   Check,
   RefreshCw,
-  Store
+  Store,
+  Upload,
+  Image as ImageIcon,
+  X
 } from 'lucide-react';
 import { Business, Customer, Review, RecoveryCase, Plan, PlatformSettings } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -30,7 +33,8 @@ import {
   updateBusiness,
   deleteBusiness,
   savePlan,
-  savePlatformSettings
+  savePlatformSettings,
+  uploadImage
 } from '../../lib/dbService';
 import { getPublicReviewUrl } from '../../lib/urlHelper';
 import { QrCodeModal } from '../common/QrCodeModal';
@@ -100,9 +104,39 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   const [newBizPlan, setNewBizPlan] = useState('plan_pro');
   const [newBizGoogleUrl, setNewBizGoogleUrl] = useState('');
   const [newBizLogoUrl, setNewBizLogoUrl] = useState('');
+  const [uploadingModalLogo, setUploadingModalLogo] = useState(false);
+  const [modalLogoPreview, setModalLogoPreview] = useState<string>('');
   const [newBizCurrency, setNewBizCurrency] = useState<'EUR' | 'BRL'>('EUR');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+
+  const handleModalLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setCreateError('Por favor, selecione um ficheiro de imagem válido (PNG, JPG, WebP ou SVG).');
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      setCreateError('O ficheiro é demasiado grande. Escolha uma imagem de até 10MB.');
+      return;
+    }
+
+    setUploadingModalLogo(true);
+    setCreateError(null);
+
+    try {
+      const publicUrl = await uploadImage(file, 'new_biz');
+      setNewBizLogoUrl(publicUrl);
+      setModalLogoPreview(publicUrl);
+    } catch (err: any) {
+      console.warn('Modal logo upload notice:', err);
+    } finally {
+      setUploadingModalLogo(false);
+    }
+  };
 
   // Business Deletion Modal State
   const [businessToDelete, setBusinessToDelete] = useState<{ id: string; name: string } | null>(null);
@@ -163,10 +197,6 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
       setCreateError('Por favor, informe o nome do estabelecimento.');
       return;
     }
-    if (!newBizEmail.trim()) {
-      setCreateError('Por favor, informe o e-mail de login para o comerciante.');
-      return;
-    }
 
     setCreating(true);
     setCreateError(null);
@@ -178,19 +208,21 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
         .replace(/[^a-z0-9-]/g, '-')
         .replace(/-+/g, '-');
 
+      const finalEmail = (newBizEmail.trim() || `${slugClean}@reputaflow.com`).toLowerCase();
+
       const businessData: Omit<Business, 'id'> = {
         name: newBizName.trim(),
         slug: slugClean,
         category: newBizCategory.trim() || 'Comércio & Serviços',
         phone: newBizPhone.trim(),
-        email: newBizEmail.trim().toLowerCase(),
+        email: finalEmail,
         address: newBizAddress.trim(),
         status: 'active',
         planId: newBizPlan,
         ownerId: currentUser?.uid || 'admin-created',
         currency: newBizCurrency,
         createdAt: new Date().toISOString(),
-        password: newBizPassword.trim() || 'senha123'
+        password: newBizPassword.trim() || 'reputa123'
       };
 
       if (newBizLogoUrl.trim()) {
@@ -217,10 +249,11 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
       setNewBizAddress('');
       setNewBizGoogleUrl('');
       setNewBizLogoUrl('');
+      setModalLogoPreview('');
       setNewBizCurrency('EUR');
       setCreateError(null);
-      setSuccessBanner(`Estabelecimento "${createdName}" cadastrado com sucesso!`);
-      setTimeout(() => setSuccessBanner(null), 6000);
+      setSuccessBanner(`Estabelecimento "${createdName}" cadastrado com sucesso! Já pode aceder ao CRM ou partilhar o link de avaliação.`);
+      setTimeout(() => setSuccessBanner(null), 8000);
     } catch (err: any) {
       console.error('Error creating business:', err);
       setCreateError(
@@ -916,17 +949,62 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  URL do Logótipo (Imagem)
+              {/* Logo Upload & URL Section */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-700">
+                  Logótipo da Empresa (Upload ou URL)
                 </label>
-                <input
-                  type="url"
-                  placeholder="https://exemplo.com/logo.png"
-                  value={newBizLogoUrl}
-                  onChange={(e) => setNewBizLogoUrl(e.target.value)}
-                  className="w-full text-xs p-2.5 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
-                />
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden shrink-0 shadow-2xs">
+                    {modalLogoPreview || newBizLogoUrl ? (
+                      <img
+                        src={modalLogoPreview || newBizLogoUrl}
+                        alt="Preview"
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <ImageIcon className="w-5 h-5 text-slate-300" />
+                    )}
+                  </div>
+                  <div className="flex-1 space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <label className="py-1.5 px-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs transition cursor-pointer inline-flex items-center gap-1.5 border border-indigo-100">
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>{uploadingModalLogo ? 'Enviando...' : 'Carregar Imagem'}</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={handleModalLogoUpload}
+                          disabled={uploadingModalLogo}
+                        />
+                      </label>
+                      {(modalLogoPreview || newBizLogoUrl) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setModalLogoPreview('');
+                            setNewBizLogoUrl('');
+                          }}
+                          className="py-1.5 px-2 text-rose-600 hover:bg-rose-50 rounded-xl text-xs transition flex items-center gap-1 cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                          <span>Remover</span>
+                        </button>
+                      )}
+                    </div>
+                    <input
+                      type="url"
+                      placeholder="Ou cole o link direto da imagem"
+                      value={newBizLogoUrl}
+                      onChange={(e) => {
+                        setNewBizLogoUrl(e.target.value);
+                        setModalLogoPreview(e.target.value);
+                      }}
+                      className="w-full text-xs p-2 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
               </div>
 
               <div>

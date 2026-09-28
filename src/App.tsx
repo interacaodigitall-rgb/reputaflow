@@ -32,7 +32,7 @@ import {
   getPlatformSettings
 } from './lib/dbService';
 import { extractReviewSlug } from './lib/urlHelper';
-import { ArrowLeft, ShieldAlert } from 'lucide-react';
+import { ArrowLeft, ShieldAlert, Store, Plus } from 'lucide-react';
 
 function MainAppContent() {
   const {
@@ -50,6 +50,13 @@ function MainAppContent() {
   const [showQrModal, setShowQrModal] = useState(false);
   const [isCustomerViewMode, setIsCustomerViewMode] = useState(false);
   const [reviewSlugFromUrl, setReviewSlugFromUrl] = useState<string | null>(null);
+
+  // Automatically show Super Admin tab when Super Admin has no businesses registered yet
+  useEffect(() => {
+    if (isSuperAdmin && businesses.length === 0) {
+      setActiveTab('super_admin');
+    }
+  }, [isSuperAdmin, businesses.length]);
 
   // Business-specific data
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -218,12 +225,12 @@ function MainAppContent() {
         />
 
         {/* Impersonation Banner ONLY visible if Super Admin is inspecting a merchant */}
-        {isSuperAdmin && activeTab !== 'super_admin' && (
+        {isSuperAdmin && activeTab !== 'super_admin' && selectedBusiness && (
           <div className="bg-indigo-50/80 border-b border-indigo-100 px-4 sm:px-6 py-2 flex items-center justify-between text-xs text-indigo-900">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
               <span>
-                Espaço: <strong>{selectedBusiness?.name || 'A carregar...'}</strong>
+                Espaço: <strong>{selectedBusiness.name}</strong>
               </span>
               <span className="text-slate-400">•</span>
               <span className="text-slate-600">Ambiente de teste do estabelecimento</span>
@@ -231,7 +238,7 @@ function MainAppContent() {
 
             <button
               onClick={() => setActiveTab('super_admin')}
-              className="text-indigo-700 hover:text-indigo-900 font-bold flex items-center gap-1 hover:underline"
+              className="text-indigo-700 hover:text-indigo-900 font-bold flex items-center gap-1 hover:underline cursor-pointer"
             >
               <ShieldAlert className="w-3.5 h-3.5" />
               <span>Painel Super Admin</span>
@@ -254,10 +261,25 @@ function MainAppContent() {
                 onOpenReviewPreview={() => setIsCustomerViewMode(true)}
               />
             ) : (
-              <div className="flex flex-col items-center justify-center p-12 text-center bg-white rounded-3xl border border-slate-200">
-                <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4"></div>
-                <h3 className="text-base font-bold text-slate-800">A carregar o seu comércio...</h3>
-                <p className="text-xs text-slate-500 mt-1">A sincronizar dados em tempo real.</p>
+              <div className="flex flex-col items-center justify-center p-8 sm:p-12 text-center bg-white rounded-3xl border border-slate-200/80 shadow-xs max-w-xl mx-auto my-8">
+                <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-3xl flex items-center justify-center mb-4 border border-indigo-100 shadow-xs">
+                  <Store className="w-8 h-8" />
+                </div>
+                <h2 className="text-xl font-extrabold text-slate-900">Nenhum comércio ativo cadastrado</h2>
+                <p className="text-xs sm:text-sm text-slate-500 mt-2 max-w-md leading-relaxed">
+                  {isSuperAdmin
+                    ? 'A sua plataforma está pronta. Clique no botão abaixo para ir ao Painel Super Admin e adicionar o primeiro comerciante.'
+                    : 'A sua conta ainda não tem um estabelecimento vinculado. Contacte o administrador da plataforma.'}
+                </p>
+                {isSuperAdmin && (
+                  <button
+                    onClick={() => setActiveTab('super_admin')}
+                    className="mt-6 py-3 px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl text-xs sm:text-sm shadow-md shadow-indigo-200 transition flex items-center gap-2 cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Cadastrar Primeiro Comércio no Super Admin</span>
+                  </button>
+                )}
               </div>
             )
           )}

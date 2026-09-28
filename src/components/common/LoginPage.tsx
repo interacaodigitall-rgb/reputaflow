@@ -5,7 +5,7 @@ import { BrandLogo } from './BrandLogo';
 
 export const LoginPage: React.FC = () => {
   const { signInWithEmail, signInWithGoogle } = useAuth();
-  const [email, setEmail] = useState('reputa@glowfyhub.com');
+  const [email, setEmail] = useState('eunawebse@gmail.com');
   const [password, setPassword] = useState('reputa123');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,12 +42,26 @@ export const LoginPage: React.FC = () => {
     }
   };
 
+  const handleQuickAdminLogin = async (targetEmail: string) => {
+    setEmail(targetEmail);
+    setPassword('reputa123');
+    setLoading(true);
+    setError(null);
+    try {
+      await signInWithEmail(targetEmail, 'reputa123');
+    } catch (err) {
+      console.error('Admin quick login error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleFillDemo = (type: 'admin' | 'merchant') => {
     setError(null);
     if (type === 'admin') {
-      setEmail('reputa@glowfyhub.com');
+      setEmail('eunawebse@gmail.com');
       setPassword('reputa123');
-      setInfoMessage('Conta de Administrador Geral. Permite gerir todos os estabelecimentos, moedas (Euro/Real) e configurações.');
+      setInfoMessage('Conta de Administrador Geral (eunawebse@gmail.com). Permite gerir todos os estabelecimentos, cadastrar comércios e configurações.');
     } else {
       setEmail('comerciante@reputaflow.com');
       setPassword('reputa123');
@@ -152,26 +166,38 @@ export const LoginPage: React.FC = () => {
           </div>
         </form>
 
-        {/* Demo Fast Access Section */}
-        <div className="pt-4 border-t border-slate-200">
-          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider text-center mb-2.5">
-            Acesso Rápido para Teste
+        {/* Quick Admin Access Section */}
+        <div className="pt-4 border-t border-slate-200 space-y-2">
+          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider text-center">
+            Acesso Rápido de Administrador
           </p>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="flex flex-col gap-1.5">
             <button
               type="button"
-              onClick={() => handleFillDemo('admin')}
-              className="py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-[11px] transition text-center"
+              disabled={loading}
+              onClick={() => handleQuickAdminLogin('eunawebse@gmail.com')}
+              className="w-full py-2.5 px-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 border border-indigo-100 cursor-pointer shadow-xs disabled:opacity-50"
             >
-              👑 Administrador
+              <span>👑 Entrar como Super Admin (eunawebse@gmail.com)</span>
             </button>
-            <button
-              type="button"
-              onClick={() => handleFillDemo('merchant')}
-              className="py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-[11px] transition text-center"
-            >
-              💼 Comerciante
-            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => handleQuickAdminLogin('reputa@glowfyhub.com')}
+                className="py-2 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-[11px] transition text-center cursor-pointer"
+              >
+                👑 reputa@glowfyhub
+              </button>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => handleFillDemo('merchant')}
+                className="py-2 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-[11px] transition text-center cursor-pointer"
+              >
+                💼 Preencher Comerciante
+              </button>
+            </div>
           </div>
         </div>
 
