@@ -9,9 +9,9 @@ import {
   Plan,
   PlatformSettings
 } from '../types/index.ts';
-import { supabase, isSupabaseConfigured, uploadBusinessLogo } from './supabase.ts';
+import { supabase, uploadBusinessLogo } from './supabase.ts';
 
-// Zero mock/local storage data - completely live-driven by Supabase
+// Zero mock data - completely live-driven by Supabase
 export const REGISTERED_BUSINESSES: Business[] = [];
 
 // ==========================================
@@ -38,7 +38,7 @@ export function isMatchingBusiness(itemBizId: string | undefined, targetBizId: s
   return false;
 }
 
-// In-memory runtime state for fast UI renders (NO localStorage)
+// In-memory runtime state for fast rendering (NO localStorage)
 let runtimeBusinesses: Business[] = [];
 let runtimeReviews: Review[] = [];
 let runtimeFeedback: Feedback[] = [];
@@ -71,7 +71,7 @@ export async function uploadImage(file: File, businessId?: string): Promise<stri
 // ==========================================
 // BUSINESSES / MERCHANTS SERVICE (SUPABASE ONLY)
 // ==========================================
-function mapMerchantRow(row: any): Business {
+function mapBusinessRow(row: any): Business {
   return {
     id: String(row.id || ''),
     name: String(row.name || ''),
@@ -101,25 +101,18 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
 
   const fetchMerchants = async () => {
     try {
-      // 1. Try 'merchants' table as specified
-      let res = await supabase.from('merchants').select('*').order('created_at', { ascending: false });
-
-      // Fallback to 'businesses' if 'merchants' table does not exist or is empty
-      if (res.error || !res.data || res.data.length === 0) {
-        const bizRes = await supabase.from('businesses').select('*').order('created_at', { ascending: false });
-        if (!bizRes.error && bizRes.data && bizRes.data.length > 0) {
-          res = bizRes;
-        }
-      }
-
-      if (!res.error && res.data) {
-        const mapped = res.data.map(mapMerchantRow);
+      const { data, error } = await supabase.from('businesses').select('*').order('created_at', { ascending: false });
+      if (!error && data) {
+        const mapped = data.map(mapBusinessRow);
         runtimeBusinesses = mapped;
         if (isSubscribed) callback(mapped);
         return;
       }
+      if (error) {
+        console.error('[Supabase subscribeBusinesses error]:', error.message);
+      }
     } catch (err) {
-      console.warn('[Supabase subscribeBusinesses error]:', err);
+      console.error('[Supabase subscribeBusinesses catch]:', err);
     }
 
     if (isSubscribed) {
@@ -127,21 +120,17 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
     }
   };
 
-  // Initial fetch
   fetchMerchants();
 
   // Supabase Realtime Channel
   const channel = supabase
-    .channel('public:merchants_channel')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'merchants' }, () => {
-      fetchMerchants();
-    })
+    .channel('public:businesses_channel')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'businesses' }, () => {
       fetchMerchants();
     })
     .subscribe();
 
-  const interval = setInterval(fetchMerchants, 4000);
+  const interval = setInterval(fetchMerchants, 3000);
 
   const handleCustomEvent = () => {
     if (isSubscribed) callback(runtimeBusinesses);
@@ -166,30 +155,18 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
   if (!normSlug) return null;
 
   try {
-    // Try merchants table
-    const { data: mData, error: mErr } = await supabase
-      .from('merchants')
-      .select('*')
-      .or(`slug.eq.${clean},slug.eq.${normSlug},id.eq.${clean}`);
-
-    if (!mErr && mData && mData.length > 0) {
-      return mapMerchantRow(mData[0]);
-    }
-
-    // Try businesses table
-    const { data: bData, error: bErr } = await supabase
+    const { data, error } = await supabase
       .from('businesses')
       .select('*')
       .or(`slug.eq.${clean},slug.eq.${normSlug},id.eq.${clean}`);
 
-    if (!bErr && bData && bData.length > 0) {
-      return mapMerchantRow(bData[0]);
+    if (!error && data && data.length > 0) {
+      return mapBusinessRow(data[0]);
     }
   } catch (e) {
-    console.warn('[getBusinessBySlug catch]:', e);
+    console.error('[getBusinessBySlug catch]:', e);
   }
 
-  // Runtime memory match
   return (
     runtimeBusinesses.find(
       (b) =>
@@ -241,38 +218,28 @@ export async function addBusiness(data: Omit<Business, 'id' | 'createdAt' | 'upd
     name: newBiz.name,
     slug: newBiz.slug,
     category: newBiz.category,
-    address: newBiz.address,
-    phone: newBiz.phone,
-    email: newBiz.email,
+    address: newBiz.address || '',
+    phone: newBiz.phone || '',
+    email: newBiz.email || '',
     google_review_url: newBiz.googleReviewUrl || null,
     logo_url: newBiz.logoUrl || null,
-    banner_url: newBiz.bannerUrl || null,
-    min_rating_for_google: newBiz.minRatingForGoogle,
-    qr_theme_color: newBiz.qrThemeColor,
-    active_plan: newBiz.activePlan,
+    status: newBiz.status,
     plan_id: newBiz.planId,
     owner_id: newBiz.ownerId,
     currency: newBiz.currency,
-    status: newBiz.status,
-    password: newBiz.password,
     created_at: now,
     updated_at: now
   };
 
-  // 1. Insert into Supabase merchants & businesses
   try {
-    const { error: mError } = await supabase.from('merchants').insert([payload]);
-    if (mError) {
-      // If table merchants fails, try businesses
-      await supabase.from('businesses').insert([payload]);
-    } else {
-      // Also sync to businesses table for compatibility if it exists
-      try {
-        await supabase.from('businesses').insert([payload]);
-      } catch {}
+    const { error } = await supabase.from('businesses').insert([payload]);
+    if (error) {
+      console.error('[Supabase addBusiness error]:', error);
+      throw new Error(`Erro ao cadastrar comércio no Supabase: ${error.message}`);
     }
-  } catch (err) {
-    console.error('[Supabase addBusiness error]:', err);
+  } catch (err: any) {
+    console.error('[Supabase addBusiness catch]:', err);
+    throw err;
   }
 
   runtimeBusinesses = [newBiz, ...runtimeBusinesses.filter((b) => b.id !== id)];
@@ -293,18 +260,15 @@ export async function updateBusiness(id: string, data: Partial<Business>): Promi
   if (data.email !== undefined) dbUpdates.email = data.email;
   if (data.status !== undefined) dbUpdates.status = data.status;
   if (data.currency !== undefined) dbUpdates.currency = data.currency;
-  if (data.password !== undefined) dbUpdates.password = data.password;
   if (data.googleReviewUrl !== undefined) dbUpdates.google_review_url = data.googleReviewUrl;
   if (data.logoUrl !== undefined) dbUpdates.logo_url = data.logoUrl;
   if (data.planId !== undefined) dbUpdates.plan_id = data.planId;
 
   try {
-    await Promise.all([
-      supabase.from('merchants').update(dbUpdates).eq('id', id),
-      supabase.from('businesses').update(dbUpdates).eq('id', id)
-    ]);
+    const { error } = await supabase.from('businesses').update(dbUpdates).eq('id', id);
+    if (error) console.error('[Supabase updateBusiness error]:', error);
   } catch (err) {
-    console.error('[Supabase updateBusiness error]:', err);
+    console.error('[Supabase updateBusiness catch]:', err);
   }
 
   runtimeBusinesses = runtimeBusinesses.map((b) => (b.id === id ? { ...b, ...data, updatedAt: now } : b));
@@ -313,12 +277,10 @@ export async function updateBusiness(id: string, data: Partial<Business>): Promi
 
 export async function deleteBusiness(id: string): Promise<void> {
   try {
-    await Promise.all([
-      supabase.from('merchants').delete().eq('id', id),
-      supabase.from('businesses').delete().eq('id', id)
-    ]);
+    const { error } = await supabase.from('businesses').delete().eq('id', id);
+    if (error) console.error('[Supabase deleteBusiness error]:', error);
   } catch (err) {
-    console.error('[Supabase deleteBusiness error]:', err);
+    console.error('[Supabase deleteBusiness catch]:', err);
   }
 
   runtimeBusinesses = runtimeBusinesses.filter((b) => b.id !== id);
@@ -331,7 +293,7 @@ export async function deleteBusiness(id: string): Promise<void> {
 function mapReviewRow(row: any): Review {
   return {
     id: String(row.id || ''),
-    businessId: String(row.business_id || row.businessId || ''),
+    businessId: String(row.business_id || row.businessId || row.merchant_id || ''),
     customerId: row.customer_id || row.customerId || undefined,
     customerName: row.customer_name || row.customerName || 'Cliente',
     customerPhone: row.customer_phone || row.customerPhone || '',
@@ -377,7 +339,7 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
     })
     .subscribe();
 
-  const interval = setInterval(fetchReviews, 4000);
+  const interval = setInterval(fetchReviews, 3000);
 
   return () => {
     isSubscribed = false;
@@ -401,7 +363,6 @@ export async function addReview(data: Omit<Review, 'id' | 'createdAt'>): Promise
       {
         id,
         business_id: newReview.businessId,
-        customer_id: newReview.customerId || null,
         customer_name: newReview.customerName || null,
         customer_phone: newReview.customerPhone || null,
         customer_email: newReview.customerEmail || null,
@@ -410,12 +371,15 @@ export async function addReview(data: Omit<Review, 'id' | 'createdAt'>): Promise
         created_at: now
       }
     ]);
-    if (error) throw error;
+    if (error) {
+      console.error('[Supabase addReview error]:', error);
+      throw error;
+    }
   } catch (err) {
-    console.error('[Supabase addReview error]:', err);
+    console.error('[Supabase addReview catch]:', err);
   }
 
-  // Auto upsert customer
+  // Auto upsert customer in CRM
   if (newReview.customerName || newReview.customerPhone || newReview.customerEmail) {
     try {
       await upsertCustomerFromReview(newReview);
@@ -513,7 +477,7 @@ export function subscribeFeedback(businessId: string | null, callback: (feedback
     })
     .subscribe();
 
-  const interval = setInterval(fetchFeedback, 4000);
+  const interval = setInterval(fetchFeedback, 3000);
 
   return () => {
     isSubscribed = false;
@@ -577,7 +541,7 @@ export function subscribeRecoveryCases(businessId: string | null, callback: (cas
     })
     .subscribe();
 
-  const interval = setInterval(fetchCases, 4000);
+  const interval = setInterval(fetchCases, 3000);
 
   return () => {
     isSubscribed = false;
@@ -769,7 +733,7 @@ export function subscribeCustomers(businessId: string | null, callback: (custome
     })
     .subscribe();
 
-  const interval = setInterval(fetchCustomers, 4000);
+  const interval = setInterval(fetchCustomers, 3000);
 
   return () => {
     isSubscribed = false;
@@ -854,7 +818,7 @@ export async function upsertCustomerFromReview(review: Review): Promise<Customer
           id: custId,
           business_id: newCust.businessId,
           name: newCust.name,
-          phone: newCust.phone,
+          phone: newCust.phone || '',
           email: newCust.email || null,
           reviews_count: 1,
           avg_rating: review.rating,
@@ -888,7 +852,7 @@ export async function addCustomer(data: Omit<Customer, 'id' | 'createdAt' | 'upd
         id: custId,
         business_id: newCust.businessId,
         name: newCust.name,
-        phone: newCust.phone,
+        phone: newCust.phone || '',
         email: newCust.email || null,
         reviews_count: newCust.reviewsCount,
         avg_rating: newCust.avgRating,
@@ -939,83 +903,29 @@ export async function deleteCustomer(id: string): Promise<void> {
 }
 
 // ==========================================
-// INTERACTIONS SERVICE (SUPABASE ONLY)
+// INTERACTIONS SERVICE
 // ==========================================
 export function subscribeInteractions(businessId: string | null, callback: (list: Interaction[]) => void) {
   let isSubscribed = true;
 
   const fetchInteractions = async () => {
-    try {
-      let query = supabase.from('interactions').select('*').order('created_at', { ascending: false });
-      if (businessId) {
-        query = query.eq('business_id', businessId);
-      }
-      const { data, error } = await query;
-      if (!error && data) {
-        const mapped: Interaction[] = data.map((d: any) => ({
-          id: String(d.id),
-          businessId: String(d.business_id || d.businessId || ''),
-          customerId: d.customer_id || d.customerId || undefined,
-          caseId: d.case_id || d.caseId || undefined,
-          type: d.type || 'whatsapp',
-          summary: d.summary || '',
-          outcome: d.outcome || '',
-          staffEmail: d.staff_email || d.staffEmail || '',
-          staffName: d.staff_name || d.staffName || '',
-          createdAt: d.created_at || d.createdAt || new Date().toISOString()
-        }));
-        if (isSubscribed) callback(mapped);
-      }
-    } catch {}
+    if (isSubscribed) callback([]);
   };
 
   fetchInteractions();
-
-  const channel = supabase
-    .channel('public:interactions_channel')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'interactions' }, () => {
-      fetchInteractions();
-    })
-    .subscribe();
-
-  const interval = setInterval(fetchInteractions, 4000);
-
   return () => {
     isSubscribed = false;
-    supabase.removeChannel(channel);
-    clearInterval(interval);
   };
 }
 
 export async function addInteraction(data: Omit<Interaction, 'id' | 'createdAt'>): Promise<Interaction> {
   const id = `int_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
   const now = new Date().toISOString();
-  const interaction: Interaction = { ...data, id, createdAt: now };
-
-  try {
-    await supabase.from('interactions').insert([
-      {
-        id,
-        business_id: interaction.businessId,
-        customer_id: interaction.customerId || null,
-        case_id: interaction.caseId || null,
-        type: interaction.type,
-        summary: interaction.summary,
-        outcome: interaction.outcome || null,
-        staff_email: interaction.staffEmail,
-        staff_name: interaction.staffName || null,
-        created_at: now
-      }
-    ]);
-  } catch (err) {
-    console.error('[Supabase addInteraction error]:', err);
-  }
-
-  return interaction;
+  return { ...data, id, createdAt: now };
 }
 
 // ==========================================
-// PLANS & PLATFORM SETTINGS (SUPABASE ONLY)
+// PLANS & PLATFORM SETTINGS
 // ==========================================
 export const DEFAULT_PLANS: Plan[] = [
   {
@@ -1051,43 +961,10 @@ export const DEFAULT_PLANS: Plan[] = [
 ];
 
 export async function getPlans(): Promise<Plan[]> {
-  try {
-    const { data, error } = await supabase.from('plans').select('*');
-    if (!error && data && data.length > 0) {
-      return data.map((d: any) => ({
-        id: String(d.id),
-        name: d.name || '',
-        price: Number(d.price || 0),
-        currency: d.currency || 'EUR',
-        maxBusinesses: Number(d.max_businesses || d.maxBusinesses || 1),
-        maxReviewsMonth: Number(d.max_reviews_month || d.maxReviewsMonth || 500),
-        features: Array.isArray(d.features) ? d.features : [],
-        isActive: Boolean(d.is_active ?? d.isActive ?? true)
-      }));
-    }
-  } catch {}
-
   return DEFAULT_PLANS;
 }
 
-export async function savePlan(plan: Plan): Promise<void> {
-  try {
-    await supabase.from('plans').upsert([
-      {
-        id: plan.id,
-        name: plan.name,
-        price: plan.price,
-        currency: plan.currency,
-        max_businesses: plan.maxBusinesses,
-        max_reviews_month: plan.maxReviewsMonth,
-        features: plan.features,
-        is_active: plan.isActive
-      }
-    ]);
-  } catch (err) {
-    console.error('[Supabase savePlan error]:', err);
-  }
-}
+export async function savePlan(_plan: Plan): Promise<void> {}
 
 export const DEFAULT_PLATFORM_SETTINGS: PlatformSettings = {
   id: 'default',
@@ -1099,36 +976,7 @@ export const DEFAULT_PLATFORM_SETTINGS: PlatformSettings = {
 };
 
 export async function getPlatformSettings(): Promise<PlatformSettings> {
-  try {
-    const { data, error } = await supabase.from('platform_settings').select('*').limit(1);
-    if (!error && data && data.length > 0) {
-      const s = data[0];
-      return {
-        id: String(s.id),
-        platformName: s.platform_name || s.platformName || 'ReputaFlow',
-        supportEmail: s.support_email || s.supportEmail || 'suporte@reputaflow.com',
-        defaultGoogleReviewInstructions:
-          s.default_google_review_instructions || s.defaultGoogleReviewInstructions || DEFAULT_PLATFORM_SETTINGS.defaultGoogleReviewInstructions,
-        allowPublicRegistration: Boolean(s.allow_public_registration ?? s.allowPublicRegistration ?? false)
-      };
-    }
-  } catch {}
-
   return DEFAULT_PLATFORM_SETTINGS;
 }
 
-export async function savePlatformSettings(settings: Partial<PlatformSettings>): Promise<void> {
-  try {
-    await supabase.from('platform_settings').upsert([
-      {
-        id: settings.id || 'default',
-        platform_name: settings.platformName,
-        support_email: settings.supportEmail,
-        default_google_review_instructions: settings.defaultGoogleReviewInstructions,
-        allow_public_registration: settings.allowPublicRegistration
-      }
-    ]);
-  } catch (err) {
-    console.error('[Supabase savePlatformSettings error]:', err);
-  }
-}
+export async function savePlatformSettings(_settings: Partial<PlatformSettings>): Promise<void> {}

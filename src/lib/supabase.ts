@@ -1,24 +1,45 @@
 import { createClient } from '@supabase/supabase-js';
 
+const SUPABASE_URL_DEFAULT = 'https://ltpxwagdnrtuulzhfdjk.supabase.co';
+const SUPABASE_ANON_KEY_DEFAULT =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx0cHh3YWdkbnJ0dXVsemhmZGprIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAzNjM3MjEsImV4cCI6MjEwNTkzOTcyMX0.BzdBFiv16a6O4g6MV4H-sWPELTss5yvL9j2V_q7YoZY';
+
 const supabaseUrl: string =
   (import.meta as any).env?.VITE_SUPABASE_URL ||
   (typeof process !== 'undefined' ? process.env?.VITE_SUPABASE_URL : '') ||
-  'https://ltpxwagdnrtuulzhfdjk.supabase.co';
+  SUPABASE_URL_DEFAULT;
 
 const supabaseAnonKey: string =
   (import.meta as any).env?.VITE_SUPABASE_ANON_KEY ||
   (typeof process !== 'undefined' ? process.env?.VITE_SUPABASE_ANON_KEY : '') ||
-  '';
+  SUPABASE_ANON_KEY_DEFAULT;
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error("ERRO CRÍTICO: Chaves do Supabase ausentes no ficheiro .env!");
+}
 
 export const supabase = createClient(
   supabaseUrl.trim(),
-  supabaseAnonKey && supabaseAnonKey.trim()
-    ? supabaseAnonKey.trim()
-    : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.anon_key_placeholder'
+  supabaseAnonKey.trim(),
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true
+    },
+    realtime: {
+      params: {
+        eventsPerSecond: 10
+      }
+    }
+  }
 );
 
 export function isSupabaseConfigured(): boolean {
-  return Boolean(supabaseAnonKey && supabaseAnonKey.trim().length > 0 && !supabaseAnonKey.includes('placeholder'));
+  return Boolean(
+    supabaseAnonKey &&
+    supabaseAnonKey.trim().length > 0 &&
+    !supabaseAnonKey.includes('placeholder')
+  );
 }
 
 /**
@@ -154,8 +175,8 @@ export async function uploadBusinessLogo(file: File, businessId: string): Promis
   if (businessId) {
     try {
       await Promise.all([
-        supabase.from('merchants').update({ logo_url: finalPublicUrl, updated_at: new Date().toISOString() }).eq('id', businessId),
-        supabase.from('businesses').update({ logo_url: finalPublicUrl, updated_at: new Date().toISOString() }).eq('id', businessId)
+        supabase.from('businesses').update({ logo_url: finalPublicUrl, updated_at: new Date().toISOString() }).eq('id', businessId),
+        supabase.from('merchants').update({ logo_url: finalPublicUrl, updated_at: new Date().toISOString() }).eq('id', businessId)
       ]);
     } catch {}
   }
