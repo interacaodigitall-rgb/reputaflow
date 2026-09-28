@@ -1,23 +1,24 @@
 import { createClient } from '@supabase/supabase-js';
 
-function cleanSupabaseUrl(url?: string): string {
-  if (!url || typeof url !== 'string' || !url.trim()) {
-    return 'https://ltpxwagdnrtuulzhfdjk.supabase.co';
-  }
-  return url.trim().replace(/\/rest\/v1\/?$/i, '').replace(/\/+$/, '') || 'https://ltpxwagdnrtuulzhfdjk.supabase.co';
-}
+const supabaseUrl: string =
+  (import.meta as any).env?.VITE_SUPABASE_URL ||
+  (typeof process !== 'undefined' ? process.env?.VITE_SUPABASE_URL : '') ||
+  'https://ltpxwagdnrtuulzhfdjk.supabase.co';
 
-const rawUrl = (import.meta as any).env?.VITE_SUPABASE_URL || (typeof process !== 'undefined' ? process.env?.VITE_SUPABASE_URL : '');
-const rawKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || (typeof process !== 'undefined' ? process.env?.VITE_SUPABASE_ANON_KEY : '');
+const supabaseAnonKey: string =
+  (import.meta as any).env?.VITE_SUPABASE_ANON_KEY ||
+  (typeof process !== 'undefined' ? process.env?.VITE_SUPABASE_ANON_KEY : '') ||
+  '';
 
-const supabaseUrl = cleanSupabaseUrl(rawUrl);
-// Provide a fallback dummy string so createClient does not throw 'supabaseKey is required' when key is not set
-const supabaseAnonKey = rawKey && rawKey.trim() ? rawKey.trim() : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.placeholder_key';
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient(
+  supabaseUrl.trim(),
+  supabaseAnonKey && supabaseAnonKey.trim()
+    ? supabaseAnonKey.trim()
+    : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.anon_key_placeholder'
+);
 
 export function isSupabaseConfigured(): boolean {
-  return Boolean(rawKey && rawKey.trim().length > 0 && !rawKey.includes('placeholder'));
+  return Boolean(supabaseAnonKey && supabaseAnonKey.trim().length > 0 && !supabaseAnonKey.includes('placeholder'));
 }
 
 /**
@@ -32,7 +33,6 @@ export async function fileToOptimizedDataUrl(file: File, maxWidth = 1200, maxHei
         resolve('');
         return;
       }
-      // If SVG or already small, return directly
       if (file.type.includes('svg') || file.size < 300 * 1024) {
         resolve(src);
         return;
@@ -73,81 +73,46 @@ export async function fileToOptimizedDataUrl(file: File, maxWidth = 1200, maxHei
 }
 
 /**
- * Uploads an image payload to the local API /api/upload endpoint
+ * Uploads logo to Supabase Storage
  */
-async function uploadToLocalApi(base64Data: string, filename: string): Promise<string | null> {
-  try {
-    const res = await fetch('/api/upload', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: base64Data, filename })
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data && data.url) {
-        return data.url;
-      }
-    }
-  } catch (err) {
-    console.warn('[uploadToLocalApi] API upload fallback notice:', err);
-  }
-  return null;
-}
-
 export async function uploadToSupabaseStorage(file: File, folder: string = 'logos'): Promise<string> {
   const fileExt = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '');
   const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${fileExt}`;
   const filePath = `${folder}/${fileName}`;
 
-  // 1. Try Supabase Storage if configured
-  if (isSupabaseConfigured()) {
-    const candidateBuckets = ['uploads', 'logos', 'public', 'images'];
-    for (const bucket of candidateBuckets) {
-      try {
-        const { error } = await supabase.storage
+  const candidateBuckets = ['uploads', 'logos', 'public', 'images'];
+  for (const bucket of candidateBuckets) {
+    try {
+      const { error } = await supabase.storage
+        .from(bucket)
+        .upload(filePath, file, {
+          contentType: file.type || `image/${fileExt}`,
+          cacheControl: '3600',
+          upsert: true
+        });
+
+      if (!error) {
+        const { data: { publicUrl } } = supabase.storage
           .from(bucket)
-          .upload(filePath, file, {
-            contentType: file.type || `image/${fileExt}`,
-            cacheControl: '3600',
-            upsert: true
-          });
+          .getPublicUrl(filePath);
 
-        if (!error) {
-          const { data: { publicUrl } } = supabase.storage
-            .from(bucket)
-            .getPublicUrl(filePath);
-
-          if (publicUrl && publicUrl.startsWith('http')) {
-            return publicUrl;
-          }
+        if (publicUrl && publicUrl.startsWith('http')) {
+          return publicUrl;
         }
-      } catch (e) {
-        console.warn(`[Supabase Storage] Bucket ${bucket} upload failed, trying next fallback:`, e);
       }
+    } catch (e) {
+      console.warn(`[Supabase Storage] Bucket ${bucket} upload notice:`, e);
     }
   }
 
-  // 2. Fallback: Optimize image client-side and upload to /api/upload or return data URL
-  const optimizedDataUrl = await fileToOptimizedDataUrl(file);
-  if (optimizedDataUrl) {
-    const localUrl = await uploadToLocalApi(optimizedDataUrl, fileName);
-    if (localUrl) return localUrl;
-    return optimizedDataUrl;
-  }
-
-  throw new Error('Não foi possível processar o arquivo de imagem.');
+  // Fallback to client-side optimized base64
+  return await fileToOptimizedDataUrl(file);
 }
 
 export async function uploadBusinessLogo(file: File, businessId: string): Promise<string> {
-  if (!file) {
-    throw new Error('Nenhum ficheiro fornecido.');
-  }
-  if (!file.type.startsWith('image/')) {
-    throw new Error('O ficheiro selecionado não é uma imagem válida.');
-  }
-  if (file.size > 25 * 1024 * 1024) {
-    throw new Error('A imagem selecionada ultrapassa o limite de 25MB.');
-  }
+  if (!file) throw new Error('Nenhum ficheiro fornecido.');
+  if (!file.type.startsWith('image/')) throw new Error('O ficheiro selecionado não é uma imagem válida.');
+  if (file.size > 25 * 1024 * 1024) throw new Error('A imagem selecionada ultrapassa o limite de 25MB.');
 
   const fileExt = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '');
   const cleanId = (businessId || 'biz').replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -156,64 +121,43 @@ export async function uploadBusinessLogo(file: File, businessId: string): Promis
 
   let finalPublicUrl: string | null = null;
 
-  // 1. Try Supabase Storage if configured
-  if (isSupabaseConfigured()) {
-    const candidateBuckets = ['uploads', 'logos', 'public', 'images'];
-    for (const bucket of candidateBuckets) {
-      try {
-        const { error: uploadError } = await supabase.storage
+  const candidateBuckets = ['uploads', 'logos', 'public', 'images'];
+  for (const bucket of candidateBuckets) {
+    try {
+      const { error: uploadError } = await supabase.storage
+        .from(bucket)
+        .upload(filePath, file, {
+          contentType: file.type || `image/${fileExt}`,
+          cacheControl: '3600',
+          upsert: true
+        });
+
+      if (!uploadError) {
+        const { data: { publicUrl } } = supabase.storage
           .from(bucket)
-          .upload(filePath, file, {
-            contentType: file.type || `image/${fileExt}`,
-            cacheControl: '3600',
-            upsert: true
-          });
+          .getPublicUrl(filePath);
 
-        if (!uploadError) {
-          const { data: { publicUrl } } = supabase.storage
-            .from(bucket)
-            .getPublicUrl(filePath);
-
-          if (publicUrl && publicUrl.startsWith('http')) {
-            finalPublicUrl = publicUrl;
-            break;
-          }
+        if (publicUrl && publicUrl.startsWith('http')) {
+          finalPublicUrl = publicUrl;
+          break;
         }
-      } catch (err) {
-        console.warn(`[uploadBusinessLogo] Supabase storage bucket '${bucket}' attempt failed:`, err);
       }
-    }
-  }
-
-  // 2. If Supabase storage is unavailable or failed, fallback to /api/upload with optimized DataURL
-  if (!finalPublicUrl) {
-    const dataUrl = await fileToOptimizedDataUrl(file);
-    if (dataUrl) {
-      const serverUrl = await uploadToLocalApi(dataUrl, fileName);
-      finalPublicUrl = serverUrl || dataUrl;
+    } catch (err) {
+      console.warn(`[uploadBusinessLogo] Supabase storage bucket '${bucket}' attempt:`, err);
     }
   }
 
   if (!finalPublicUrl) {
-    throw new Error('Não foi possível processar ou enviar a imagem.');
+    finalPublicUrl = await fileToOptimizedDataUrl(file);
   }
 
-  // 3. Persist to Supabase DB if possible (non-blocking failure)
-  if (isSupabaseConfigured() && businessId) {
-    (async () => {
-      try {
-        const { error } = await supabase
-          .from('businesses')
-          .update({
-            logo_url: finalPublicUrl,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', businessId);
-        if (error) console.warn('[Supabase DB] Non-fatal logo_url update warning:', error);
-      } catch (e) {
-        console.warn('[Supabase DB] Logo update catch:', e);
-      }
-    })();
+  if (businessId) {
+    try {
+      await Promise.all([
+        supabase.from('merchants').update({ logo_url: finalPublicUrl, updated_at: new Date().toISOString() }).eq('id', businessId),
+        supabase.from('businesses').update({ logo_url: finalPublicUrl, updated_at: new Date().toISOString() }).eq('id', businessId)
+      ]);
+    } catch {}
   }
 
   return finalPublicUrl;

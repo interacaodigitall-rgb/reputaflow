@@ -9,41 +9,10 @@ import {
   Plan,
   PlatformSettings
 } from '../types/index.ts';
-import {
-  db,
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  query,
-  where,
-  orderBy,
-  onSnapshot
-} from './firebase.ts';
 import { supabase, isSupabaseConfigured, uploadBusinessLogo } from './supabase.ts';
 
-// Clean initial data - platform starts empty and is completely live-synced
+// Zero mock/local storage data - completely live-driven by Supabase
 export const REGISTERED_BUSINESSES: Business[] = [];
-
-const LOCAL_STORAGE_KEY_BIZ = 'reputaflow_businesses';
-const LOCAL_STORAGE_KEY_REVIEWS = 'reputaflow_reviews_cache';
-const LOCAL_STORAGE_KEY_FEEDBACK = 'reputaflow_feedback_cache';
-const LOCAL_STORAGE_KEY_CASES = 'reputaflow_cases_cache';
-const LOCAL_STORAGE_KEY_CUSTOMERS = 'reputaflow_customers_cache';
-const LOCAL_STORAGE_KEY_PLANS = 'reputaflow_plans_cache';
-const LOCAL_STORAGE_KEY_SETTINGS = 'reputaflow_settings_cache';
-
-// Shared API fetch helper
-async function apiFetch(url: string, options?: RequestInit) {
-  try {
-    return await fetch(url, options);
-  } catch (err) {
-    return new Response(JSON.stringify({ error: 'Network error' }), { status: 503 });
-  }
-}
 
 // ==========================================
 // STRING & ID NORMALIZATION UTILS
@@ -69,25 +38,12 @@ export function isMatchingBusiness(itemBizId: string | undefined, targetBizId: s
   return false;
 }
 
-// ==========================================
-// LOCAL STORAGE CACHE HELPERS
-// ==========================================
-function getCached<T>(key: string, fallback: T): T {
-  if (typeof window === 'undefined') return fallback;
-  try {
-    const data = localStorage.getItem(key);
-    return data ? JSON.parse(data) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function setCached<T>(key: string, data: T): void {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem(key, JSON.stringify(data));
-  } catch {}
-}
+// In-memory runtime state for fast UI renders (NO localStorage)
+let runtimeBusinesses: Business[] = [];
+let runtimeReviews: Review[] = [];
+let runtimeFeedback: Feedback[] = [];
+let runtimeRecoveryCases: RecoveryCase[] = [];
+let runtimeCustomers: Customer[] = [];
 
 export function notifyDataChanged() {
   if (typeof window !== 'undefined') {
@@ -96,165 +52,109 @@ export function notifyDataChanged() {
 }
 
 // ==========================================
-// IMAGE UPLOAD SERVICE (SUPABASE STORAGE + SERVER API + BASE64 DATA URL)
+// IMAGE UPLOAD SERVICE (SUPABASE STORAGE ONLY)
 // ==========================================
 export async function uploadImage(file: File, businessId?: string): Promise<string> {
   const currentMerchantId = businessId || 'biz';
   const publicUrl = await uploadBusinessLogo(file, currentMerchantId);
 
-  try {
-    const list = getCached<Business[]>(LOCAL_STORAGE_KEY_BIZ, []);
-    const updated = list.map((b) => (b.id === currentMerchantId ? { ...b, logoUrl: publicUrl } : b));
-    setCached(LOCAL_STORAGE_KEY_BIZ, updated);
-  } catch {}
-
-  // Update in Firestore immediately if businessId provided
   if (businessId && businessId !== 'biz' && businessId !== 'new_biz') {
     try {
-      await updateDoc(doc(db, 'businesses', businessId), {
-        logoUrl: publicUrl,
-        updatedAt: new Date().toISOString()
-      });
+      await updateBusiness(businessId, { logoUrl: publicUrl });
     } catch {}
   }
 
   notifyDataChanged();
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated'));
-  }
-
   return publicUrl;
 }
 
 // ==========================================
-// BUSINESSES SERVICE (MULTI-CLOUD SYNCHRONIZED)
+// BUSINESSES / MERCHANTS SERVICE (SUPABASE ONLY)
 // ==========================================
-function mapBusinessDoc(id: string, data: any): Business {
+function mapMerchantRow(row: any): Business {
   return {
-    id: id || data.id || `biz_${Date.now().toString(36)}`,
-    name: data.name || '',
-    slug: data.slug || normalizeKey(data.name || id),
-    category: data.category || 'Comércio & Serviços',
-    address: data.address || '',
-    phone: data.phone || '',
-    email: data.email || '',
-    googleReviewUrl: data.googleReviewUrl || data.google_review_url || '',
-    logoUrl: data.logoUrl || data.logo_url || '',
-    bannerUrl: data.bannerUrl || data.banner_url || '',
-    minRatingForGoogle: Number(data.minRatingForGoogle ?? data.min_rating_for_google ?? 4),
-    qrThemeColor: data.qrThemeColor || data.qr_theme_color || '#4f46e5',
-    activePlan: data.activePlan || data.active_plan || data.planId || data.plan_id || 'pro',
-    planId: data.planId || data.plan_id || 'plan_pro',
-    ownerId: data.ownerId || data.owner_id || '',
-    currency: (data.currency as 'EUR' | 'BRL') || 'EUR',
-    status: (data.status as any) || 'active',
-    password: data.password || 'reputa123',
-    createdAt: data.createdAt || data.created_at || new Date().toISOString(),
-    updatedAt: data.updatedAt || data.updated_at || new Date().toISOString()
+    id: String(row.id || ''),
+    name: String(row.name || ''),
+    slug: String(row.slug || normalizeKey(row.name || String(row.id || ''))),
+    category: row.category || 'Comércio & Serviços',
+    address: row.address || '',
+    phone: row.phone || '',
+    email: row.email || '',
+    googleReviewUrl: row.google_review_url || row.googleReviewUrl || '',
+    logoUrl: row.logo_url || row.logoUrl || '',
+    bannerUrl: row.banner_url || row.bannerUrl || '',
+    minRatingForGoogle: Number(row.min_rating_for_google ?? row.minRatingForGoogle ?? 4),
+    qrThemeColor: row.qr_theme_color || row.qrThemeColor || '#4f46e5',
+    activePlan: row.active_plan || row.activePlan || row.plan_id || 'pro',
+    planId: row.plan_id || row.planId || 'plan_pro',
+    ownerId: row.owner_id || row.ownerId || '',
+    currency: (row.currency as 'EUR' | 'BRL') || 'EUR',
+    status: (row.status as any) || 'active',
+    password: row.password || 'reputa123',
+    createdAt: row.created_at || row.createdAt || new Date().toISOString(),
+    updatedAt: row.updated_at || row.updatedAt || new Date().toISOString()
   };
 }
 
 export function subscribeBusinesses(callback: (businesses: Business[]) => void) {
   let isSubscribed = true;
 
-  const emit = (list: Business[]) => {
-    if (!isSubscribed) return;
-    setCached(LOCAL_STORAGE_KEY_BIZ, list);
-    callback(list);
-  };
+  const fetchMerchants = async () => {
+    try {
+      // 1. Try 'merchants' table as specified
+      let res = await supabase.from('merchants').select('*').order('created_at', { ascending: false });
 
-  // 1. Initial cached emission for zero latency
-  const cachedList = getCached<Business[]>(LOCAL_STORAGE_KEY_BIZ, []);
-  if (cachedList.length > 0) {
-    emit(cachedList);
-  }
-
-  // 2. Real-time Firestore Listener (Cross-Device Cloud Hub)
-  let unFirestore: (() => void) | null = null;
-  try {
-    const bizCollection = collection(db, 'businesses');
-    unFirestore = onSnapshot(
-      bizCollection,
-      (snapshot) => {
-        const firestoreList: Business[] = [];
-        snapshot.forEach((d) => {
-          firestoreList.push(mapBusinessDoc(d.id, d.data()));
-        });
-
-        // Sort latest first
-        firestoreList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-        if (firestoreList.length > 0) {
-          emit(firestoreList);
-        } else if (cachedList.length === 0) {
-          emit([]);
+      // Fallback to 'businesses' if 'merchants' table does not exist or is empty
+      if (res.error || !res.data || res.data.length === 0) {
+        const bizRes = await supabase.from('businesses').select('*').order('created_at', { ascending: false });
+        if (!bizRes.error && bizRes.data && bizRes.data.length > 0) {
+          res = bizRes;
         }
-      },
-      (error) => {
-        console.warn('[Firestore subscribeBusinesses warning]:', error.message);
       }
-    );
-  } catch (err) {
-    console.warn('[Firestore setup warning]:', err);
-  }
 
-  // 3. Parallel Poller / Supabase & Server API Sync
-  const fetchSecondarySources = async () => {
-    let remoteList: Business[] = [];
-
-    // Supabase check
-    if (isSupabaseConfigured()) {
-      try {
-        const { data, error } = await supabase.from('businesses').select('*').order('created_at', { ascending: false });
-        if (!error && data && data.length > 0) {
-          remoteList = data.map((b: any) => mapBusinessDoc(b.id, b));
-        }
-      } catch {}
+      if (!res.error && res.data) {
+        const mapped = res.data.map(mapMerchantRow);
+        runtimeBusinesses = mapped;
+        if (isSubscribed) callback(mapped);
+        return;
+      }
+    } catch (err) {
+      console.warn('[Supabase subscribeBusinesses error]:', err);
     }
 
-    // Server API check
-    if (remoteList.length === 0) {
-      try {
-        const res = await apiFetch('/api/businesses');
-        if (res.ok) {
-          const data: any[] = await res.json();
-          if (Array.isArray(data) && data.length > 0) {
-            remoteList = data.map((b: any) => mapBusinessDoc(b.id, b));
-          }
-        }
-      } catch {}
-    }
-
-    if (remoteList.length > 0 && isSubscribed) {
-      // Sync any businesses found into Firestore as well for cross-device consistency
-      remoteList.forEach((biz) => {
-        try {
-          setDoc(doc(db, 'businesses', biz.id), biz, { merge: true }).catch(() => {});
-        } catch {}
-      });
-      emit(remoteList);
+    if (isSubscribed) {
+      callback(runtimeBusinesses);
     }
   };
 
-  fetchSecondarySources();
-  const pollInterval = setInterval(fetchSecondarySources, 6000);
+  // Initial fetch
+  fetchMerchants();
+
+  // Supabase Realtime Channel
+  const channel = supabase
+    .channel('public:merchants_channel')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'merchants' }, () => {
+      fetchMerchants();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'businesses' }, () => {
+      fetchMerchants();
+    })
+    .subscribe();
+
+  const interval = setInterval(fetchMerchants, 4000);
 
   const handleCustomEvent = () => {
-    const current = getCached<Business[]>(LOCAL_STORAGE_KEY_BIZ, []);
-    emit(current);
+    if (isSubscribed) callback(runtimeBusinesses);
   };
-
   if (typeof window !== 'undefined') {
-    window.addEventListener('reputaflow_businesses_updated', handleCustomEvent);
     window.addEventListener('reputaflow_live_sync', handleCustomEvent);
   }
 
   return () => {
     isSubscribed = false;
-    if (unFirestore) unFirestore();
-    clearInterval(pollInterval);
+    supabase.removeChannel(channel);
+    clearInterval(interval);
     if (typeof window !== 'undefined') {
-      window.removeEventListener('reputaflow_businesses_updated', handleCustomEvent);
       window.removeEventListener('reputaflow_live_sync', handleCustomEvent);
     }
   };
@@ -265,73 +165,39 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
   const normSlug = normalizeKey(clean);
   if (!normSlug) return null;
 
-  // 1. Check local cache first
-  const cached = getCached<Business[]>(LOCAL_STORAGE_KEY_BIZ, []);
-  const localMatch = cached.find(
-    (b) =>
-      normalizeKey(b.slug) === normSlug ||
-      normalizeKey(b.id) === normSlug ||
-      normalizeKey(b.name) === normSlug
+  try {
+    // Try merchants table
+    const { data: mData, error: mErr } = await supabase
+      .from('merchants')
+      .select('*')
+      .or(`slug.eq.${clean},slug.eq.${normSlug},id.eq.${clean}`);
+
+    if (!mErr && mData && mData.length > 0) {
+      return mapMerchantRow(mData[0]);
+    }
+
+    // Try businesses table
+    const { data: bData, error: bErr } = await supabase
+      .from('businesses')
+      .select('*')
+      .or(`slug.eq.${clean},slug.eq.${normSlug},id.eq.${clean}`);
+
+    if (!bErr && bData && bData.length > 0) {
+      return mapMerchantRow(bData[0]);
+    }
+  } catch (e) {
+    console.warn('[getBusinessBySlug catch]:', e);
+  }
+
+  // Runtime memory match
+  return (
+    runtimeBusinesses.find(
+      (b) =>
+        normalizeKey(b.slug) === normSlug ||
+        normalizeKey(b.id) === normSlug ||
+        normalizeKey(b.name) === normSlug
+    ) || null
   );
-  if (localMatch) return localMatch;
-
-  // 2. Query Firestore by slug or ID
-  try {
-    const q = query(collection(db, 'businesses'), where('slug', '==', clean));
-    const snap = await getDocs(q);
-    if (!snap.empty) {
-      const d = snap.docs[0];
-      return mapBusinessDoc(d.id, d.data());
-    }
-
-    const docRef = doc(db, 'businesses', clean);
-    const docSnap = await getDoc(docRef);
-    if (docSnap.exists()) {
-      return mapBusinessDoc(docSnap.id, docSnap.data());
-    }
-
-    // Try finding by normalized key in all Firestore businesses
-    const allSnap = await getDocs(collection(db, 'businesses'));
-    for (const d of allSnap.docs) {
-      const bData = mapBusinessDoc(d.id, d.data());
-      if (
-        normalizeKey(bData.slug) === normSlug ||
-        normalizeKey(bData.id) === normSlug ||
-        normalizeKey(bData.name) === normSlug
-      ) {
-        return bData;
-      }
-    }
-  } catch (err) {
-    console.warn('[Firestore getBusinessBySlug warning]:', err);
-  }
-
-  // 3. Query Supabase
-  if (isSupabaseConfigured()) {
-    try {
-      const { data, error } = await supabase
-        .from('businesses')
-        .select('*')
-        .or(`slug.eq.${clean},slug.eq.${normSlug},id.eq.${clean}`);
-
-      if (!error && data && data.length > 0) {
-        return mapBusinessDoc(data[0].id, data[0]);
-      }
-    } catch {}
-  }
-
-  // 4. Query Server API
-  try {
-    const res = await apiFetch(`/api/businesses/${encodeURIComponent(clean)}`);
-    if (res.ok) {
-      const data = await res.json();
-      if (data && data.name) {
-        return mapBusinessDoc(data.id, data);
-      }
-    }
-  } catch {}
-
-  return null;
 }
 
 export async function getBusinessById(id: string): Promise<Business | null> {
@@ -339,7 +205,7 @@ export async function getBusinessById(id: string): Promise<Business | null> {
 }
 
 export function getLocalBusinesses(): Business[] {
-  return getCached<Business[]>(LOCAL_STORAGE_KEY_BIZ, []);
+  return runtimeBusinesses;
 }
 
 export async function addBusiness(data: Omit<Business, 'id' | 'createdAt' | 'updatedAt'>): Promise<Business> {
@@ -370,61 +236,47 @@ export async function addBusiness(data: Omit<Business, 'id' | 'createdAt' | 'upd
     updatedAt: now
   };
 
-  // 1. Write to Firestore Cloud Database (Instant Multi-Device Sync)
-  try {
-    await setDoc(doc(db, 'businesses', id), newBiz);
-  } catch (err) {
-    console.warn('[Firestore addBusiness warning]:', err);
-  }
+  const payload = {
+    id,
+    name: newBiz.name,
+    slug: newBiz.slug,
+    category: newBiz.category,
+    address: newBiz.address,
+    phone: newBiz.phone,
+    email: newBiz.email,
+    google_review_url: newBiz.googleReviewUrl || null,
+    logo_url: newBiz.logoUrl || null,
+    banner_url: newBiz.bannerUrl || null,
+    min_rating_for_google: newBiz.minRatingForGoogle,
+    qr_theme_color: newBiz.qrThemeColor,
+    active_plan: newBiz.activePlan,
+    plan_id: newBiz.planId,
+    owner_id: newBiz.ownerId,
+    currency: newBiz.currency,
+    status: newBiz.status,
+    password: newBiz.password,
+    created_at: now,
+    updated_at: now
+  };
 
-  // 2. Write to Supabase Database
-  if (isSupabaseConfigured()) {
-    try {
-      const supabaseRecord = {
-        id,
-        name: newBiz.name,
-        slug: newBiz.slug,
-        category: newBiz.category,
-        address: newBiz.address,
-        phone: newBiz.phone,
-        email: newBiz.email,
-        google_review_url: newBiz.googleReviewUrl || null,
-        logo_url: newBiz.logoUrl || null,
-        banner_url: newBiz.bannerUrl || null,
-        min_rating_for_google: newBiz.minRatingForGoogle,
-        qr_theme_color: newBiz.qrThemeColor,
-        active_plan: newBiz.activePlan,
-        plan_id: newBiz.planId,
-        owner_id: newBiz.ownerId,
-        currency: newBiz.currency,
-        status: newBiz.status,
-        password: newBiz.password,
-        created_at: now,
-        updated_at: now
-      };
-      await supabase.from('businesses').insert([supabaseRecord]);
-    } catch (e) {
-      console.warn('[Supabase addBusiness warning]:', e);
+  // 1. Insert into Supabase merchants & businesses
+  try {
+    const { error: mError } = await supabase.from('merchants').insert([payload]);
+    if (mError) {
+      // If table merchants fails, try businesses
+      await supabase.from('businesses').insert([payload]);
+    } else {
+      // Also sync to businesses table for compatibility if it exists
+      try {
+        await supabase.from('businesses').insert([payload]);
+      } catch {}
     }
+  } catch (err) {
+    console.error('[Supabase addBusiness error]:', err);
   }
 
-  // 3. Write to Server API
-  try {
-    await apiFetch('/api/businesses', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newBiz)
-    });
-  } catch {}
-
-  // 4. Update Local Cache & trigger instant live sync event
-  const list = getCached<Business[]>(LOCAL_STORAGE_KEY_BIZ, []);
-  setCached(LOCAL_STORAGE_KEY_BIZ, [newBiz, ...list]);
+  runtimeBusinesses = [newBiz, ...runtimeBusinesses.filter((b) => b.id !== id)];
   notifyDataChanged();
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated'));
-  }
-
   return newBiz;
 }
 
@@ -432,194 +284,105 @@ export const createBusiness = addBusiness;
 
 export async function updateBusiness(id: string, data: Partial<Business>): Promise<void> {
   const now = new Date().toISOString();
-  const cleanUpdates = { ...data, updatedAt: now };
+  const dbUpdates: any = { updated_at: now };
+  if (data.name !== undefined) dbUpdates.name = data.name;
+  if (data.slug !== undefined) dbUpdates.slug = data.slug.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-');
+  if (data.category !== undefined) dbUpdates.category = data.category;
+  if (data.address !== undefined) dbUpdates.address = data.address;
+  if (data.phone !== undefined) dbUpdates.phone = data.phone;
+  if (data.email !== undefined) dbUpdates.email = data.email;
+  if (data.status !== undefined) dbUpdates.status = data.status;
+  if (data.currency !== undefined) dbUpdates.currency = data.currency;
+  if (data.password !== undefined) dbUpdates.password = data.password;
+  if (data.googleReviewUrl !== undefined) dbUpdates.google_review_url = data.googleReviewUrl;
+  if (data.logoUrl !== undefined) dbUpdates.logo_url = data.logoUrl;
+  if (data.planId !== undefined) dbUpdates.plan_id = data.planId;
 
-  // 1. Update in Firestore
   try {
-    await setDoc(doc(db, 'businesses', id), cleanUpdates, { merge: true });
+    await Promise.all([
+      supabase.from('merchants').update(dbUpdates).eq('id', id),
+      supabase.from('businesses').update(dbUpdates).eq('id', id)
+    ]);
   } catch (err) {
-    console.warn('[Firestore updateBusiness warning]:', err);
+    console.error('[Supabase updateBusiness error]:', err);
   }
 
-  // 2. Update in Supabase
-  if (isSupabaseConfigured()) {
-    try {
-      const dbUpdates: any = { updated_at: now };
-      if (data.name !== undefined) dbUpdates.name = data.name;
-      if (data.slug !== undefined) dbUpdates.slug = data.slug.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-');
-      if (data.category !== undefined) dbUpdates.category = data.category;
-      if (data.address !== undefined) dbUpdates.address = data.address;
-      if (data.phone !== undefined) dbUpdates.phone = data.phone;
-      if (data.email !== undefined) dbUpdates.email = data.email;
-      if (data.status !== undefined) dbUpdates.status = data.status;
-      if (data.currency !== undefined) dbUpdates.currency = data.currency;
-      if (data.password !== undefined) dbUpdates.password = data.password;
-      if (data.googleReviewUrl !== undefined) dbUpdates.google_review_url = data.googleReviewUrl;
-      if (data.logoUrl !== undefined) dbUpdates.logo_url = data.logoUrl;
-      if (data.planId !== undefined) dbUpdates.plan_id = data.planId;
-
-      await supabase.from('businesses').update(dbUpdates).eq('id', id);
-    } catch {}
-  }
-
-  // 3. Update in Server API
-  try {
-    await apiFetch(`/api/businesses/${encodeURIComponent(id)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(cleanUpdates)
-    });
-  } catch {}
-
-  // 4. Update in local cache
-  const list = getCached<Business[]>(LOCAL_STORAGE_KEY_BIZ, []);
-  const updated = list.map((b) => (b.id === id ? { ...b, ...cleanUpdates } : b));
-  setCached(LOCAL_STORAGE_KEY_BIZ, updated);
+  runtimeBusinesses = runtimeBusinesses.map((b) => (b.id === id ? { ...b, ...data, updatedAt: now } : b));
   notifyDataChanged();
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated'));
-  }
 }
 
 export async function deleteBusiness(id: string): Promise<void> {
-  // 1. Delete in Firestore
   try {
-    await deleteDoc(doc(db, 'businesses', id));
+    await Promise.all([
+      supabase.from('merchants').delete().eq('id', id),
+      supabase.from('businesses').delete().eq('id', id)
+    ]);
   } catch (err) {
-    console.warn('[Firestore deleteBusiness warning]:', err);
+    console.error('[Supabase deleteBusiness error]:', err);
   }
 
-  // 2. Delete in Supabase
-  if (isSupabaseConfigured()) {
-    try {
-      await supabase.from('businesses').delete().eq('id', id);
-    } catch {}
-  }
-
-  // 3. Delete in Server API
-  try {
-    await apiFetch(`/api/businesses/${encodeURIComponent(id)}`, { method: 'DELETE' });
-  } catch {}
-
-  // 4. Update Local Cache
-  const list = getCached<Business[]>(LOCAL_STORAGE_KEY_BIZ, []);
-  const filtered = list.filter((b) => b.id !== id);
-  setCached(LOCAL_STORAGE_KEY_BIZ, filtered);
+  runtimeBusinesses = runtimeBusinesses.filter((b) => b.id !== id);
   notifyDataChanged();
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated'));
-  }
 }
 
 // ==========================================
-// REVIEWS SERVICE (MULTI-CLOUD SYNCHRONIZED)
+// REVIEWS SERVICE (SUPABASE ONLY)
 // ==========================================
-function mapReviewDoc(id: string, data: any): Review {
+function mapReviewRow(row: any): Review {
   return {
-    id: id || data.id || `rev_${Date.now().toString(36)}`,
-    businessId: data.businessId || data.business_id || '',
-    customerId: data.customerId || data.customer_id || '',
-    customerName: data.customerName || data.customer_name || 'Cliente',
-    customerPhone: data.customerPhone || data.customer_phone || '',
-    customerEmail: data.customerEmail || data.customer_email || '',
-    rating: Number(data.rating || 5),
-    channel: (data.channel as any) || 'qr',
-    createdAt: data.createdAt || data.created_at || new Date().toISOString()
+    id: String(row.id || ''),
+    businessId: String(row.business_id || row.businessId || ''),
+    customerId: row.customer_id || row.customerId || undefined,
+    customerName: row.customer_name || row.customerName || 'Cliente',
+    customerPhone: row.customer_phone || row.customerPhone || '',
+    customerEmail: row.customer_email || row.customerEmail || '',
+    rating: Number(row.rating || 5),
+    channel: (row.channel as any) || 'qr',
+    createdAt: row.created_at || row.createdAt || new Date().toISOString()
   };
 }
 
 export function subscribeReviews(businessId: string | null, callback: (reviews: Review[]) => void) {
   let isSubscribed = true;
 
-  const emit = (list: Review[]) => {
-    if (!isSubscribed) return;
-    const filtered = businessId ? list.filter((r) => isMatchingBusiness(r.businessId, businessId)) : list;
-    callback(filtered);
-  };
-
-  // 1. Local Cache initial
-  const cached = getCached<Review[]>(LOCAL_STORAGE_KEY_REVIEWS, []);
-  if (cached.length > 0) {
-    emit(cached);
-  }
-
-  // 2. Real-time Firestore Listener
-  let unFirestore: (() => void) | null = null;
-  try {
-    const reviewsCol = collection(db, 'reviews');
-    unFirestore = onSnapshot(
-      reviewsCol,
-      (snapshot) => {
-        const firestoreList: Review[] = [];
-        snapshot.forEach((d) => {
-          firestoreList.push(mapReviewDoc(d.id, d.data()));
-        });
-        firestoreList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        setCached(LOCAL_STORAGE_KEY_REVIEWS, firestoreList);
-        emit(firestoreList);
-      },
-      (err) => {
-        console.warn('[Firestore subscribeReviews warning]:', err.message);
+  const fetchReviews = async () => {
+    try {
+      let query = supabase.from('reviews').select('*').order('created_at', { ascending: false });
+      if (businessId) {
+        query = query.eq('business_id', businessId);
       }
-    );
-  } catch (err) {
-    console.warn('[Firestore setup reviews warning]:', err);
-  }
-
-  // 3. Polling secondary sources
-  const fetchSecondary = async () => {
-    let remote: Review[] = [];
-    if (isSupabaseConfigured()) {
-      try {
-        const { data } = await supabase.from('reviews').select('*').order('created_at', { ascending: false });
-        if (data && data.length > 0) {
-          remote = data.map((r: any) => mapReviewDoc(r.id, r));
-        }
-      } catch {}
+      const { data, error } = await query;
+      if (!error && data) {
+        const mapped = data.map(mapReviewRow);
+        runtimeReviews = mapped;
+        if (isSubscribed) callback(mapped);
+        return;
+      }
+    } catch (err) {
+      console.warn('[Supabase subscribeReviews error]:', err);
     }
 
-    if (remote.length === 0) {
-      try {
-        const res = await apiFetch(`/api/reviews${businessId ? `?businessId=${encodeURIComponent(businessId)}` : ''}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data) && data.length > 0) {
-            remote = data.map((r: any) => mapReviewDoc(r.id, r));
-          }
-        }
-      } catch {}
-    }
-
-    if (remote.length > 0 && isSubscribed) {
-      remote.forEach((rev) => {
-        try {
-          setDoc(doc(db, 'reviews', rev.id), rev, { merge: true }).catch(() => {});
-        } catch {}
-      });
-      setCached(LOCAL_STORAGE_KEY_REVIEWS, remote);
-      emit(remote);
+    if (isSubscribed) {
+      const filtered = businessId ? runtimeReviews.filter((r) => isMatchingBusiness(r.businessId, businessId)) : runtimeReviews;
+      callback(filtered);
     }
   };
 
-  fetchSecondary();
-  const pollInterval = setInterval(fetchSecondary, 6000);
+  fetchReviews();
 
-  const handleCustomEvent = () => {
-    const current = getCached<Review[]>(LOCAL_STORAGE_KEY_REVIEWS, []);
-    emit(current);
-  };
+  const channel = supabase
+    .channel('public:reviews_channel')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'reviews' }, () => {
+      fetchReviews();
+    })
+    .subscribe();
 
-  if (typeof window !== 'undefined') {
-    window.addEventListener('reputaflow_live_sync', handleCustomEvent);
-  }
+  const interval = setInterval(fetchReviews, 4000);
 
   return () => {
     isSubscribed = false;
-    if (unFirestore) unFirestore();
-    clearInterval(pollInterval);
-    if (typeof window !== 'undefined') {
-      window.removeEventListener('reputaflow_live_sync', handleCustomEvent);
-    }
+    supabase.removeChannel(channel);
+    clearInterval(interval);
   };
 }
 
@@ -633,53 +396,34 @@ export async function addReview(data: Omit<Review, 'id' | 'createdAt'>): Promise
     createdAt: now
   };
 
-  // 1. Write to Firestore Cloud
   try {
-    await setDoc(doc(db, 'reviews', id), newReview);
+    const { error } = await supabase.from('reviews').insert([
+      {
+        id,
+        business_id: newReview.businessId,
+        customer_id: newReview.customerId || null,
+        customer_name: newReview.customerName || null,
+        customer_phone: newReview.customerPhone || null,
+        customer_email: newReview.customerEmail || null,
+        rating: newReview.rating,
+        channel: newReview.channel,
+        created_at: now
+      }
+    ]);
+    if (error) throw error;
   } catch (err) {
-    console.warn('[Firestore addReview warning]:', err);
+    console.error('[Supabase addReview error]:', err);
   }
 
-  // 2. Write to Supabase
-  if (isSupabaseConfigured()) {
-    try {
-      await supabase.from('reviews').insert([
-        {
-          id,
-          business_id: newReview.businessId,
-          customer_id: newReview.customerId || null,
-          customer_name: newReview.customerName || null,
-          customer_phone: newReview.customerPhone || null,
-          customer_email: newReview.customerEmail || null,
-          rating: newReview.rating,
-          channel: newReview.channel,
-          created_at: now
-        }
-      ]);
-    } catch {}
-  }
-
-  // 3. Write to Server API
-  try {
-    await apiFetch('/api/reviews', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newReview)
-    });
-  } catch {}
-
-  // 4. Automatically upsert customer record in CRM
+  // Auto upsert customer
   if (newReview.customerName || newReview.customerPhone || newReview.customerEmail) {
     try {
       await upsertCustomerFromReview(newReview);
     } catch {}
   }
 
-  // 5. Update local cache
-  const list = getCached<Review[]>(LOCAL_STORAGE_KEY_REVIEWS, []);
-  setCached(LOCAL_STORAGE_KEY_REVIEWS, [newReview, ...list]);
+  runtimeReviews = [newReview, ...runtimeReviews];
   notifyDataChanged();
-
   return newReview;
 }
 
@@ -690,158 +434,155 @@ export const submitReview = async (data: any): Promise<Review & { reviewId: stri
 
 export async function deleteReview(reviewId: string): Promise<void> {
   try {
-    await deleteDoc(doc(db, 'reviews', reviewId));
-  } catch {}
-
-  if (isSupabaseConfigured()) {
-    try {
-      await supabase.from('reviews').delete().eq('id', reviewId);
-    } catch {}
+    await supabase.from('reviews').delete().eq('id', reviewId);
+  } catch (err) {
+    console.error('[Supabase deleteReview error]:', err);
   }
 
-  try {
-    await apiFetch(`/api/reviews/${encodeURIComponent(reviewId)}`, { method: 'DELETE' });
-  } catch {}
-
-  const list = getCached<Review[]>(LOCAL_STORAGE_KEY_REVIEWS, []);
-  setCached(LOCAL_STORAGE_KEY_REVIEWS, list.filter((r) => r.id !== reviewId));
+  runtimeReviews = runtimeReviews.filter((r) => r.id !== reviewId);
   notifyDataChanged();
 }
 
 export async function clearAllReviews(businessId?: string): Promise<void> {
-  const list = getCached<Review[]>(LOCAL_STORAGE_KEY_REVIEWS, []);
-  if (businessId) {
-    setCached(LOCAL_STORAGE_KEY_REVIEWS, list.filter((r) => !isMatchingBusiness(r.businessId, businessId)));
-  } else {
-    setCached(LOCAL_STORAGE_KEY_REVIEWS, []);
+  try {
+    if (businessId) {
+      await supabase.from('reviews').delete().eq('business_id', businessId);
+    } else {
+      await supabase.from('reviews').delete().neq('id', '');
+    }
+  } catch (err) {
+    console.error('[Supabase clearAllReviews error]:', err);
   }
+
+  runtimeReviews = businessId ? runtimeReviews.filter((r) => !isMatchingBusiness(r.businessId, businessId)) : [];
   notifyDataChanged();
 }
 
 // ==========================================
-// FEEDBACK SERVICE (INTERNAL ADAPTIVE REVIEW FLOW)
+// FEEDBACK & RECOVERY CASES SERVICE (SUPABASE ONLY)
 // ==========================================
-function mapFeedbackDoc(id: string, data: any): Feedback {
+function mapFeedbackRow(row: any): Feedback {
   return {
-    id: id || data.id || `fb_${Date.now().toString(36)}`,
-    businessId: data.businessId || data.business_id || '',
-    reviewId: data.reviewId || data.review_id || '',
-    customerId: data.customerId || data.customer_id || '',
-    customerName: data.customerName || data.customer_name || 'Cliente',
-    customerPhone: data.customerPhone || data.customer_phone || '',
-    customerEmail: data.customerEmail || data.customer_email || '',
-    rating: Number(data.rating || 1),
-    question1: data.question1 || '',
-    question2: data.question2 || '',
-    question3WantsContact: Boolean(data.question3WantsContact ?? data.question3_wants_contact ?? true),
-    createdAt: data.createdAt || data.created_at || new Date().toISOString()
+    id: String(row.id || ''),
+    businessId: String(row.business_id || row.businessId || ''),
+    reviewId: String(row.review_id || row.reviewId || ''),
+    customerId: row.customer_id || row.customerId || undefined,
+    customerName: row.customer_name || row.customerName || 'Cliente',
+    customerPhone: row.customer_phone || row.customerPhone || '',
+    customerEmail: row.customer_email || row.customerEmail || '',
+    rating: Number(row.rating || 1),
+    question1: row.question1 || '',
+    question2: row.question2 || '',
+    question3WantsContact: Boolean(row.question3_wants_contact ?? row.question3WantsContact ?? true),
+    createdAt: row.created_at || row.createdAt || new Date().toISOString()
   };
 }
 
 export function subscribeFeedback(businessId: string | null, callback: (feedbackList: Feedback[]) => void) {
   let isSubscribed = true;
 
-  const emit = (list: Feedback[]) => {
-    if (!isSubscribed) return;
-    const filtered = businessId ? list.filter((f) => isMatchingBusiness(f.businessId, businessId)) : list;
-    callback(filtered);
+  const fetchFeedback = async () => {
+    try {
+      let query = supabase.from('feedback').select('*').order('created_at', { ascending: false });
+      if (businessId) {
+        query = query.eq('business_id', businessId);
+      }
+      const { data, error } = await query;
+      if (!error && data) {
+        const mapped = data.map(mapFeedbackRow);
+        runtimeFeedback = mapped;
+        if (isSubscribed) callback(mapped);
+        return;
+      }
+    } catch (err) {
+      console.warn('[Supabase subscribeFeedback error]:', err);
+    }
+
+    if (isSubscribed) {
+      const filtered = businessId ? runtimeFeedback.filter((f) => isMatchingBusiness(f.businessId, businessId)) : runtimeFeedback;
+      callback(filtered);
+    }
   };
 
-  const cached = getCached<Feedback[]>(LOCAL_STORAGE_KEY_FEEDBACK, []);
-  if (cached.length > 0) emit(cached);
+  fetchFeedback();
 
-  let unFirestore: (() => void) | null = null;
-  try {
-    const colRef = collection(db, 'feedback');
-    unFirestore = onSnapshot(
-      colRef,
-      (snapshot) => {
-        const list: Feedback[] = [];
-        snapshot.forEach((d) => list.push(mapFeedbackDoc(d.id, d.data())));
-        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        setCached(LOCAL_STORAGE_KEY_FEEDBACK, list);
-        emit(list);
-      },
-      () => {}
-    );
-  } catch {}
+  const channel = supabase
+    .channel('public:feedback_channel')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'feedback' }, () => {
+      fetchFeedback();
+    })
+    .subscribe();
 
-  const handleCustomEvent = () => emit(getCached<Feedback[]>(LOCAL_STORAGE_KEY_FEEDBACK, []));
-  if (typeof window !== 'undefined') {
-    window.addEventListener('reputaflow_live_sync', handleCustomEvent);
-  }
+  const interval = setInterval(fetchFeedback, 4000);
 
   return () => {
     isSubscribed = false;
-    if (unFirestore) unFirestore();
-    if (typeof window !== 'undefined') {
-      window.removeEventListener('reputaflow_live_sync', handleCustomEvent);
-    }
+    supabase.removeChannel(channel);
+    clearInterval(interval);
   };
 }
 
-// ==========================================
-// RECOVERY CASES SERVICE
-// ==========================================
-function mapRecoveryDoc(id: string, data: any): RecoveryCase {
+function mapRecoveryRow(row: any): RecoveryCase {
   return {
-    id: id || data.id || `case_${Date.now().toString(36)}`,
-    businessId: data.businessId || data.business_id || '',
-    customerId: data.customerId || data.customer_id || '',
-    reviewId: data.reviewId || data.review_id || '',
-    feedbackId: data.feedbackId || data.feedback_id || '',
-    customerName: data.customerName || data.customer_name || 'Cliente',
-    customerPhone: data.customerPhone || data.customer_phone || '',
-    customerEmail: data.customerEmail || data.customer_email || '',
-    rating: Number(data.rating || 1),
-    status: (data.status as RecoveryCaseStatus) || 'novo',
-    notes: data.notes || '',
-    assignedTo: data.assignedTo || data.assigned_to || '',
-    resolvedAt: data.resolvedAt || data.resolved_at || undefined,
-    createdAt: data.createdAt || data.created_at || new Date().toISOString(),
-    updatedAt: data.updatedAt || data.updated_at || new Date().toISOString()
+    id: String(row.id || ''),
+    businessId: String(row.business_id || row.businessId || ''),
+    customerId: row.customer_id || row.customerId || undefined,
+    reviewId: String(row.review_id || row.reviewId || ''),
+    feedbackId: row.feedback_id || row.feedbackId || '',
+    customerName: row.customer_name || row.customerName || 'Cliente',
+    customerPhone: row.customer_phone || row.customerPhone || '',
+    customerEmail: row.customer_email || row.customerEmail || '',
+    rating: Number(row.rating || 1),
+    status: (row.status as RecoveryCaseStatus) || 'novo',
+    notes: row.notes || '',
+    assignedTo: row.assigned_to || row.assignedTo || '',
+    resolvedAt: row.resolved_at || row.resolvedAt || undefined,
+    createdAt: row.created_at || row.createdAt || new Date().toISOString(),
+    updatedAt: row.updated_at || row.updatedAt || new Date().toISOString()
   };
 }
 
 export function subscribeRecoveryCases(businessId: string | null, callback: (cases: RecoveryCase[]) => void) {
   let isSubscribed = true;
 
-  const emit = (list: RecoveryCase[]) => {
-    if (!isSubscribed) return;
-    const filtered = businessId ? list.filter((c) => isMatchingBusiness(c.businessId, businessId)) : list;
-    callback(filtered);
+  const fetchCases = async () => {
+    try {
+      let query = supabase.from('recovery_cases').select('*').order('created_at', { ascending: false });
+      if (businessId) {
+        query = query.eq('business_id', businessId);
+      }
+      const { data, error } = await query;
+      if (!error && data) {
+        const mapped = data.map(mapRecoveryRow);
+        runtimeRecoveryCases = mapped;
+        if (isSubscribed) callback(mapped);
+        return;
+      }
+    } catch (err) {
+      console.warn('[Supabase subscribeRecoveryCases error]:', err);
+    }
+
+    if (isSubscribed) {
+      const filtered = businessId ? runtimeRecoveryCases.filter((c) => isMatchingBusiness(c.businessId, businessId)) : runtimeRecoveryCases;
+      callback(filtered);
+    }
   };
 
-  const cached = getCached<RecoveryCase[]>(LOCAL_STORAGE_KEY_CASES, []);
-  if (cached.length > 0) emit(cached);
+  fetchCases();
 
-  let unFirestore: (() => void) | null = null;
-  try {
-    const colRef = collection(db, 'recovery_cases');
-    unFirestore = onSnapshot(
-      colRef,
-      (snapshot) => {
-        const list: RecoveryCase[] = [];
-        snapshot.forEach((d) => list.push(mapRecoveryDoc(d.id, d.data())));
-        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        setCached(LOCAL_STORAGE_KEY_CASES, list);
-        emit(list);
-      },
-      () => {}
-    );
-  } catch {}
+  const channel = supabase
+    .channel('public:recovery_channel')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'recovery_cases' }, () => {
+      fetchCases();
+    })
+    .subscribe();
 
-  const handleCustomEvent = () => emit(getCached<RecoveryCase[]>(LOCAL_STORAGE_KEY_CASES, []));
-  if (typeof window !== 'undefined') {
-    window.addEventListener('reputaflow_live_sync', handleCustomEvent);
-  }
+  const interval = setInterval(fetchCases, 4000);
 
   return () => {
     isSubscribed = false;
-    if (unFirestore) unFirestore();
-    if (typeof window !== 'undefined') {
-      window.removeEventListener('reputaflow_live_sync', handleCustomEvent);
-    }
+    supabase.removeChannel(channel);
+    clearInterval(interval);
   };
 }
 
@@ -876,72 +617,45 @@ export async function addFeedbackAndCreateRecoveryCase(
     updatedAt: now
   };
 
-  // 1. Save in Firestore
   try {
     await Promise.all([
-      setDoc(doc(db, 'feedback', fbId), feedback),
-      setDoc(doc(db, 'recovery_cases', caseId), recoveryCase)
+      supabase.from('feedback').insert([
+        {
+          id: fbId,
+          business_id: feedback.businessId,
+          review_id: reviewId,
+          customer_name: feedback.customerName,
+          customer_phone: feedback.customerPhone,
+          customer_email: feedback.customerEmail || null,
+          rating: feedback.rating,
+          question1: feedback.question1,
+          question2: feedback.question2,
+          question3_wants_contact: feedback.question3WantsContact,
+          created_at: now
+        }
+      ]),
+      supabase.from('recovery_cases').insert([
+        {
+          id: caseId,
+          business_id: recoveryCase.businessId,
+          review_id: reviewId,
+          feedback_id: fbId,
+          customer_name: recoveryCase.customerName,
+          customer_phone: recoveryCase.customerPhone,
+          customer_email: recoveryCase.customerEmail || null,
+          rating: recoveryCase.rating,
+          status: recoveryCase.status,
+          notes: recoveryCase.notes,
+          created_at: now,
+          updated_at: now
+        }
+      ])
     ]);
   } catch (err) {
-    console.warn('[Firestore addFeedbackAndCreateRecoveryCase warning]:', err);
+    console.error('[Supabase addFeedbackAndCreateRecoveryCase error]:', err);
   }
 
-  // 2. Save in Supabase
-  if (isSupabaseConfigured()) {
-    try {
-      await Promise.all([
-        supabase.from('feedback').insert([
-          {
-            id: fbId,
-            business_id: feedback.businessId,
-            review_id: reviewId,
-            customer_name: feedback.customerName,
-            customer_phone: feedback.customerPhone,
-            customer_email: feedback.customerEmail || null,
-            rating: feedback.rating,
-            question1: feedback.question1,
-            question2: feedback.question2,
-            question3_wants_contact: feedback.question3WantsContact,
-            created_at: now
-          }
-        ]),
-        supabase.from('recovery_cases').insert([
-          {
-            id: caseId,
-            business_id: recoveryCase.businessId,
-            review_id: reviewId,
-            feedback_id: fbId,
-            customer_name: recoveryCase.customerName,
-            customer_phone: recoveryCase.customerPhone,
-            customer_email: recoveryCase.customerEmail || null,
-            rating: recoveryCase.rating,
-            status: recoveryCase.status,
-            notes: recoveryCase.notes,
-            created_at: now,
-            updated_at: now
-          }
-        ])
-      ]);
-    } catch {}
-  }
-
-  // 3. Save in Server API
-  try {
-    await Promise.all([
-      apiFetch('/api/feedback', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(feedback)
-      }),
-      apiFetch('/api/recovery-cases', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(recoveryCase)
-      })
-    ]);
-  } catch {}
-
-  // 4. Update CRM Customer record
+  // Auto upsert customer
   try {
     await upsertCustomerFromReview({
       id: reviewId,
@@ -955,13 +669,8 @@ export async function addFeedbackAndCreateRecoveryCase(
     });
   } catch {}
 
-  // 5. Update local cache
-  const currentFb = getCached<Feedback[]>(LOCAL_STORAGE_KEY_FEEDBACK, []);
-  setCached(LOCAL_STORAGE_KEY_FEEDBACK, [feedback, ...currentFb]);
-
-  const currentCases = getCached<RecoveryCase[]>(LOCAL_STORAGE_KEY_CASES, []);
-  setCached(LOCAL_STORAGE_KEY_CASES, [recoveryCase, ...currentCases]);
-
+  runtimeFeedback = [feedback, ...runtimeFeedback];
+  runtimeRecoveryCases = [recoveryCase, ...runtimeRecoveryCases];
   notifyDataChanged();
 
   return { feedback, recoveryCase };
@@ -981,119 +690,114 @@ export async function updateRecoveryCaseStatus(
   customerId?: string
 ): Promise<void> {
   const now = new Date().toISOString();
-  const updates: any = { status, updatedAt: now };
+  const updates: any = { status, updated_at: now };
   if (notes !== undefined) updates.notes = notes;
   if (status === 'resolvido' || status === 'cliente_recuperado') {
-    updates.resolvedAt = now;
+    updates.resolved_at = now;
   }
 
   try {
-    await setDoc(doc(db, 'recovery_cases', caseId), updates, { merge: true });
-  } catch {}
+    await supabase.from('recovery_cases').update(updates).eq('id', caseId);
+  } catch (err) {
+    console.error('[Supabase updateRecoveryCaseStatus error]:', err);
+  }
 
   if (customerId) {
     const custStatus = status === 'cliente_recuperado' ? 'recovered' : status === 'resolvido' ? 'active' : 'in_recovery';
     try {
-      await updateDoc(doc(db, 'customers', customerId), { status: custStatus, updatedAt: now });
+      await supabase.from('customers').update({ status: custStatus, updated_at: now }).eq('id', customerId);
     } catch {}
   }
 
-  if (isSupabaseConfigured()) {
-    try {
-      await supabase.from('recovery_cases').update(updates).eq('id', caseId);
-    } catch {}
-  }
-
-  try {
-    await apiFetch(`/api/recovery-cases/${encodeURIComponent(caseId)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates)
-    });
-  } catch {}
-
-  const currentCases = getCached<RecoveryCase[]>(LOCAL_STORAGE_KEY_CASES, []);
-  const updated = currentCases.map((c) => (c.id === caseId ? { ...c, ...updates } : c));
-  setCached(LOCAL_STORAGE_KEY_CASES, updated);
+  runtimeRecoveryCases = runtimeRecoveryCases.map((c) => (c.id === caseId ? { ...c, status, notes: notes ?? c.notes, updatedAt: now } : c));
   notifyDataChanged();
 }
 
 // ==========================================
-// CUSTOMERS CRM SERVICE
+// CUSTOMERS CRM SERVICE (SUPABASE ONLY)
 // ==========================================
-function mapCustomerDoc(id: string, data: any): Customer {
+function mapCustomerRow(row: any): Customer {
   return {
-    id: id || data.id || `cust_${Date.now().toString(36)}`,
-    businessId: data.businessId || data.business_id || '',
-    name: data.name || 'Cliente',
-    phone: data.phone || '',
-    email: data.email || '',
-    reviewsCount: Number(data.reviewsCount ?? data.reviews_count ?? data.totalReviews ?? 1),
-    lastReviewAt: data.lastReviewAt || data.last_review_at || new Date().toISOString(),
-    avgRating: Number(data.avgRating ?? data.avg_rating ?? data.rating ?? 5),
-    status: (data.status as any) || 'active',
-    internalNotes: data.internalNotes || data.internal_notes || '',
-    lastInteractionAt: data.lastInteractionAt || data.last_interaction_at || undefined,
-    createdAt: data.createdAt || data.created_at || new Date().toISOString(),
-    updatedAt: data.updatedAt || data.updated_at || new Date().toISOString()
+    id: String(row.id || ''),
+    businessId: String(row.business_id || row.businessId || ''),
+    name: row.name || 'Cliente',
+    phone: row.phone || '',
+    email: row.email || '',
+    reviewsCount: Number(row.reviews_count ?? row.reviewsCount ?? 1),
+    lastReviewAt: row.last_review_at || row.lastReviewAt || new Date().toISOString(),
+    avgRating: Number(row.avg_rating ?? row.avgRating ?? 5),
+    status: (row.status as any) || 'active',
+    internalNotes: row.internal_notes || row.internalNotes || '',
+    lastInteractionAt: row.last_interaction_at || row.lastInteractionAt || undefined,
+    createdAt: row.created_at || row.createdAt || new Date().toISOString(),
+    updatedAt: row.updated_at || row.updatedAt || new Date().toISOString()
   };
 }
 
 export function subscribeCustomers(businessId: string | null, callback: (customers: Customer[]) => void) {
   let isSubscribed = true;
 
-  const emit = (list: Customer[]) => {
-    if (!isSubscribed) return;
-    const filtered = businessId ? list.filter((c) => isMatchingBusiness(c.businessId, businessId)) : list;
-    callback(filtered);
+  const fetchCustomers = async () => {
+    try {
+      let query = supabase.from('customers').select('*').order('last_review_at', { ascending: false });
+      if (businessId) {
+        query = query.eq('business_id', businessId);
+      }
+      const { data, error } = await query;
+      if (!error && data) {
+        const mapped = data.map(mapCustomerRow);
+        runtimeCustomers = mapped;
+        if (isSubscribed) callback(mapped);
+        return;
+      }
+    } catch (err) {
+      console.warn('[Supabase subscribeCustomers error]:', err);
+    }
+
+    if (isSubscribed) {
+      const filtered = businessId ? runtimeCustomers.filter((c) => isMatchingBusiness(c.businessId, businessId)) : runtimeCustomers;
+      callback(filtered);
+    }
   };
 
-  const cached = getCached<Customer[]>(LOCAL_STORAGE_KEY_CUSTOMERS, []);
-  if (cached.length > 0) emit(cached);
+  fetchCustomers();
 
-  let unFirestore: (() => void) | null = null;
-  try {
-    const colRef = collection(db, 'customers');
-    unFirestore = onSnapshot(
-      colRef,
-      (snapshot) => {
-        const list: Customer[] = [];
-        snapshot.forEach((d) => list.push(mapCustomerDoc(d.id, d.data())));
-        list.sort((a, b) => new Date(b.lastReviewAt).getTime() - new Date(a.lastReviewAt).getTime());
-        setCached(LOCAL_STORAGE_KEY_CUSTOMERS, list);
-        emit(list);
-      },
-      () => {}
-    );
-  } catch {}
+  const channel = supabase
+    .channel('public:customers_channel')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'customers' }, () => {
+      fetchCustomers();
+    })
+    .subscribe();
 
-  const handleCustomEvent = () => emit(getCached<Customer[]>(LOCAL_STORAGE_KEY_CUSTOMERS, []));
-  if (typeof window !== 'undefined') {
-    window.addEventListener('reputaflow_live_sync', handleCustomEvent);
-  }
+  const interval = setInterval(fetchCustomers, 4000);
 
   return () => {
     isSubscribed = false;
-    if (unFirestore) unFirestore();
-    if (typeof window !== 'undefined') {
-      window.removeEventListener('reputaflow_live_sync', handleCustomEvent);
-    }
+    supabase.removeChannel(channel);
+    clearInterval(interval);
   };
 }
 
 export async function upsertCustomerFromReview(review: Review): Promise<Customer> {
-  const current = getCached<Customer[]>(LOCAL_STORAGE_KEY_CUSTOMERS, []);
   const cleanPhone = (review.customerPhone || '').trim();
   const cleanEmail = (review.customerEmail || '').trim().toLowerCase();
   const cleanName = (review.customerName || 'Cliente').trim();
-
-  const existing = current.find(
-    (c) =>
-      isMatchingBusiness(c.businessId, review.businessId) &&
-      ((cleanPhone && c.phone === cleanPhone) || (cleanEmail && c.email?.toLowerCase() === cleanEmail))
-  );
-
   const now = new Date().toISOString();
+
+  let existing: Customer | null = null;
+
+  try {
+    let q = supabase.from('customers').select('*').eq('business_id', review.businessId);
+    if (cleanPhone) {
+      q = q.eq('phone', cleanPhone);
+    } else if (cleanEmail) {
+      q = q.eq('email', cleanEmail);
+    }
+    const { data } = await q;
+    if (data && data.length > 0) {
+      existing = mapCustomerRow(data[0]);
+    }
+  } catch {}
 
   if (existing) {
     const newCount = existing.reviewsCount + 1;
@@ -1113,11 +817,19 @@ export async function upsertCustomerFromReview(review: Review): Promise<Customer
     };
 
     try {
-      await setDoc(doc(db, 'customers', existing.id), updatedCust, { merge: true });
+      await supabase.from('customers').update({
+        name: updatedCust.name,
+        phone: updatedCust.phone,
+        email: updatedCust.email || null,
+        reviews_count: newCount,
+        avg_rating: newAvg,
+        last_review_at: now,
+        status: nextStatus,
+        updated_at: now
+      }).eq('id', existing.id);
     } catch {}
 
-    const updatedList = current.map((c) => (c.id === existing.id ? updatedCust : c));
-    setCached(LOCAL_STORAGE_KEY_CUSTOMERS, updatedList);
+    runtimeCustomers = runtimeCustomers.map((c) => (c.id === existing?.id ? updatedCust : c));
     notifyDataChanged();
     return updatedCust;
   } else {
@@ -1137,10 +849,24 @@ export async function upsertCustomerFromReview(review: Review): Promise<Customer
     };
 
     try {
-      await setDoc(doc(db, 'customers', custId), newCust);
+      await supabase.from('customers').insert([
+        {
+          id: custId,
+          business_id: newCust.businessId,
+          name: newCust.name,
+          phone: newCust.phone,
+          email: newCust.email || null,
+          reviews_count: 1,
+          avg_rating: review.rating,
+          last_review_at: now,
+          status: newCust.status,
+          created_at: now,
+          updated_at: now
+        }
+      ]);
     } catch {}
 
-    setCached(LOCAL_STORAGE_KEY_CUSTOMERS, [newCust, ...current]);
+    runtimeCustomers = [newCust, ...runtimeCustomers];
     notifyDataChanged();
     return newCust;
   }
@@ -1157,83 +883,107 @@ export async function addCustomer(data: Omit<Customer, 'id' | 'createdAt' | 'upd
   };
 
   try {
-    await setDoc(doc(db, 'customers', custId), newCust);
-  } catch {}
+    await supabase.from('customers').insert([
+      {
+        id: custId,
+        business_id: newCust.businessId,
+        name: newCust.name,
+        phone: newCust.phone,
+        email: newCust.email || null,
+        reviews_count: newCust.reviewsCount,
+        avg_rating: newCust.avgRating,
+        last_review_at: newCust.lastReviewAt,
+        status: newCust.status,
+        internal_notes: newCust.internalNotes || null,
+        created_at: now,
+        updated_at: now
+      }
+    ]);
+  } catch (err) {
+    console.error('[Supabase addCustomer error]:', err);
+  }
 
-  const current = getCached<Customer[]>(LOCAL_STORAGE_KEY_CUSTOMERS, []);
-  setCached(LOCAL_STORAGE_KEY_CUSTOMERS, [newCust, ...current]);
+  runtimeCustomers = [newCust, ...runtimeCustomers];
   notifyDataChanged();
-
   return newCust;
 }
 
 export async function updateCustomer(id: string, updates: Partial<Customer>): Promise<void> {
   const now = new Date().toISOString();
-  const clean = { ...updates, updatedAt: now };
+  const dbUpdates: any = { updated_at: now };
+  if (updates.name !== undefined) dbUpdates.name = updates.name;
+  if (updates.phone !== undefined) dbUpdates.phone = updates.phone;
+  if (updates.email !== undefined) dbUpdates.email = updates.email;
+  if (updates.status !== undefined) dbUpdates.status = updates.status;
+  if (updates.internalNotes !== undefined) dbUpdates.internal_notes = updates.internalNotes;
 
   try {
-    await setDoc(doc(db, 'customers', id), clean, { merge: true });
-  } catch {}
+    await supabase.from('customers').update(dbUpdates).eq('id', id);
+  } catch (err) {
+    console.error('[Supabase updateCustomer error]:', err);
+  }
 
-  const current = getCached<Customer[]>(LOCAL_STORAGE_KEY_CUSTOMERS, []);
-  setCached(LOCAL_STORAGE_KEY_CUSTOMERS, current.map((c) => (c.id === id ? { ...c, ...clean } : c)));
+  runtimeCustomers = runtimeCustomers.map((c) => (c.id === id ? { ...c, ...updates, updatedAt: now } : c));
   notifyDataChanged();
 }
 
 export async function deleteCustomer(id: string): Promise<void> {
   try {
-    await deleteDoc(doc(db, 'customers', id));
-  } catch {}
+    await supabase.from('customers').delete().eq('id', id);
+  } catch (err) {
+    console.error('[Supabase deleteCustomer error]:', err);
+  }
 
-  const current = getCached<Customer[]>(LOCAL_STORAGE_KEY_CUSTOMERS, []);
-  setCached(LOCAL_STORAGE_KEY_CUSTOMERS, current.filter((c) => c.id !== id));
+  runtimeCustomers = runtimeCustomers.filter((c) => c.id !== id);
   notifyDataChanged();
 }
 
 // ==========================================
-// INTERACTIONS SERVICE
+// INTERACTIONS SERVICE (SUPABASE ONLY)
 // ==========================================
 export function subscribeInteractions(businessId: string | null, callback: (list: Interaction[]) => void) {
   let isSubscribed = true;
 
-  const emit = (list: Interaction[]) => {
-    if (!isSubscribed) return;
-    const filtered = businessId ? list.filter((i) => isMatchingBusiness(i.businessId, businessId)) : list;
-    callback(filtered);
+  const fetchInteractions = async () => {
+    try {
+      let query = supabase.from('interactions').select('*').order('created_at', { ascending: false });
+      if (businessId) {
+        query = query.eq('business_id', businessId);
+      }
+      const { data, error } = await query;
+      if (!error && data) {
+        const mapped: Interaction[] = data.map((d: any) => ({
+          id: String(d.id),
+          businessId: String(d.business_id || d.businessId || ''),
+          customerId: d.customer_id || d.customerId || undefined,
+          caseId: d.case_id || d.caseId || undefined,
+          type: d.type || 'whatsapp',
+          summary: d.summary || '',
+          outcome: d.outcome || '',
+          staffEmail: d.staff_email || d.staffEmail || '',
+          staffName: d.staff_name || d.staffName || '',
+          createdAt: d.created_at || d.createdAt || new Date().toISOString()
+        }));
+        if (isSubscribed) callback(mapped);
+      }
+    } catch {}
   };
 
-  let unFirestore: (() => void) | null = null;
-  try {
-    const colRef = collection(db, 'interactions');
-    unFirestore = onSnapshot(
-      colRef,
-      (snapshot) => {
-        const list: Interaction[] = [];
-        snapshot.forEach((d) => {
-          const data = d.data();
-          list.push({
-            id: d.id,
-            businessId: data.businessId || data.business_id || '',
-            customerId: data.customerId || data.customer_id || '',
-            caseId: data.caseId || data.case_id || '',
-            type: data.type || 'whatsapp',
-            summary: data.summary || '',
-            outcome: data.outcome || '',
-            staffEmail: data.staffEmail || data.staff_email || '',
-            staffName: data.staffName || data.staff_name || '',
-            createdAt: data.createdAt || data.created_at || new Date().toISOString()
-          });
-        });
-        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        emit(list);
-      },
-      () => {}
-    );
-  } catch {}
+  fetchInteractions();
+
+  const channel = supabase
+    .channel('public:interactions_channel')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'interactions' }, () => {
+      fetchInteractions();
+    })
+    .subscribe();
+
+  const interval = setInterval(fetchInteractions, 4000);
 
   return () => {
     isSubscribed = false;
-    if (unFirestore) unFirestore();
+    supabase.removeChannel(channel);
+    clearInterval(interval);
   };
 }
 
@@ -1243,14 +993,29 @@ export async function addInteraction(data: Omit<Interaction, 'id' | 'createdAt'>
   const interaction: Interaction = { ...data, id, createdAt: now };
 
   try {
-    await setDoc(doc(db, 'interactions', id), interaction);
-  } catch {}
+    await supabase.from('interactions').insert([
+      {
+        id,
+        business_id: interaction.businessId,
+        customer_id: interaction.customerId || null,
+        case_id: interaction.caseId || null,
+        type: interaction.type,
+        summary: interaction.summary,
+        outcome: interaction.outcome || null,
+        staff_email: interaction.staffEmail,
+        staff_name: interaction.staffName || null,
+        created_at: now
+      }
+    ]);
+  } catch (err) {
+    console.error('[Supabase addInteraction error]:', err);
+  }
 
   return interaction;
 }
 
 // ==========================================
-// PLANS & PLATFORM SETTINGS
+// PLANS & PLATFORM SETTINGS (SUPABASE ONLY)
 // ==========================================
 export const DEFAULT_PLANS: Plan[] = [
   {
@@ -1287,11 +1052,18 @@ export const DEFAULT_PLANS: Plan[] = [
 
 export async function getPlans(): Promise<Plan[]> {
   try {
-    const snap = await getDocs(collection(db, 'plans'));
-    if (!snap.empty) {
-      const list: Plan[] = [];
-      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as any) }));
-      return list;
+    const { data, error } = await supabase.from('plans').select('*');
+    if (!error && data && data.length > 0) {
+      return data.map((d: any) => ({
+        id: String(d.id),
+        name: d.name || '',
+        price: Number(d.price || 0),
+        currency: d.currency || 'EUR',
+        maxBusinesses: Number(d.max_businesses || d.maxBusinesses || 1),
+        maxReviewsMonth: Number(d.max_reviews_month || d.maxReviewsMonth || 500),
+        features: Array.isArray(d.features) ? d.features : [],
+        isActive: Boolean(d.is_active ?? d.isActive ?? true)
+      }));
     }
   } catch {}
 
@@ -1300,8 +1072,21 @@ export async function getPlans(): Promise<Plan[]> {
 
 export async function savePlan(plan: Plan): Promise<void> {
   try {
-    await setDoc(doc(db, 'plans', plan.id), plan, { merge: true });
-  } catch {}
+    await supabase.from('plans').upsert([
+      {
+        id: plan.id,
+        name: plan.name,
+        price: plan.price,
+        currency: plan.currency,
+        max_businesses: plan.maxBusinesses,
+        max_reviews_month: plan.maxReviewsMonth,
+        features: plan.features,
+        is_active: plan.isActive
+      }
+    ]);
+  } catch (err) {
+    console.error('[Supabase savePlan error]:', err);
+  }
 }
 
 export const DEFAULT_PLATFORM_SETTINGS: PlatformSettings = {
@@ -1315,9 +1100,17 @@ export const DEFAULT_PLATFORM_SETTINGS: PlatformSettings = {
 
 export async function getPlatformSettings(): Promise<PlatformSettings> {
   try {
-    const snap = await getDoc(doc(db, 'settings', 'platform_settings'));
-    if (snap.exists()) {
-      return { id: snap.id, ...(snap.data() as any) };
+    const { data, error } = await supabase.from('platform_settings').select('*').limit(1);
+    if (!error && data && data.length > 0) {
+      const s = data[0];
+      return {
+        id: String(s.id),
+        platformName: s.platform_name || s.platformName || 'ReputaFlow',
+        supportEmail: s.support_email || s.supportEmail || 'suporte@reputaflow.com',
+        defaultGoogleReviewInstructions:
+          s.default_google_review_instructions || s.defaultGoogleReviewInstructions || DEFAULT_PLATFORM_SETTINGS.defaultGoogleReviewInstructions,
+        allowPublicRegistration: Boolean(s.allow_public_registration ?? s.allowPublicRegistration ?? false)
+      };
     }
   } catch {}
 
@@ -1326,6 +1119,16 @@ export async function getPlatformSettings(): Promise<PlatformSettings> {
 
 export async function savePlatformSettings(settings: Partial<PlatformSettings>): Promise<void> {
   try {
-    await setDoc(doc(db, 'settings', 'platform_settings'), settings, { merge: true });
-  } catch {}
+    await supabase.from('platform_settings').upsert([
+      {
+        id: settings.id || 'default',
+        platform_name: settings.platformName,
+        support_email: settings.supportEmail,
+        default_google_review_instructions: settings.defaultGoogleReviewInstructions,
+        allow_public_registration: settings.allowPublicRegistration
+      }
+    ]);
+  } catch (err) {
+    console.error('[Supabase savePlatformSettings error]:', err);
+  }
 }
