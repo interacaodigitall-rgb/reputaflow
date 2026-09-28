@@ -96,6 +96,31 @@ function mapBusinessRow(row: any): Business {
   };
 }
 
+// Helper for safe isolated Supabase realtime subscriptions
+function createSafeTableSubscription(tableName: string, onUpdate: () => void): () => void {
+  const channelName = `rt_${tableName}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  let channel: any = null;
+
+  try {
+    channel = supabase
+      .channel(channelName)
+      .on('postgres_changes', { event: '*', schema: 'public', table: tableName }, () => {
+        onUpdate();
+      })
+      .subscribe();
+  } catch (err) {
+    console.warn(`[Supabase Realtime Channel init on ${tableName}]:`, err);
+  }
+
+  return () => {
+    if (channel) {
+      try {
+        supabase.removeChannel(channel);
+      } catch {}
+    }
+  };
+}
+
 export function subscribeBusinesses(callback: (businesses: Business[]) => void) {
   let isSubscribed = true;
 
@@ -122,14 +147,7 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
 
   fetchMerchants();
 
-  // Supabase Realtime Channel
-  const channel = supabase
-    .channel('public:businesses_channel')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'businesses' }, () => {
-      fetchMerchants();
-    })
-    .subscribe();
-
+  const unsubscribeRealtime = createSafeTableSubscription('businesses', fetchMerchants);
   const interval = setInterval(fetchMerchants, 3000);
 
   const handleCustomEvent = () => {
@@ -141,7 +159,7 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
 
   return () => {
     isSubscribed = false;
-    supabase.removeChannel(channel);
+    unsubscribeRealtime();
     clearInterval(interval);
     if (typeof window !== 'undefined') {
       window.removeEventListener('reputaflow_live_sync', handleCustomEvent);
@@ -332,18 +350,12 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
 
   fetchReviews();
 
-  const channel = supabase
-    .channel('public:reviews_channel')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'reviews' }, () => {
-      fetchReviews();
-    })
-    .subscribe();
-
+  const unsubscribeRealtime = createSafeTableSubscription('reviews', fetchReviews);
   const interval = setInterval(fetchReviews, 3000);
 
   return () => {
     isSubscribed = false;
-    supabase.removeChannel(channel);
+    unsubscribeRealtime();
     clearInterval(interval);
   };
 }
@@ -470,18 +482,12 @@ export function subscribeFeedback(businessId: string | null, callback: (feedback
 
   fetchFeedback();
 
-  const channel = supabase
-    .channel('public:feedback_channel')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'feedback' }, () => {
-      fetchFeedback();
-    })
-    .subscribe();
-
+  const unsubscribeRealtime = createSafeTableSubscription('feedback', fetchFeedback);
   const interval = setInterval(fetchFeedback, 3000);
 
   return () => {
     isSubscribed = false;
-    supabase.removeChannel(channel);
+    unsubscribeRealtime();
     clearInterval(interval);
   };
 }
@@ -534,18 +540,12 @@ export function subscribeRecoveryCases(businessId: string | null, callback: (cas
 
   fetchCases();
 
-  const channel = supabase
-    .channel('public:recovery_channel')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'recovery_cases' }, () => {
-      fetchCases();
-    })
-    .subscribe();
-
+  const unsubscribeRealtime = createSafeTableSubscription('recovery_cases', fetchCases);
   const interval = setInterval(fetchCases, 3000);
 
   return () => {
     isSubscribed = false;
-    supabase.removeChannel(channel);
+    unsubscribeRealtime();
     clearInterval(interval);
   };
 }
@@ -726,18 +726,12 @@ export function subscribeCustomers(businessId: string | null, callback: (custome
 
   fetchCustomers();
 
-  const channel = supabase
-    .channel('public:customers_channel')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'customers' }, () => {
-      fetchCustomers();
-    })
-    .subscribe();
-
+  const unsubscribeRealtime = createSafeTableSubscription('customers', fetchCustomers);
   const interval = setInterval(fetchCustomers, 3000);
 
   return () => {
     isSubscribed = false;
-    supabase.removeChannel(channel);
+    unsubscribeRealtime();
     clearInterval(interval);
   };
 }

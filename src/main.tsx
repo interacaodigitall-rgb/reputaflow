@@ -1,14 +1,23 @@
-import {StrictMode} from 'react';
-import {createRoot} from 'react-dom/client';
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { initConditionalPWA } from './lib/pwaManager';
 
-// Conditionally register PWA manifest and service worker (omitted on ?b= review page)
-initConditionalPWA();
+try {
+  initConditionalPWA();
+} catch (e) {
+  console.warn('PWA init notice:', e);
+}
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+const rootElement = document.getElementById('root');
+if (rootElement) {
+  createRoot(rootElement).render(
+    <StrictMode>
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
+    </StrictMode>
+  );
+}
