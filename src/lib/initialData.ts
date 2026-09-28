@@ -1,27 +1,9 @@
 import { Business, Review, Feedback, Customer, RecoveryCase } from '../types';
 
-export const REGISTERED_BUSINESSES: Business[] = [
-  {
-    id: 'biz_mrnavalha',
-    name: 'Mr. Navalha',
-    slug: 'mrnavalha',
-    category: 'Barbearia & Estética',
-    logoUrl: 'https://ltpxwagdnrtuulzhfdjk.supabase.co/storage/v1/object/public/uploads/logos/MISTER_VETOR-removebg-preview.png',
-    phone: '+351 937 472 634',
-    email: 'contacto@misternavalha.com',
-    address: 'R. António Sérgio 20, 6300-685 Guarda, Portugal',
-    googleReviewUrl: 'https://search.google.com/local/writereview?placeid=ChIJtrX8AEj7PA0Rp4bh2umMy6k',
-    status: 'active',
-    planId: 'plan_pro',
-    ownerId: 'owner_mrnavalha',
-    currency: 'EUR',
-    password: 'reputa123',
-    createdAt: '2026-08-22T10:40:37.506Z',
-    updatedAt: '2026-09-21T10:40:37.506Z'
-  }
-];
+// Zero mock businesses - platform is clean and ready for real merchant onboarding
+export const REGISTERED_BUSINESSES: Business[] = [];
 
-// ZERO MOCK DATA - ONLY REAL SUPABASE DATA
+// Zero mock data - fully driven by Supabase
 export const INITIAL_REVIEWS: Review[] = [];
 export const INITIAL_FEEDBACK: Feedback[] = [];
 export const INITIAL_CUSTOMERS: Customer[] = [];

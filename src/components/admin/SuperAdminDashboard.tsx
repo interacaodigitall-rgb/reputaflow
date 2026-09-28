@@ -20,7 +20,8 @@ import {
   QrCode,
   Copy,
   Check,
-  RefreshCw
+  RefreshCw,
+  Store
 } from 'lucide-react';
 import { Business, Customer, Review, RecoveryCase, Plan, PlatformSettings } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -536,7 +537,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                             <ExternalLink className="w-3.5 h-3.5" />
                           </a>
 
-                          {/* Aceder ao CRM (Section 1 requirement) */}
+                          {/* Aceder ao CRM */}
                           <button
                             onClick={() => onImpersonateBusiness(b)}
                             title="Aceder ao CRM deste estabelecimento"
@@ -571,6 +572,30 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                       </td>
                     </tr>
                   ))}
+
+                  {filteredBusinesses.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="py-12 px-4 text-center">
+                        <div className="max-w-sm mx-auto space-y-3">
+                          <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto">
+                            <Store className="w-6 h-6" />
+                          </div>
+                          <h4 className="text-sm font-bold text-slate-800">Nenhum comerciante cadastrado</h4>
+                          <p className="text-xs text-slate-500">
+                            A plataforma está pronta. Clique no botão <strong>"+ Novo Comerciante"</strong> no topo para adicionar o primeiro estabelecimento.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setShowCreateModal(true)}
+                            className="py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition inline-flex items-center gap-1.5 shadow-sm shadow-indigo-200 cursor-pointer"
+                          >
+                            <Plus className="w-4 h-4" />
+                            <span>Adicionar Primeiro Comerciante</span>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>

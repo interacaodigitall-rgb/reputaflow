@@ -99,31 +99,37 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Business Selector (or Merchant Business Badge) */}
           <div className="flex items-center gap-2">
             {isSuperAdmin ? (
-              <div className="relative">
-                <select
-                  value={selectedBusiness?.id || ''}
-                  onChange={(e) => {
-                    const b = businesses.find((item) => item.id === e.target.value);
-                    if (b) setSelectedBusiness(b);
-                  }}
-                  className="text-xs font-bold py-2 px-3 bg-slate-50 hover:bg-slate-100 text-slate-800 rounded-xl border border-slate-200 outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer max-w-[150px] sm:max-w-[200px] truncate min-h-[38px]"
-                >
-                  {businesses.map((biz) => (
-                    <option key={biz.id} value={biz.id}>
-                      {biz.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              businesses.length > 0 ? (
+                <div className="relative">
+                  <select
+                    value={selectedBusiness?.id || ''}
+                    onChange={(e) => {
+                      const b = businesses.find((item) => item.id === e.target.value);
+                      if (b) setSelectedBusiness(b);
+                    }}
+                    className="text-xs font-bold py-2 px-3 bg-slate-50 hover:bg-slate-100 text-slate-800 rounded-xl border border-slate-200 outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer max-w-[150px] sm:max-w-[200px] truncate min-h-[38px]"
+                  >
+                    {businesses.map((biz) => (
+                      <option key={biz.id} value={biz.id}>
+                        {biz.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div className="py-1.5 px-3 bg-slate-50 text-slate-500 rounded-xl border border-slate-200 text-xs font-semibold">
+                  Sem comércios
+                </div>
+              )
             ) : (
               <div className="py-1.5 px-2.5 sm:px-3 bg-slate-100 text-slate-900 rounded-xl border border-slate-200 text-xs font-bold truncate max-w-[140px] sm:max-w-[200px] flex items-center gap-1.5 min-h-[38px]">
                 <BusinessLogo
                   url={selectedBusiness?.logoUrl}
-                  name={selectedBusiness?.name}
+                  name={selectedBusiness?.name || 'Comércio'}
                   size="xs"
                   rounded="rounded-md"
                 />
-                <span className="truncate">{selectedBusiness?.name || 'A carregar...'}</span>
+                <span className="truncate">{selectedBusiness?.name || 'Aguardando Comércio'}</span>
               </div>
             )}
 

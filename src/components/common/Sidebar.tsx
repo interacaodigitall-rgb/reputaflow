@@ -86,32 +86,38 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {isSuperAdmin ? 'Estabelecimento Ativo' : 'O Seu Comércio'}
           </label>
           {isSuperAdmin ? (
-            <div className="relative">
-              <select
-                value={selectedBusiness?.id || ''}
-                onChange={(e) => {
-                  const b = businesses.find((item) => item.id === e.target.value);
-                  if (b) setSelectedBusiness(b);
-                }}
-                className="w-full text-xs font-semibold py-2 px-2.5 bg-slate-800 text-white rounded-xl border border-slate-700 outline-none focus:ring-1 focus:ring-indigo-500 truncate pr-6 cursor-pointer"
-              >
-                {businesses.map((biz) => (
-                  <option key={biz.id} value={biz.id}>
-                    {biz.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            businesses.length > 0 ? (
+              <div className="relative">
+                <select
+                  value={selectedBusiness?.id || ''}
+                  onChange={(e) => {
+                    const b = businesses.find((item) => item.id === e.target.value);
+                    if (b) setSelectedBusiness(b);
+                  }}
+                  className="w-full text-xs font-semibold py-2 px-2.5 bg-slate-800 text-white rounded-xl border border-slate-700 outline-none focus:ring-1 focus:ring-indigo-500 truncate pr-6 cursor-pointer"
+                >
+                  {businesses.map((biz) => (
+                    <option key={biz.id} value={biz.id}>
+                      {biz.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="py-2 px-3 bg-slate-800 text-slate-400 rounded-xl border border-slate-700 text-xs font-medium">
+                Nenhum comércio cadastrado
+              </div>
+            )
           ) : (
             <div className="py-2 px-3 bg-slate-800/90 text-white rounded-xl border border-slate-700/80 text-xs font-bold truncate flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 truncate min-w-0">
                 <BusinessLogo
                   url={selectedBusiness?.logoUrl}
-                  name={selectedBusiness?.name}
+                  name={selectedBusiness?.name || 'Comércio'}
                   size="xs"
                   rounded="rounded-lg"
                 />
-                <span className="truncate">{selectedBusiness?.name || 'A carregar comércio...'}</span>
+                <span className="truncate">{selectedBusiness?.name || 'Aguardando Comércio'}</span>
               </div>
               <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0 ml-1 animate-pulse"></span>
             </div>
