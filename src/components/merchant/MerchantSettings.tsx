@@ -17,11 +17,13 @@ import {
   Shield,
   Upload,
   Loader2,
-  Trash2
+  Trash2,
+  AlertTriangle,
+  Check
 } from 'lucide-react';
 import { Business } from '../../types';
 import { updateBusiness, uploadImage } from '../../lib/dbService';
-import { supabase, uploadBusinessLogo } from '../../lib/supabase';
+import { uploadBusinessLogo } from '../../lib/supabase';
 import { getPublicReviewUrl } from '../../lib/urlHelper';
 import { BusinessLogo } from '../common/BusinessLogo';
 
@@ -61,25 +63,37 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
 
   const [saving, setSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Logo upload state
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [logoFeedback, setLogoFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   // Password alteration state
   const [newPassword, setNewPassword] = useState('');
   const [passwordStatus, setPasswordStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [passwordError, setPasswordError] = useState('');
 
-  const publicReviewUrl = getPublicReviewUrl(slug || business.slug);
+  // Copy status
+  const [copiedLink, setCopiedLink] = useState(false);
 
-  const [uploadingLogo, setUploadingLogo] = useState(false);
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const publicReviewUrl = getPublicReviewUrl(slug || business.slug);
 
   const handleLogoFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
     setUploadingLogo(true);
+    setLogoFeedback(null);
+
     try {
-      // Função modular de upload que grava no Storage e atualiza a coluna logo_url no Supabase
+      // Modular resilient upload helper (Supabase Storage -> Server API /api/upload -> Optimized Base64)
       const publicUrl = await uploadBusinessLogo(file, business.id);
+
+      if (!publicUrl) {
+        throw new Error('Não foi possível obter o endereço da imagem enviada.');
+      }
 
       // Sincroniza o estado da aplicação e banco local/API
       await updateBusiness(business.id, { logoUrl: publicUrl });
@@ -88,11 +102,15 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
       if (onBusinessUpdated) {
         onBusinessUpdated({ ...business, logoUrl: publicUrl });
       }
-      setSavedSuccess(true);
-      setTimeout(() => setSavedSuccess(false), 3000);
+
+      setLogoFeedback({ type: 'success', message: 'Logótipo enviado e atualizado com sucesso!' });
+      setTimeout(() => setLogoFeedback(null), 4000);
     } catch (err: any) {
       console.error('Logo upload error:', err);
-      alert('Erro ao enviar imagem para o Supabase Storage: ' + (err.message || err));
+      setLogoFeedback({
+        type: 'error',
+        message: 'Erro ao carregar logótipo: ' + (err.message || 'Tente novamente com outra imagem.')
+      });
     } finally {
       if (event.target) {
         event.target.value = '';
@@ -101,32 +119,45 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
     }
   };
 
+  const handleRemoveLogo = async () => {
+    setLogoUrl('');
+    await updateBusiness(business.id, { logoUrl: '' });
+    if (onBusinessUpdated) {
+      onBusinessUpdated({ ...business, logoUrl: '' });
+    }
+    setLogoFeedback({ type: 'success', message: 'Logótipo removido.' });
+    setTimeout(() => setLogoFeedback(null), 3000);
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     setSavedSuccess(false);
+    setSaveError(null);
+
     try {
       const cleanSlug = slug.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-');
       const updatedData: Partial<Business> = {
-        name,
+        name: (name || '').trim(),
         slug: cleanSlug,
-        category,
-        phone,
-        email,
-        address,
-        logoUrl: logoUrl || undefined,
-        googleReviewUrl: googleReviewUrl || undefined,
+        category: (category || '').trim(),
+        phone: (phone || '').trim(),
+        email: (email || '').trim(),
+        address: (address || '').trim(),
+        logoUrl: (logoUrl || '').trim() || undefined,
+        googleReviewUrl: (googleReviewUrl || '').trim() || undefined,
         currency
       };
+
       await updateBusiness(business.id, updatedData);
       setSavedSuccess(true);
       if (onBusinessUpdated) {
         onBusinessUpdated({ ...business, ...updatedData });
       }
       setTimeout(() => setSavedSuccess(false), 3500);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error saving business settings:', err);
-      alert('Erro ao guardar as alterações.');
+      setSaveError('Erro ao guardar as alterações: ' + (err.message || 'Tente novamente.'));
     } finally {
       setSaving(false);
     }
@@ -154,8 +185,14 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
   };
 
   const handleCopyLink = () => {
-    navigator.clipboard.writeText(publicReviewUrl);
-    alert('Link público de avaliação copiado com sucesso!');
+    try {
+      navigator.clipboard.writeText(publicReviewUrl);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 3000);
+    } catch {
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 3000);
+    }
   };
 
   const handleDownloadQr = () => {
@@ -219,270 +256,291 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs">
             <form onSubmit={handleSave} className="space-y-5">
-            {savedSuccess && (
-              <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl text-xs font-semibold flex items-center gap-2 animate-fade-in">
-                <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>Configurações atualizadas com sucesso na base de dados!</span>
-              </div>
-            )}
-
-            <div className="space-y-4">
-              <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider border-b border-slate-100 pb-2">
-                Dados Principais
-              </h2>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Nome do Estabelecimento *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
-                  />
+              {savedSuccess && (
+                <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl text-xs font-semibold flex items-center gap-2 animate-fade-in">
+                  <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>Configurações atualizadas com sucesso na base de dados!</span>
                 </div>
+              )}
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Slug / Identificador no Link *
-                  </label>
-                  <div className="relative">
+              {saveError && (
+                <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-2xl text-xs font-semibold flex items-center gap-2 animate-fade-in">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{saveError}</span>
+                </div>
+              )}
+
+              <div className="space-y-4">
+                <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider border-b border-slate-100 pb-2">
+                  Dados Principais
+                </h2>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Nome do Estabelecimento *
+                    </label>
                     <input
                       type="text"
                       required
-                      value={slug}
-                      onChange={(e) => setSlug(e.target.value)}
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
                       className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
                     />
                   </div>
-                  <span className="text-[10px] text-slate-400 mt-0.5 block">
-                    Usado na URL de avaliação: ?b={slug}
-                  </span>
-                </div>
-              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Segmento / Categoria
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Ex: Restaurante, Clínica..."
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value)}
-                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Telefone / WhatsApp *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
-                  />
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Slug / Identificador no Link *
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        required
+                        value={slug}
+                        onChange={(e) => setSlug(e.target.value)}
+                        className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                      />
+                    </div>
+                    <span className="text-[10px] text-slate-400 mt-0.5 block">
+                      Usado na URL de avaliação: ?b={slug}
+                    </span>
+                  </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    E-mail do Estabelecimento
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Endereço Completo
-                </label>
-                <input
-                  type="text"
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  placeholder="Rua, Número, Bairro, Cidade - Estado"
-                  className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Logótipo do Estabelecimento
-                  </label>
-                  <div className="flex gap-2 items-center mb-2">
-                    {logoUrl ? (
-                      <div className="relative group shrink-0">
-                        <BusinessLogo url={logoUrl} name={name} size="md" rounded="rounded-xl" className="w-12 h-12" />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setLogoUrl('');
-                            updateBusiness(business.id, { logoUrl: '' });
-                            if (onBusinessUpdated) onBusinessUpdated({ ...business, logoUrl: '' });
-                          }}
-                          className="absolute -top-1.5 -right-1.5 bg-rose-500 hover:bg-rose-600 text-white rounded-full p-1 shadow-sm transition"
-                          title="Remover logótipo"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      </div>
-                    ) : (
-                      <BusinessLogo url="" name={name} size="md" rounded="rounded-xl" className="w-12 h-12" />
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={uploadingLogo}
-                      className="py-2.5 px-3.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 disabled:opacity-50 cursor-pointer shadow-2xs"
-                    >
-                      {uploadingLogo ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
-                          <span>A enviar para a nuvem...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Upload className="w-4 h-4" />
-                          <span>Carregar Ficheiro</span>
-                        </>
-                      )}
-                    </button>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Segmento / Categoria
+                    </label>
                     <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/*"
-                      onChange={handleLogoFileUpload}
-                      style={{ display: 'none' }}
+                      type="text"
+                      placeholder="Ex: Restaurante, Clínica..."
+                      value={category}
+                      onChange={(e) => setCategory(e.target.value)}
+                      className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
                     />
                   </div>
-                  <input
-                    type="url"
-                    value={logoUrl}
-                    onChange={(e) => setLogoUrl(e.target.value)}
-                    placeholder="Ou cole o link direto https://exemplo.com/logo.png"
-                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
-                  />
-                  <span className="text-[10px] text-slate-400 mt-0.5 block">
-                    Exibido no topo da página de avaliação pública do seu negócio
-                  </span>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Telefone / WhatsApp *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      E-mail do Estabelecimento
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    />
+                  </div>
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Moeda do Estabelecimento
+                    Endereço Completo
                   </label>
-                  <select
-                    value={currency}
-                    onChange={(e) => setCurrency(e.target.value as 'EUR' | 'BRL')}
+                  <input
+                    type="text"
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                    placeholder="Rua, Número, Bairro, Cidade - Estado"
                     className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
-                  >
-                    <option value="EUR">Euro (€) - Europa</option>
-                    <option value="BRL">Real (R$) - Brasil</option>
-                  </select>
-                  <span className="text-[10px] text-slate-400 mt-0.5 block">
-                    Define o símbolo monetário apresentado nos relatórios e faturas
-                  </span>
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Logótipo do Estabelecimento
+                    </label>
+
+                    {logoFeedback && (
+                      <div
+                        className={`mb-2 p-2.5 rounded-xl text-xs flex items-center gap-1.5 font-medium ${
+                          logoFeedback.type === 'success'
+                            ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                            : 'bg-rose-50 text-rose-800 border border-rose-200'
+                        }`}
+                      >
+                        {logoFeedback.type === 'success' ? (
+                          <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        ) : (
+                          <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                        )}
+                        <span>{logoFeedback.message}</span>
+                      </div>
+                    )}
+
+                    <div className="flex gap-2 items-center mb-2">
+                      {logoUrl ? (
+                        <div className="relative group shrink-0">
+                          <BusinessLogo url={logoUrl} name={name} size="md" rounded="rounded-xl" className="w-12 h-12" />
+                          <button
+                            type="button"
+                            onClick={handleRemoveLogo}
+                            className="absolute -top-1.5 -right-1.5 bg-rose-500 hover:bg-rose-600 text-white rounded-full p-1 shadow-sm transition"
+                            title="Remover logótipo"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ) : (
+                        <BusinessLogo url="" name={name} size="md" rounded="rounded-xl" className="w-12 h-12" />
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={uploadingLogo}
+                        className="py-2.5 px-3.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 disabled:opacity-50 cursor-pointer shadow-2xs"
+                      >
+                        {uploadingLogo ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
+                            <span>A enviar logótipo...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Upload className="w-4 h-4" />
+                            <span>Carregar Imagem / Logo</span>
+                          </>
+                        )}
+                      </button>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleLogoFileUpload}
+                        style={{ display: 'none' }}
+                      />
+                    </div>
+                    <input
+                      type="url"
+                      value={logoUrl}
+                      onChange={(e) => setLogoUrl(e.target.value)}
+                      placeholder="Ou cole o link direto https://exemplo.com/logo.png"
+                      className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    />
+                    <span className="text-[10px] text-slate-400 mt-0.5 block">
+                      Exibido no topo da página de avaliação pública do seu negócio
+                    </span>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Moeda do Estabelecimento
+                    </label>
+                    <select
+                      value={currency}
+                      onChange={(e) => setCurrency(e.target.value as 'EUR' | 'BRL')}
+                      className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    >
+                      <option value="EUR">Euro (€) - Europa</option>
+                      <option value="BRL">Real (R$) - Brasil</option>
+                    </select>
+                    <span className="text-[10px] text-slate-400 mt-0.5 block">
+                      Define o símbolo monetário apresentado nos relatórios e faturas
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Google Review Integration (Section 4) */}
-            <div className="space-y-3 pt-4 border-t border-slate-100">
-              <div className="flex items-center gap-2">
-                <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-                  Link Oficial do Google Reviews
-                </h2>
-                <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-bold rounded-full">
-                  Secção 4
-                </span>
+              {/* Google Review Integration (Section 4) */}
+              <div className="space-y-3 pt-4 border-t border-slate-100">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                    Link Oficial do Google Reviews
+                  </h2>
+                  <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-bold rounded-full">
+                    Secção 4
+                  </span>
+                </div>
+
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Insira o link oficial "Pedir avaliações" do seu perfil de empresa no Google (ex: https://g.page/r/.../review). O sistema disponibiliza o link de forma neutra aos clientes.
+                </p>
+
+                <div>
+                  <input
+                    type="url"
+                    value={googleReviewUrl}
+                    onChange={(e) => setGoogleReviewUrl(e.target.value)}
+                    placeholder="https://g.page/r/exemplo-perfil/review"
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-mono"
+                  />
+                </div>
               </div>
 
-              <p className="text-xs text-slate-500 leading-relaxed">
-                Insira o link oficial "Pedir avaliações" do seu perfil de empresa no Google (ex: https://g.page/r/.../review). O sistema disponibiliza o link de forma neutra aos clientes.
-              </p>
+              <div className="pt-4 flex justify-end">
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="py-2.5 px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-md shadow-indigo-200 transition flex items-center gap-2 disabled:opacity-50 cursor-pointer"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>{saving ? 'A guardar...' : 'Guardar Alterações'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
 
-              <div>
+          {/* Section: Password Change (Required by user) */}
+          <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs space-y-4">
+            <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+              <Shield className="w-4 h-4 text-indigo-600" />
+              <span>Segurança & Alteração de Senha</span>
+            </h2>
+            <p className="text-xs text-slate-500">
+              Altere a senha de acesso à plataforma para garantir a segurança da sua conta.
+            </p>
+
+            <form onSubmit={handleChangePassword} className="space-y-3">
+              {passwordStatus === 'success' && (
+                <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-xl text-xs font-semibold flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-emerald-600" />
+                  <span>Senha alterada com sucesso!</span>
+                </div>
+              )}
+              {passwordStatus === 'error' && (
+                <div className="p-3 bg-rose-50 border border-rose-100 text-rose-800 rounded-xl text-xs font-semibold flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-rose-600" />
+                  <span>{passwordError}</span>
+                </div>
+              )}
+
+              <div className="flex flex-col sm:flex-row gap-2">
                 <input
-                  type="url"
-                  value={googleReviewUrl}
-                  onChange={(e) => setGoogleReviewUrl(e.target.value)}
-                  placeholder="https://g.page/r/exemplo-perfil/review"
-                  className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-mono"
+                  type="password"
+                  placeholder="Nova senha (mínimo 6 caracteres)"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="flex-1 text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  required
                 />
+                <button
+                  type="submit"
+                  disabled={passwordStatus === 'loading'}
+                  className="py-2.5 px-5 bg-slate-900 hover:bg-black text-white font-bold rounded-xl text-xs transition whitespace-nowrap cursor-pointer"
+                >
+                  {passwordStatus === 'loading' ? 'A atualizar...' : 'Alterar Senha'}
+                </button>
               </div>
-            </div>
-
-            <div className="pt-4 flex justify-end">
-              <button
-                type="submit"
-                disabled={saving}
-                className="py-2.5 px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-md shadow-indigo-200 transition flex items-center gap-2 disabled:opacity-50"
-              >
-                <Save className="w-4 h-4" />
-                <span>{saving ? 'A guardar...' : 'Guardar Alterações'}</span>
-              </button>
-            </div>
-          </form>
+            </form>
+          </div>
         </div>
-
-        {/* Section: Password Change (Required by user) */}
-        <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs space-y-4">
-          <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-            <Shield className="w-4 h-4 text-indigo-600" />
-            <span>Segurança & Alteração de Senha</span>
-          </h2>
-          <p className="text-xs text-slate-500">
-            Altere a senha de acesso à plataforma para garantir a segurança da sua conta.
-          </p>
-
-          <form onSubmit={handleChangePassword} className="space-y-3">
-            {passwordStatus === 'success' && (
-              <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-xl text-xs font-semibold flex items-center gap-2">
-                <CheckCircle className="w-4 h-4 text-emerald-600" />
-                <span>Senha alterada com sucesso!</span>
-              </div>
-            )}
-            {passwordStatus === 'error' && (
-              <div className="p-3 bg-rose-50 border border-rose-100 text-rose-800 rounded-xl text-xs font-semibold flex items-center gap-2">
-                <Shield className="w-4 h-4 text-rose-600" />
-                <span>{passwordError}</span>
-              </div>
-            )}
-
-            <div className="flex flex-col sm:flex-row gap-2">
-              <input
-                type="password"
-                placeholder="Nova senha (mínimo 6 caracteres)"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                className="flex-1 text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
-                required
-              />
-              <button
-                type="submit"
-                disabled={passwordStatus === 'loading'}
-                className="py-2.5 px-5 bg-slate-900 hover:bg-black text-white font-bold rounded-xl text-xs transition whitespace-nowrap"
-              >
-                {passwordStatus === 'loading' ? 'A atualizar...' : 'Alterar Senha'}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
 
         {/* Right Col: QR Code Card & Direct Test (Section 1 & 2) */}
         <div className="space-y-6">
@@ -508,26 +566,42 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
 
             <div className="space-y-2">
               <button
+                type="button"
                 onClick={handleDownloadQr}
-                className="w-full py-2.5 px-4 bg-slate-900 hover:bg-black text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-sm"
+                className="w-full py-2.5 px-4 bg-slate-900 hover:bg-black text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
               >
                 <Download className="w-4 h-4" />
                 <span>Descarregar Placa PNG</span>
               </button>
 
               <button
+                type="button"
                 onClick={handleCopyLink}
-                className="w-full py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition flex items-center justify-center gap-2"
+                className={`w-full py-2 px-4 font-semibold rounded-xl text-xs transition flex items-center justify-center gap-2 cursor-pointer ${
+                  copiedLink
+                    ? 'bg-emerald-500 text-white'
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                }`}
               >
-                <Copy className="w-3.5 h-3.5" />
-                <span>Copiar Link de Avaliação</span>
+                {copiedLink ? (
+                  <>
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Link Copiado com Sucesso!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Copiar Link de Avaliação</span>
+                  </>
+                )}
               </button>
             </div>
 
             <div className="pt-2 border-t border-slate-100">
               <button
+                type="button"
                 onClick={onOpenReviewPreview}
-                className="text-xs text-indigo-600 hover:text-indigo-800 font-bold inline-flex items-center gap-1"
+                className="text-xs text-indigo-600 hover:text-indigo-800 font-bold inline-flex items-center gap-1 cursor-pointer"
               >
                 <span>Ver página pública como cliente</span>
                 <ExternalLink className="w-3 h-3" />
