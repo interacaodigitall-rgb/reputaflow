@@ -151,7 +151,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     return businesses.filter(
       (b) =>
         b.name.toLowerCase().includes(searchBiz.toLowerCase()) ||
-        b.email.toLowerCase().includes(searchBiz.toLowerCase()) ||
+        (b.email || '').toLowerCase().includes(searchBiz.toLowerCase()) ||
         b.slug.toLowerCase().includes(searchBiz.toLowerCase())
     );
   }, [businesses, searchBiz]);

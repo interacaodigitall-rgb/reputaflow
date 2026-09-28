@@ -305,8 +305,8 @@ app.post('/api/customers', async (req, res) => {
   }
 });
 
-// GET /api/recovery_cases
-app.get('/api/recovery_cases', async (req, res) => {
+// GET /api/recovery_cases and /api/recovery-cases
+app.get(['/api/recovery_cases', '/api/recovery-cases'], async (req, res) => {
   const bizId = req.query.businessId as string | undefined;
   try {
     const list = await getRecoveryCasesSql(bizId);
@@ -317,8 +317,8 @@ app.get('/api/recovery_cases', async (req, res) => {
   }
 });
 
-// POST /api/recovery_cases
-app.post('/api/recovery_cases', async (req, res) => {
+// POST /api/recovery_cases and /api/recovery-cases
+app.post(['/api/recovery_cases', '/api/recovery-cases'], async (req, res) => {
   try {
     const created = await createRecoveryCaseSql(req.body);
     res.status(201).json(created);
@@ -328,8 +328,8 @@ app.post('/api/recovery_cases', async (req, res) => {
   }
 });
 
-// PATCH /api/recovery_cases/:id
-app.patch('/api/recovery_cases/:id', async (req, res) => {
+// PATCH /api/recovery_cases/:id and /api/recovery-cases/:id
+app.patch(['/api/recovery_cases/:id', '/api/recovery-cases/:id'], async (req, res) => {
   const id = req.params.id;
   try {
     const updated = await updateRecoveryCaseSql(id, req.body);

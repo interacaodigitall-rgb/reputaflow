@@ -25,7 +25,7 @@ export async function seedCloudSqlDatabase() {
           password: b.password || 'reputa123',
           createdAt: new Date(b.createdAt),
           updatedAt: new Date(b.updatedAt || b.createdAt)
-        }).onConflictDoNothing();
+        } as any).onConflictDoNothing();
       }
     }
 
