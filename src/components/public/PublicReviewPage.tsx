@@ -251,14 +251,6 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
             <h2 className="text-lg font-bold text-slate-900">Estabelecimento não encontrado</h2>
             <p className="text-xs text-slate-500 leading-relaxed">{loadError}</p>
           </div>
-          {onBackToApp && (
-            <button
-              onClick={onBackToApp}
-              className="py-2.5 px-5 bg-slate-900 hover:bg-black text-white rounded-xl text-xs font-bold transition shadow-sm"
-            >
-              Voltar à Aplicação
-            </button>
-          )}
         </div>
       </div>
     );
@@ -268,22 +260,14 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100 flex flex-col justify-between py-6 sm:py-10 px-4 sm:px-6 font-sans">
-      {/* Top Header & Admin Back Button */}
-      <div className="max-w-md w-full mx-auto flex items-center justify-between">
-        <div className="flex items-center gap-2">
+      {/* Top Header Badge */}
+      <div className="max-w-md w-full mx-auto flex items-center justify-center">
+        <div className="flex items-center gap-2 bg-white/80 backdrop-blur-xs px-3 py-1 rounded-full border border-slate-200/60 shadow-xs">
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
             Avaliação Oficial
           </span>
         </div>
-        {onBackToApp && (
-          <button
-            onClick={onBackToApp}
-            className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition py-1 px-2.5 rounded-lg hover:bg-indigo-50"
-          >
-            ← Painel Admin
-          </button>
-        )}
       </div>
 
       {/* Main Review Card Container */}

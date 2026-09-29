@@ -1,15 +1,15 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { Mail, Lock, LogIn, AlertCircle, RefreshCw } from 'lucide-react';
+import { Mail, Lock, LogIn, AlertCircle, RefreshCw, Eye, EyeOff } from 'lucide-react';
 import { BrandLogo } from './BrandLogo';
 
 export const LoginPage: React.FC = () => {
   const { signInWithEmail, signInWithGoogle } = useAuth();
-  const [email, setEmail] = useState('eunawebse@gmail.com');
-  const [password, setPassword] = useState('reputa123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [infoMessage, setInfoMessage] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -20,17 +20,16 @@ export const LoginPage: React.FC = () => {
 
     setLoading(true);
     setError(null);
-    setInfoMessage(null);
 
     try {
       await signInWithEmail(email, password);
     } catch (err: any) {
       console.error('Login error:', err);
-      if (err.code === 'auth/wrong-password') {
-        setError('Senha incorreta. Por favor, verifique a senha introduzida.');
-      } else if (err.code === 'auth/invalid-email') {
+      if (err?.code === 'auth/wrong-password' || err?.message?.includes('Invalid login credentials')) {
+        setError('Credenciais incorretas. Por favor, verifique o e-mail e a senha.');
+      } else if (err?.code === 'auth/invalid-email') {
         setError('O e-mail introduzido não é válido.');
-      } else if (err.code === 'auth/user-disabled') {
+      } else if (err?.code === 'auth/user-disabled') {
         setError('Esta conta foi desativada pelo administrador.');
       } else {
         setError(
@@ -39,33 +38,6 @@ export const LoginPage: React.FC = () => {
       }
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleQuickAdminLogin = async (targetEmail: string) => {
-    setEmail(targetEmail);
-    setPassword('reputa123');
-    setLoading(true);
-    setError(null);
-    try {
-      await signInWithEmail(targetEmail, 'reputa123');
-    } catch (err) {
-      console.error('Admin quick login error:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleFillDemo = (type: 'admin' | 'merchant') => {
-    setError(null);
-    if (type === 'admin') {
-      setEmail('eunawebse@gmail.com');
-      setPassword('reputa123');
-      setInfoMessage('Conta de Administrador Geral (eunawebse@gmail.com). Permite gerir todos os estabelecimentos, cadastrar comércios e configurações.');
-    } else {
-      setEmail('comerciante@reputaflow.com');
-      setPassword('reputa123');
-      setInfoMessage('Conta demo de Comerciante. Permite testar o CRM de avaliações, QR Code e fluxos de recuperação.');
     }
   };
 
@@ -83,7 +55,7 @@ export const LoginPage: React.FC = () => {
               Aceda à sua plataforma
             </h2>
             <p className="text-xs text-slate-500 max-w-xs mx-auto">
-              Controle a reputação do seu negócio, recupere clientes insatisfeitos e cresça em qualquer mercado (Brasil e Europa)
+              Controle a reputação do seu negócio, recupere clientes insatisfeitos e gerencie as avaliações da sua empresa.
             </p>
           </div>
         </div>
@@ -96,33 +68,25 @@ export const LoginPage: React.FC = () => {
           </div>
         )}
 
-        {/* Info Feedback Section */}
-        {infoMessage && (
-          <div className="p-3.5 bg-indigo-50 border border-indigo-100 text-indigo-800 rounded-2xl text-xs font-medium flex items-start gap-2.5 animate-fade-in">
-            <AlertCircle className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
-            <span>{infoMessage}</span>
-          </div>
-        )}
-
         {/* Login Form */}
-        <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
+        <form className="mt-6 space-y-4" onSubmit={handleSubmit} autoComplete="off">
           <div className="space-y-3">
             <div>
               <label htmlFor="email-address" className="block text-xs font-bold text-slate-700 mb-1">
                 Endereço de E-mail
               </label>
               <div className="relative">
-                <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3.5 pointer-events-none" />
                 <input
                   id="email-address"
                   name="email"
                   type="email"
-                  autoComplete="email"
+                  autoComplete="off"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="pl-9 pr-3 py-2.5 w-full text-xs rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500 transition"
-                  placeholder="exemplo@reputaflow.com"
+                  placeholder="Introduza o seu e-mail"
                 />
               </div>
             </div>
@@ -134,27 +98,40 @@ export const LoginPage: React.FC = () => {
                 </label>
               </div>
               <div className="relative">
-                <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3.5 pointer-events-none" />
                 <input
                   id="password"
                   name="password"
-                  type="password"
-                  autoComplete="current-password"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="pl-9 pr-3 py-2.5 w-full text-xs rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500 transition"
+                  className="pl-9 pr-10 py-2.5 w-full text-xs rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500 transition"
                   placeholder="Introduza a sua senha"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-3 text-slate-400 hover:text-slate-600 focus:outline-none cursor-pointer transition p-0.5"
+                  title={showPassword ? 'Ocultar senha' : 'Ver senha'}
+                  aria-label={showPassword ? 'Ocultar senha' : 'Ver senha'}
+                >
+                  {showPassword ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
+                </button>
               </div>
             </div>
           </div>
 
-          <div>
+          <div className="pt-2">
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 px-4 bg-slate-900 hover:bg-black text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-md hover:shadow-lg disabled:opacity-50"
+              className="w-full py-3 px-4 bg-slate-900 hover:bg-black text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-md hover:shadow-lg disabled:opacity-50 cursor-pointer"
             >
               {loading ? (
                 <RefreshCw className="w-4 h-4 animate-spin" />
@@ -166,48 +143,13 @@ export const LoginPage: React.FC = () => {
           </div>
         </form>
 
-        {/* Quick Admin Access Section */}
-        <div className="pt-4 border-t border-slate-200 space-y-2">
-          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider text-center">
-            Acesso Rápido de Administrador
-          </p>
-          <div className="flex flex-col gap-1.5">
-            <button
-              type="button"
-              disabled={loading}
-              onClick={() => handleQuickAdminLogin('eunawebse@gmail.com')}
-              className="w-full py-2.5 px-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 border border-indigo-100 cursor-pointer shadow-xs disabled:opacity-50"
-            >
-              <span>👑 Entrar como Super Admin (eunawebse@gmail.com)</span>
-            </button>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() => handleQuickAdminLogin('reputa@glowfyhub.com')}
-                className="py-2 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-[11px] transition text-center cursor-pointer"
-              >
-                👑 reputa@glowfyhub
-              </button>
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() => handleFillDemo('merchant')}
-                className="py-2 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-[11px] transition text-center cursor-pointer"
-              >
-                💼 Preencher Comerciante
-              </button>
-            </div>
-          </div>
-        </div>
-
         {/* Google SSO Fallback */}
-        <div className="pt-3 flex flex-col items-center justify-center">
+        <div className="pt-2 flex flex-col items-center justify-center border-t border-slate-100">
           <span className="text-[10px] text-slate-400 font-medium">Ou se preferir</span>
           <button
             type="button"
             onClick={signInWithGoogle}
-            className="mt-2 text-xs font-bold text-indigo-600 hover:text-indigo-800 hover:underline"
+            className="mt-1.5 text-xs font-bold text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer"
           >
             Entrar com conta Google
           </button>
