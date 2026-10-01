@@ -5,6 +5,7 @@ import { Header } from './components/common/Header';
 import { BottomNav } from './components/common/BottomNav';
 import { QrCodeModal } from './components/common/QrCodeModal';
 import { PublicReviewPage } from './components/public/PublicReviewPage';
+import { NfcRedirectPage } from './components/public/NfcRedirectPage';
 import { LoginPage } from './components/common/LoginPage';
 import { MerchantDashboard } from './components/merchant/MerchantDashboard';
 import { MerchantCRM } from './components/merchant/MerchantCRM';
@@ -31,7 +32,7 @@ import {
   getPlans,
   getPlatformSettings
 } from './lib/dbService';
-import { extractReviewSlug } from './lib/urlHelper';
+import { extractReviewSlug, extractNfcPlateId } from './lib/urlHelper';
 import { ArrowLeft, ShieldAlert, Store, Plus } from 'lucide-react';
 
 function MainAppContent() {
@@ -50,6 +51,7 @@ function MainAppContent() {
   const [showQrModal, setShowQrModal] = useState(false);
   const [isCustomerViewMode, setIsCustomerViewMode] = useState(false);
   const [reviewSlugFromUrl, setReviewSlugFromUrl] = useState<string | null>(null);
+  const [nfcPlateIdFromUrl, setNfcPlateIdFromUrl] = useState<string | null>(null);
 
   // Automatically show Super Admin tab when Super Admin has no businesses registered yet
   useEffect(() => {
@@ -72,9 +74,17 @@ function MainAppContent() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [settings, setSettings] = useState<PlatformSettings | null>(null);
 
-  // Check URL parameters on mount and when history changes (?b=slug or ?review=slug)
+  // Check URL parameters on mount and when history changes (?b=slug or /qr/:id or ?nfc=:id)
   useEffect(() => {
     const handleUrlChange = () => {
+      // 1. Check NFC plate route
+      const nfcId = extractNfcPlateId();
+      if (nfcId) {
+        setNfcPlateIdFromUrl(nfcId);
+        return;
+      }
+
+      // 2. Check public review slug
       const bSlug = extractReviewSlug();
       if (bSlug) {
         setReviewSlugFromUrl(bSlug);
@@ -152,6 +162,11 @@ function MainAppContent() {
     setSelectedBusiness(biz);
     setActiveTab('dashboard');
   };
+
+  // If in NFC plate redirect route (e.g. /qr/001 or ?nfc=001)
+  if (nfcPlateIdFromUrl) {
+    return <NfcRedirectPage plateId={nfcPlateIdFromUrl} />;
+  }
 
   // If in public review view (e.g., client scanned QR code or user clicked preview)
   if (isCustomerViewMode) {

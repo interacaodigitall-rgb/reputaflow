@@ -1,6 +1,6 @@
 /**
- * Helper functions to generate and parse public review URLs consistently
- * across all desktop, mobile devices, QR code scanners, and preview environments.
+ * Helper functions to generate and parse public review URLs and NFC plate URLs
+ * consistently across desktop, mobile devices, QR code scanners, and preview environments.
  */
 
 export function getPublicReviewUrl(slugOrId: string): string {
@@ -14,6 +14,12 @@ export function getPublicReviewUrl(slugOrId: string): string {
   const clean = slugOrId.trim();
 
   return `${origin}${cleanPath}/?b=${encodeURIComponent(clean)}`;
+}
+
+export function getNfcRedirectUrl(plateId: string): string {
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const cleanId = (plateId || '').trim();
+  return `${origin}/qr/${encodeURIComponent(cleanId)}`;
 }
 
 export function extractReviewSlug(): string | null {
@@ -69,6 +75,56 @@ export function extractReviewSlug(): string | null {
     }
   } catch (err) {
     console.warn('Error extracting review slug:', err);
+  }
+
+  return null;
+}
+
+export function extractNfcPlateId(): string | null {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    // 1. Pathname routing (/qr/:id or /nfc/:id)
+    const pathParts = window.location.pathname.split('/').filter(Boolean);
+    if ((pathParts[0] === 'qr' || pathParts[0] === 'nfc') && pathParts[1]) {
+      return decodeURIComponent(pathParts[1].trim());
+    }
+
+    // 2. Query parameter (?qr=001 or ?nfc=001 or ?nfc_id=001)
+    const searchParams = new URLSearchParams(window.location.search);
+    const fromSearch =
+      searchParams.get('qr') ||
+      searchParams.get('nfc') ||
+      searchParams.get('nfc_id') ||
+      searchParams.get('plate');
+
+    if (fromSearch && fromSearch.trim()) {
+      return decodeURIComponent(fromSearch.trim());
+    }
+
+    // 3. Hash routing (#/qr/:id or #/nfc/:id or #?qr=001)
+    if (window.location.hash) {
+      const hash = window.location.hash;
+      const qIndex = hash.indexOf('?');
+      if (qIndex !== -1) {
+        const hashParams = new URLSearchParams(hash.substring(qIndex));
+        const fromHashQuery =
+          hashParams.get('qr') ||
+          hashParams.get('nfc') ||
+          hashParams.get('nfc_id') ||
+          hashParams.get('plate');
+        if (fromHashQuery && fromHashQuery.trim()) {
+          return decodeURIComponent(fromHashQuery.trim());
+        }
+      }
+
+      const pathSegments = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
+      if ((pathSegments[0] === 'qr' || pathSegments[0] === 'nfc') && pathSegments[1]) {
+        return decodeURIComponent(pathSegments[1].trim());
+      }
+    }
+  } catch (err) {
+    console.warn('Error extracting NFC plate ID:', err);
   }
 
   return null;

@@ -24,7 +24,8 @@ import {
   Store,
   Upload,
   Image as ImageIcon,
-  X
+  X,
+  Radio
 } from 'lucide-react';
 import { Business, Customer, Review, RecoveryCase, Plan, PlatformSettings } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -39,6 +40,7 @@ import {
 import { getPublicReviewUrl } from '../../lib/urlHelper';
 import { QrCodeModal } from '../common/QrCodeModal';
 import { BusinessLogo } from '../common/BusinessLogo';
+import { NfcPlatesManagement } from './NfcPlatesManagement';
 
 interface SuperAdminDashboardProps {
   businesses: Business[];
@@ -60,7 +62,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   onImpersonateBusiness
 }) => {
   const { changePassword, currentUser } = useAuth();
-  const [activeTab, setActiveTab] = useState<'merchants' | 'plans' | 'settings'>('merchants');
+  const [activeTab, setActiveTab] = useState<'merchants' | 'plans' | 'settings' | 'nfc'>('merchants');
   const [searchBiz, setSearchBiz] = useState('');
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
   const [qrModalBiz, setQrModalBiz] = useState<Business | null>(null);
@@ -455,6 +457,18 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
           <Sliders className="w-4 h-4" />
           <span>Parâmetros Globais</span>
         </button>
+
+        <button
+          onClick={() => setActiveTab('nfc')}
+          className={`py-2 px-4 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap min-h-[40px] ${
+            activeTab === 'nfc'
+              ? 'bg-indigo-600 text-white shadow-xs'
+              : 'text-indigo-700 bg-indigo-50/70 hover:bg-indigo-100 border border-indigo-200/60'
+          }`}
+        >
+          <Radio className="w-4 h-4" />
+          <span>Placas NFC & QR Dinâmico</span>
+        </button>
       </div>
 
       {/* TAB 1: COMERCIANTES MANAGEMENT */}
@@ -794,6 +808,11 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* TAB 4: NFC PLATES MANAGEMENT */}
+      {activeTab === 'nfc' && (
+        <NfcPlatesManagement businesses={businesses} />
       )}
 
       {/* Modal: Criar Comerciante (Section 1 requirement) */}
