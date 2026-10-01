@@ -17,9 +17,15 @@ export function getPublicReviewUrl(slugOrId: string): string {
 }
 
 export function getNfcRedirectUrl(plateId: string): string {
-  const origin = typeof window !== 'undefined' ? window.location.origin : '';
   const cleanId = (plateId || '').trim();
-  return `${origin}/qr/${encodeURIComponent(cleanId)}`;
+  let origin = '';
+  
+  if (typeof window !== 'undefined' && window.location) {
+    origin = window.location.origin || `${window.location.protocol}//${window.location.host}`;
+  }
+  
+  const cleanOrigin = origin ? origin.replace(/\/+$/, '') : '';
+  return `${cleanOrigin}/qr/${encodeURIComponent(cleanId)}`;
 }
 
 export function extractReviewSlug(): string | null {

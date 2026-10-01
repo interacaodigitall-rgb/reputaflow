@@ -14,7 +14,9 @@ import {
   QrCode,
   RefreshCw,
   Layers,
-  X
+  X,
+  Download,
+  Eye
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Business } from '../../types';
@@ -119,13 +121,73 @@ export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ busine
     });
   }, [plates, searchTerm, statusFilter]);
 
-  // Copy URL
+  // Copy Absolute URL
   const handleCopyUrl = (plate: NfcPlate) => {
     const url = getNfcRedirectUrl(plate.id);
     navigator.clipboard.writeText(url);
     setCopiedPlateId(plate.id);
-    showToast(`Link da Placa #${plate.id} copiado para a área de transferência!`);
+    showToast(`Link absoluto copiado: ${url}`);
     setTimeout(() => setCopiedPlateId(null), 2500);
+  };
+
+  // Download QR Code as PNG
+  const handleDownloadQrPng = (plate: NfcPlate) => {
+    const svg = document.getElementById(`modal-nfc-qr-svg-${plate.id}`) || document.getElementById(`row-qr-svg-${plate.id}`);
+    if (!svg) return;
+
+    const svgData = new XMLSerializer().serializeToString(svg);
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+
+    img.onload = () => {
+      canvas.width = 600;
+      canvas.height = 700;
+      if (ctx) {
+        // Background card
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Header color bar
+        ctx.fillStyle = '#4F46E5';
+        ctx.fillRect(0, 0, canvas.width, 14);
+
+        // Title
+        ctx.fillStyle = '#0F172A';
+        ctx.font = 'bold 30px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`Placa NFC #${plate.id}`, canvas.width / 2, 70);
+
+        // Subtitle
+        ctx.fillStyle = '#64748B';
+        ctx.font = '16px sans-serif';
+        ctx.fillText(plate.merchant_name || 'Aponte a câmara e avalie a sua experiência', canvas.width / 2, 105);
+
+        // QR Code Image
+        ctx.drawImage(img, 100, 130, 400, 400);
+
+        // Footer URL text
+        ctx.fillStyle = '#64748B';
+        ctx.font = 'bold 13px monospace';
+        ctx.fillText(getNfcRedirectUrl(plate.id), canvas.width / 2, 570);
+
+        // Platform Branding
+        ctx.fillStyle = '#4F46E5';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.fillText('ReputaFlow • Avaliações & Reputação', canvas.width / 2, 630);
+      }
+
+      const pngUrl = canvas.toDataURL('image/png');
+      const downloadLink = document.createElement('a');
+      downloadLink.href = pngUrl;
+      downloadLink.download = `QR_Placa_${plate.id}.png`;
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
+      showToast(`QR Code da Placa #${plate.id} transferido em alta resolução (PNG)!`);
+    };
+
+    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
   };
 
   // Batch Generation Submit
@@ -453,38 +515,61 @@ export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ busine
             <table className="w-full text-left text-xs text-slate-600">
               <thead className="bg-slate-50 text-[11px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
                 <tr>
-                  <th className="py-3 px-4">Serial / ID</th>
+                  <th className="py-3 px-4">Placa & QR Exclusivo</th>
                   <th className="py-3 px-4">Estado</th>
                   <th className="py-3 px-4">Lojista Vinculado</th>
-                  <th className="py-3 px-4">Destino (Redirect URL)</th>
+                  <th className="py-3 px-4">Destino Final</th>
                   <th className="py-3 px-4 text-center">Leituras (Scans)</th>
                   <th className="py-3 px-4 text-right">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filteredPlates.map((plate) => {
+                  const absoluteRedirectUrl = getNfcRedirectUrl(plate.id);
                   const isCopied = copiedPlateId === plate.id;
 
                   return (
                     <tr key={plate.id} className="hover:bg-slate-50/80 transition">
-                      {/* Serial / ID */}
-                      <td className="py-3.5 px-4">
-                        <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 rounded-xl bg-slate-900 text-indigo-400 font-mono font-bold flex items-center justify-center text-xs shrink-0 shadow-2xs">
-                            #{plate.id}
+                      {/* Serial / ID + Visual QR Matrix Thumbnail */}
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-3">
+                          {/* Interactive QR Thumbnail with unique pattern */}
+                          <div
+                            onClick={() => setQrModalPlate(plate)}
+                            className="w-11 h-11 p-1 bg-white border border-slate-200 hover:border-indigo-500 rounded-xl flex items-center justify-center shrink-0 cursor-pointer shadow-xs transition hover:scale-105"
+                            title="Clique para ampliar o QR Code"
+                          >
+                            <QRCodeSVG
+                              id={`row-qr-svg-${plate.id}`}
+                              value={absoluteRedirectUrl}
+                              size={36}
+                              level="M"
+                              includeMargin={false}
+                            />
                           </div>
-                          <div>
-                            <span className="font-mono font-extrabold text-slate-900 block">
-                              Placa {plate.id}
-                            </span>
-                            <button
-                              onClick={() => handleCopyUrl(plate)}
-                              className="text-[10px] text-indigo-600 hover:text-indigo-800 font-semibold flex items-center gap-1 mt-0.5 cursor-pointer"
-                              title="Copiar rota /qr/[id]"
-                            >
-                              {isCopied ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                              <span>{isCopied ? 'Copiado!' : '/qr/' + plate.id}</span>
-                            </button>
+
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono font-extrabold text-slate-900 text-xs">
+                                #{plate.id}
+                              </span>
+                              <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
+                                NFC/QR
+                              </span>
+                            </div>
+                            {/* Visual URL debug print */}
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <span className="text-[10px] font-mono text-indigo-600 font-semibold truncate max-w-[180px]" title={absoluteRedirectUrl}>
+                                {absoluteRedirectUrl}
+                              </span>
+                              <button
+                                onClick={() => handleCopyUrl(plate)}
+                                className="text-slate-400 hover:text-indigo-600 p-0.5 rounded cursor-pointer transition shrink-0"
+                                title="Copiar URL Absoluta"
+                              >
+                                {isCopied ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                              </button>
+                            </div>
                           </div>
                         </div>
                       </td>
@@ -531,7 +616,7 @@ export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ busine
                       </td>
 
                       {/* Redirect URL */}
-                      <td className="py-3.5 px-4 max-w-[220px]">
+                      <td className="py-3.5 px-4 max-w-[200px]">
                         {plate.redirect_url ? (
                           <a
                             href={plate.redirect_url}
@@ -562,7 +647,7 @@ export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ busine
                           <button
                             onClick={() => setQrModalPlate(plate)}
                             className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition cursor-pointer"
-                            title="Ver QR Code da Placa"
+                            title="Ver & Descarregar QR Code da Placa"
                           >
                             <QrCode className="w-3.5 h-3.5" />
                           </button>
@@ -798,9 +883,9 @@ export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ busine
               {/* NFC Route Summary */}
               <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
-                  Link Dinâmico da Placa
+                  Link Dinâmico da Placa (Injetado no QR)
                 </span>
-                <p className="font-mono text-xs font-bold text-slate-900">
+                <p className="font-mono text-xs font-bold text-indigo-700 break-all">
                   {getNfcRedirectUrl(plateToLink.id)}
                 </p>
               </div>
@@ -828,60 +913,116 @@ export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ busine
       )}
 
       {/* ========================================== */}
-      {/* MODAL: QR CODE VIEW                        */}
+      {/* MODAL: QR CODE VIEW & VALIDATION (Section 3) */}
       {/* ========================================== */}
-      {qrModalPlate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in">
-          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 space-y-5 text-center">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-              <span className="text-xs font-bold text-slate-900 font-mono">
-                QR Code Placa #{qrModalPlate.id}
-              </span>
-              <button
-                onClick={() => setQrModalPlate(null)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      {qrModalPlate && (() => {
+        const qrAbsoluteUrl = getNfcRedirectUrl(qrModalPlate.id);
 
-            {/* QR Code Container */}
-            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl flex justify-center items-center shadow-inner">
-              <QRCodeSVG
-                value={getNfcRedirectUrl(qrModalPlate.id)}
-                size={200}
-                level="H"
-                includeMargin={true}
-              />
-            </div>
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs animate-in fade-in">
+            <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-5 text-center">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="text-left">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-black text-white bg-slate-900 px-2 py-0.5 rounded-lg font-mono">
+                      #{qrModalPlate.id}
+                    </span>
+                    <h3 className="text-sm font-bold text-slate-900">
+                      QR Code da Placa NFC
+                    </h3>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    {qrModalPlate.merchant_name || 'Placa pronta para vinculação'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setQrModalPlate(null)}
+                  className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
 
-            <div className="space-y-1">
-              <p className="text-xs font-bold text-slate-900">
-                {qrModalPlate.merchant_name || 'Placa sem lojista vinculado'}
-              </p>
-              <p className="text-[11px] font-mono text-slate-400 break-all">
-                {getNfcRedirectUrl(qrModalPlate.id)}
-              </p>
-            </div>
+              {/* High-Resolution QR Code Container */}
+              <div className="p-5 bg-white border border-slate-200 rounded-2xl flex justify-center items-center shadow-inner mx-auto max-w-fit">
+                <QRCodeSVG
+                  id={`modal-nfc-qr-svg-${qrModalPlate.id}`}
+                  value={qrAbsoluteUrl}
+                  size={220}
+                  level="H"
+                  includeMargin={true}
+                />
+              </div>
 
-            <div className="flex items-center gap-2 pt-2">
-              <button
-                onClick={() => handleCopyUrl(qrModalPlate)}
-                className="flex-1 py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
-              >
-                <Copy className="w-3.5 h-3.5" />
-                <span>Copiar Link</span>
-              </button>
-              <button
-                onClick={() => setQrModalPlate(null)}
-                className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer"
-              >
-                Fechar
-              </button>
+              {/* Exact URL Debug / Visual Validation Box (Mandatory Requirement) */}
+              <div className="bg-slate-50 border border-slate-200/90 rounded-2xl p-3.5 text-left space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    URL Injetada no QR Code (Validação Mobile)
+                  </span>
+                  <span className="text-[10px] font-bold font-mono text-indigo-600">
+                    ID: {qrModalPlate.id}
+                  </span>
+                </div>
+                <div className="p-2 bg-white rounded-xl border border-slate-200 font-mono text-[11px] font-bold text-slate-900 break-all select-all shadow-2xs">
+                  {qrAbsoluteUrl}
+                </div>
+                <p className="text-[10px] text-slate-500">
+                  {qrModalPlate.status === 'active' && qrModalPlate.redirect_url ? (
+                    <span>
+                      🎯 Destino final do lojista:{' '}
+                      <strong className="text-slate-800">{qrModalPlate.redirect_url}</strong>
+                    </span>
+                  ) : (
+                    <span className="text-amber-600 font-medium">
+                      ⚠️ Placa inativa. Vincule um lojista para ativar o redirecionamento.
+                    </span>
+                  )}
+                </p>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <button
+                  onClick={() => handleDownloadQrPng(qrModalPlate)}
+                  className="py-2.5 px-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-md shadow-indigo-900/20 cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Descarregar PNG</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    window.open(qrAbsoluteUrl, '_blank');
+                  }}
+                  className="py-2.5 px-3 bg-slate-900 hover:bg-black text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                  title="Testar rota no navegador"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Testar Link</span>
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleCopyUrl(qrModalPlate)}
+                  className="flex-1 py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Copiar URL Absoluta</span>
+                </button>
+                <button
+                  onClick={() => setQrModalPlate(null)}
+                  className="py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer"
+                >
+                  Fechar
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ========================================== */}
       {/* MODAL: DELETE CONFIRMATION                 */}
