@@ -135,6 +135,17 @@ export const platformSettings = pgTable('platform_settings', {
   whatsappApiEnabled: boolean('whatsapp_api_enabled').default(false).notNull()
 });
 
+// NFC Plates table
+export const nfcPlates = pgTable('nfc_plates', {
+  id: text('id').primaryKey(),
+  status: text('status').default('inactive').notNull(), // 'active' | 'inactive'
+  merchantId: text('merchant_id'),
+  redirectUrl: text('redirect_url'),
+  scanCount: integer('scan_count').default(0).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull()
+});
+
 // Relations
 export const businessRelations = relations(businesses, ({ many }) => ({
   customers: many(customers),

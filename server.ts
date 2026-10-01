@@ -22,6 +22,15 @@ import {
 import { getInteractionsSql, createInteractionSql } from './src/db/interactions.ts';
 import { getPlansSql, getPlatformSettingsSql } from './src/db/plans.ts';
 import { getOrCreateUser } from './src/db/users.ts';
+import {
+  getAllNfcPlatesSql,
+  getNfcPlateByIdSql,
+  createNfcBatchSql,
+  linkNfcPlateSql,
+  unlinkNfcPlateSql,
+  deleteNfcPlateSql,
+  incrementNfcScanSql
+} from './src/db/nfcPlates.ts';
 import { seedCloudSqlDatabase } from './src/db/seedSql.ts';
 import { db } from './src/db/index.ts';
 import { platformSettings } from './src/db/schema.ts';
@@ -426,6 +435,136 @@ app.post('/api/users/sync', async (req, res) => {
     console.error('Failed to sync user:', error);
     res.status(500).json({ error: error.message || 'Failed to sync user' });
   }
+});
+
+// ==========================================
+// NFC PLATES API & SERVER-SIDE REDIRECTS
+// ==========================================
+
+// GET /api/nfc - List all NFC plates
+app.get('/api/nfc', async (req, res) => {
+  try {
+    const plates = await getAllNfcPlatesSql();
+    res.json(plates);
+  } catch (error: any) {
+    console.error('Failed to get NFC plates:', error);
+    res.status(500).json({ error: error.message || 'Failed to get NFC plates' });
+  }
+});
+
+// GET /api/nfc/:id - Get single plate by ID
+app.get('/api/nfc/:id', async (req, res) => {
+  try {
+    const plate = await getNfcPlateByIdSql(req.params.id);
+    if (!plate) {
+      return res.status(404).json({ error: 'Placa não encontrada' });
+    }
+    res.json(plate);
+  } catch (error: any) {
+    console.error('Failed to get NFC plate:', error);
+    res.status(500).json({ error: error.message || 'Failed to get NFC plate' });
+  }
+});
+
+// POST /api/nfc/batch - Create batch of NFC plates
+app.post('/api/nfc/batch', async (req, res) => {
+  try {
+    const { quantity, prefix, startNumber, padDigits } = req.body;
+    const created = await createNfcBatchSql({
+      quantity: Number(quantity || 10),
+      prefix: prefix || '',
+      startNumber: Number(startNumber || 1),
+      padDigits: Number(padDigits || 3)
+    });
+    res.json({ success: true, createdCount: created.length, plates: created });
+  } catch (error: any) {
+    console.error('Failed to create NFC batch:', error);
+    res.status(500).json({ error: error.message || 'Failed to create NFC batch' });
+  }
+});
+
+// POST /api/nfc/link - Link plate to merchant
+app.post('/api/nfc/link', async (req, res) => {
+  try {
+    const { id, merchantId, redirectUrl } = req.body;
+    if (!id || !redirectUrl) {
+      return res.status(400).json({ error: 'ID e URL de redirecionamento são obrigatórios' });
+    }
+    const success = await linkNfcPlateSql(id, merchantId, redirectUrl);
+    res.json({ success });
+  } catch (error: any) {
+    console.error('Failed to link NFC plate:', error);
+    res.status(500).json({ error: error.message || 'Failed to link NFC plate' });
+  }
+});
+
+// POST /api/nfc/unlink - Unlink plate
+app.post('/api/nfc/unlink', async (req, res) => {
+  try {
+    const { id } = req.body;
+    if (!id) {
+      return res.status(400).json({ error: 'ID é obrigatório' });
+    }
+    const success = await unlinkNfcPlateSql(id);
+    res.json({ success });
+  } catch (error: any) {
+    console.error('Failed to unlink NFC plate:', error);
+    res.status(500).json({ error: error.message || 'Failed to unlink NFC plate' });
+  }
+});
+
+// DELETE /api/nfc/:id - Delete plate
+app.delete('/api/nfc/:id', async (req, res) => {
+  try {
+    const success = await deleteNfcPlateSql(req.params.id);
+    res.json({ success });
+  } catch (error: any) {
+    console.error('Failed to delete NFC plate:', error);
+    res.status(500).json({ error: error.message || 'Failed to delete NFC plate' });
+  }
+});
+
+// POST /api/nfc/scan/:id - Increment scan count
+app.post('/api/nfc/scan/:id', async (req, res) => {
+  try {
+    await incrementNfcScanSql(req.params.id);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to increment scan' });
+  }
+});
+
+// GET /qr/:id - High-speed Server-side Redirect for Mobile QR / NFC Scanners
+app.get('/qr/:id', async (req, res, next) => {
+  const plateId = (req.params.id || '').trim();
+  if (!plateId) {
+    return res.redirect(302, '/');
+  }
+
+  try {
+    const plate = await getNfcPlateByIdSql(plateId);
+    if (plate && plate.status === 'active' && plate.redirect_url) {
+      // Async scan increment
+      incrementNfcScanSql(plateId).catch(() => {});
+
+      let target = plate.redirect_url.trim();
+      if (target.startsWith('/')) {
+        const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+        const host = req.get('host');
+        target = `${proto}://${host}${target}`;
+      } else if (!/^https?:\/\//i.test(target)) {
+        target = 'https://' + target;
+      }
+
+      console.log(`[QR 302 Redirect] Plate #${plateId} -> ${target}`);
+      return res.redirect(302, target);
+    }
+  } catch (err) {
+    console.warn('[QR Redirect Server fallback]:', err);
+  }
+
+  // Pass through to SPA so client shows clear informative message if inactive
+  next();
 });
 
 // ==========================================

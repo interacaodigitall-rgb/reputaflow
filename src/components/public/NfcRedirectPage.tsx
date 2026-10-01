@@ -29,18 +29,34 @@ export const NfcRedirectPage: React.FC<NfcRedirectPageProps> = ({ plateId: propP
       }
 
       try {
-        // 2. Fetch from Supabase directly
-        const { data, error } = await supabase
-          .from('nfc_plates')
-          .select('*')
-          .eq('id', targetId)
-          .maybeSingle();
+        // Parallel queries to Server REST API, Supabase and local cache
+        let plateData: any = null;
 
+        // Query 1: Backend Server API (PostgreSQL)
+        const serverPromise = fetch(`/api/nfc/${encodeURIComponent(targetId)}`, { cache: 'no-store' })
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null);
+
+        // Query 2: Supabase (Cloud Database)
+        const supabasePromise = (async () => {
+          try {
+            const { data } = await supabase
+              .from('nfc_plates')
+              .select('*')
+              .eq('id', targetId)
+              .maybeSingle();
+            return data;
+          } catch {
+            return null;
+          }
+        })();
+
+        const [serverResult, supabaseResult] = await Promise.all([serverPromise, supabasePromise]);
         if (isCancelled || redirectedRef.current) return;
 
-        let plateData = data;
+        plateData = serverResult || supabaseResult;
 
-        // Fallback to local cache if offline / temporary network issue
+        // Query 3: Local Storage Fallback
         if (!plateData) {
           try {
             const raw = localStorage.getItem('reputaflow_nfc_plates_cache');
@@ -54,14 +70,17 @@ export const NfcRedirectPage: React.FC<NfcRedirectPageProps> = ({ plateId: propP
         }
 
         // 3. Evaluate Plate Status & Redirect URL
-        if (plateData && plateData.status === 'active' && plateData.redirect_url) {
+        const redirectUrl = plateData?.redirect_url || plateData?.redirectUrl;
+        const status = String(plateData?.status || '').toLowerCase();
+
+        if (plateData && status === 'active' && redirectUrl) {
           redirectedRef.current = true;
 
           // Asynchronously fire scan counter increment
-          incrementNfcScan(plateData.id, Number(plateData.scan_count || 0)).catch(() => {});
+          incrementNfcScan(plateData.id, Number(plateData.scan_count || plateData.scanCount || 0)).catch(() => {});
 
           // Build full absolute target URL
-          let target = String(plateData.redirect_url).trim();
+          let target = String(redirectUrl).trim();
           if (target.startsWith('/')) {
             target = window.location.origin + target;
           } else if (!/^https?:\/\//i.test(target)) {

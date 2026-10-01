@@ -28,25 +28,42 @@ function mapNfcRow(row: any, businesses: Business[] = []): NfcPlate {
   const matchedBiz = mId ? businesses.find((b) => b.id === mId) : undefined;
 
   return {
-    id: String(row.id || ''),
-    status: (row.status as any) === 'active' ? 'active' : 'inactive',
+    id: String(row.id || '').trim(),
+    status: String(row.status || '').toLowerCase() === 'active' ? 'active' : 'inactive',
     merchant_id: mId,
     redirect_url: row.redirect_url || row.redirectUrl || null,
     scan_count: Number(row.scan_count ?? row.scanCount ?? 0),
     created_at: row.created_at || row.createdAt || new Date().toISOString(),
     updated_at: row.updated_at || row.updatedAt || new Date().toISOString(),
-    merchant_name: matchedBiz?.name,
-    merchant_slug: matchedBiz?.slug,
-    merchant_logo_url: matchedBiz?.logoUrl
+    merchant_name: matchedBiz?.name || row.merchant_name,
+    merchant_slug: matchedBiz?.slug || row.merchant_slug,
+    merchant_logo_url: matchedBiz?.logoUrl || row.merchant_logo_url
   };
 }
 
 /**
- * Fetches all NFC plates from Supabase (merged with local cache)
+ * Fetches all NFC plates from Server API & Supabase
  */
 export async function getNfcPlates(businesses: Business[] = []): Promise<NfcPlate[]> {
   const localCache = getLocalNfcCache();
+  const plateMap = new Map<string, NfcPlate>();
+  localCache.forEach((p) => plateMap.set(p.id, p));
 
+  // 1. Try Server REST API first
+  try {
+    const res = await fetch('/api/nfc', { cache: 'no-store' });
+    if (res.ok) {
+      const serverPlates = await res.json();
+      if (Array.isArray(serverPlates) && serverPlates.length > 0) {
+        serverPlates.forEach((row) => {
+          const mapped = mapNfcRow(row, businesses);
+          plateMap.set(mapped.id, mapped);
+        });
+      }
+    }
+  } catch (e) {}
+
+  // 2. Try Supabase
   try {
     const { data, error } = await supabase
       .from('nfc_plates')
@@ -54,32 +71,16 @@ export async function getNfcPlates(businesses: Business[] = []): Promise<NfcPlat
       .order('created_at', { ascending: false });
 
     if (!error && data && data.length > 0) {
-      const remotePlates = data.map((row) => mapNfcRow(row, businesses));
-      
-      // Merge remote with local so no plate is lost
-      const plateMap = new Map<string, NfcPlate>();
-      localCache.forEach((p) => plateMap.set(p.id, p));
-      remotePlates.forEach((p) => plateMap.set(p.id, p));
-
-      const merged = Array.from(plateMap.values()).map((p) => {
-        const matchedBiz = p.merchant_id ? businesses.find((b) => b.id === p.merchant_id) : undefined;
-        return {
-          ...p,
-          merchant_name: matchedBiz?.name || p.merchant_name,
-          merchant_slug: matchedBiz?.slug || p.merchant_slug,
-          merchant_logo_url: matchedBiz?.logoUrl || p.merchant_logo_url
-        };
+      data.forEach((row) => {
+        const mapped = mapNfcRow(row, businesses);
+        plateMap.set(mapped.id, mapped);
       });
-
-      saveLocalNfcCache(merged);
-      return merged;
     }
   } catch (err) {
-    console.warn('[Supabase getNfcPlates notice]:', err);
+    console.warn('[getNfcPlates Supabase notice]:', err);
   }
 
-  // Fallback to local cache with enriched merchant data
-  return localCache.map((p) => {
+  const merged = Array.from(plateMap.values()).map((p) => {
     const matchedBiz = p.merchant_id ? businesses.find((b) => b.id === p.merchant_id) : undefined;
     return {
       ...p,
@@ -88,6 +89,9 @@ export async function getNfcPlates(businesses: Business[] = []): Promise<NfcPlat
       merchant_logo_url: matchedBiz?.logoUrl || p.merchant_logo_url
     };
   });
+
+  saveLocalNfcCache(merged);
+  return merged;
 }
 
 /**
@@ -97,7 +101,19 @@ export async function getNfcPlateById(id: string): Promise<NfcPlate | null> {
   const cleanId = (id || '').trim();
   if (!cleanId) return null;
 
-  // 1. Try Supabase
+  // 1. Try Server REST API
+  try {
+    const res = await fetch(`/api/nfc/${encodeURIComponent(cleanId)}`, { cache: 'no-store' });
+    if (res.ok) {
+      const serverPlate = await res.json();
+      if (serverPlate && serverPlate.id) {
+        const mapped = mapNfcRow(serverPlate);
+        return mapped;
+      }
+    }
+  } catch {}
+
+  // 2. Try Supabase
   try {
     const { data, error } = await supabase
       .from('nfc_plates')
@@ -107,19 +123,13 @@ export async function getNfcPlateById(id: string): Promise<NfcPlate | null> {
 
     if (!error && data) {
       const plate = mapNfcRow(data);
-      // Sync local cache
-      const local = getLocalNfcCache();
-      const existingIdx = local.findIndex((p) => p.id === cleanId);
-      if (existingIdx >= 0) local[existingIdx] = plate;
-      else local.unshift(plate);
-      saveLocalNfcCache(local);
       return plate;
     }
   } catch (err) {
     console.warn('[getNfcPlateById Supabase catch]:', err);
   }
 
-  // 2. Fallback to local cache
+  // 3. Fallback to local cache
   const localCache = getLocalNfcCache();
   const matched = localCache.find((p) => p.id === cleanId);
   return matched || null;
@@ -168,7 +178,7 @@ export async function createNfcPlatesBatch(
     });
   }
 
-  // 1. Immediately write to local cache so user sees them right away
+  // 1. Immediately write to local cache
   const localCache = getLocalNfcCache();
   const map = new Map<string, NfcPlate>();
   localCache.forEach((p) => map.set(p.id, p));
@@ -176,25 +186,23 @@ export async function createNfcPlatesBatch(
   const updatedLocal = Array.from(map.values());
   saveLocalNfcCache(updatedLocal);
 
-  // 2. Persist to Supabase
-  let supabaseError: any = null;
+  // 2. Persist to Server REST API
   try {
-    const { error } = await supabase.from('nfc_plates').upsert(rowsToInsert, {
+    await fetch('/api/nfc/batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(options)
+    });
+  } catch (e) {}
+
+  // 3. Persist to Supabase
+  try {
+    await supabase.from('nfc_plates').upsert(rowsToInsert, {
       onConflict: 'id',
       ignoreDuplicates: false
     });
-    if (error) {
-      console.warn('[Supabase createNfcPlatesBatch upsert error]:', error);
-      supabaseError = error;
-      // Fallback: try direct insert
-      const { error: insertErr } = await supabase.from('nfc_plates').insert(rowsToInsert);
-      if (!insertErr) {
-        supabaseError = null;
-      }
-    }
   } catch (err) {
     console.warn('[Supabase createNfcPlatesBatch catch]:', err);
-    supabaseError = err;
   }
 
   if (typeof window !== 'undefined') {
@@ -203,8 +211,7 @@ export async function createNfcPlatesBatch(
 
   return {
     success: true,
-    createdCount: newPlates.length,
-    error: supabaseError ? `Salvo localmente. Aviso Supabase: ${supabaseError.message || supabaseError}` : undefined
+    createdCount: newPlates.length
   };
 }
 
@@ -242,9 +249,18 @@ export async function linkNfcPlate(
   }
   saveLocalNfcCache(localCache);
 
-  // 2. Update Supabase
+  // 2. Persist to Server API
   try {
-    const { error } = await supabase
+    await fetch('/api/nfc/link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, merchantId, redirectUrl })
+    });
+  } catch (e) {}
+
+  // 3. Persist to Supabase
+  try {
+    await supabase
       .from('nfc_plates')
       .upsert({
         id,
@@ -253,10 +269,6 @@ export async function linkNfcPlate(
         redirect_url: redirectUrl.trim(),
         updated_at: now
       }, { onConflict: 'id' });
-
-    if (error) {
-      console.warn('[linkNfcPlate Supabase notice]:', error);
-    }
   } catch (err) {
     console.warn('[linkNfcPlate catch]:', err);
   }
@@ -288,7 +300,16 @@ export async function unlinkNfcPlate(id: string): Promise<{ success: boolean; er
     saveLocalNfcCache(localCache);
   }
 
-  // 2. Update Supabase
+  // 2. Persist to Server API
+  try {
+    await fetch('/api/nfc/unlink', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    });
+  } catch (e) {}
+
+  // 3. Persist to Supabase
   try {
     await supabase
       .from('nfc_plates')
@@ -318,7 +339,12 @@ export async function deleteNfcPlate(id: string): Promise<{ success: boolean; er
   const localCache = getLocalNfcCache().filter((p) => p.id !== id);
   saveLocalNfcCache(localCache);
 
-  // 2. Delete from Supabase
+  // 2. Persist to Server API
+  try {
+    await fetch(`/api/nfc/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  } catch (e) {}
+
+  // 3. Delete from Supabase
   try {
     await supabase.from('nfc_plates').delete().eq('id', id);
   } catch (err) {
@@ -347,24 +373,15 @@ export async function incrementNfcScan(id: string, currentCount: number = 0): Pr
     saveLocalNfcCache(localCache);
   }
 
-  // 2. Try Supabase RPC first (atomic)
+  // 2. Call Server API
   try {
-    const { error: rpcError } = await supabase.rpc('increment_nfc_scan', { plate_id: cleanId });
-    if (!rpcError) return;
-  } catch {}
+    await fetch(`/api/nfc/scan/${encodeURIComponent(cleanId)}`, { method: 'POST' });
+  } catch (e) {}
 
-  // 3. Direct update fallback
+  // 3. Call Supabase
   try {
-    await supabase
-      .from('nfc_plates')
-      .update({
-        scan_count: currentCount + 1,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', cleanId);
-  } catch (err) {
-    console.warn('[incrementNfcScan fallback error]:', err);
-  }
+    await supabase.rpc('increment_nfc_scan', { plate_id: cleanId });
+  } catch {}
 }
 
 function arePlatesEqual(a: NfcPlate[], b: NfcPlate[]): boolean {
@@ -405,14 +422,12 @@ export function subscribeNfcPlates(
     }
   };
 
-  // 1. Initial fast local/cached load
   const initialLocal = getLocalNfcCache();
   if (initialLocal.length > 0) {
     lastEmittedPlates = initialLocal;
     callback(initialLocal);
   }
 
-  // 2. Async fetch from Supabase
   fetchAndNotify();
 
   const channelName = `rt_nfc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -429,7 +444,6 @@ export function subscribeNfcPlates(
     console.warn('[Supabase Realtime NFC Channel notice]:', err);
   }
 
-  // Gentle 10-second sync (not 3-second rapid polling)
   const interval = setInterval(fetchAndNotify, 10000);
 
   const handleCustomSync = () => {

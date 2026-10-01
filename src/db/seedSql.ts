@@ -1,9 +1,27 @@
 import { db } from './index.ts';
-import { businesses, plans, platformSettings } from './schema.ts';
+import { businesses, plans, platformSettings, nfcPlates } from './schema.ts';
 import { REGISTERED_BUSINESSES } from '../lib/initialData.ts';
+import { sql } from 'drizzle-orm';
 
 export async function seedCloudSqlDatabase() {
   try {
+    // 0. Ensure nfc_plates table exists in Cloud SQL / PostgreSQL
+    try {
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS nfc_plates (
+          id text PRIMARY KEY,
+          status text DEFAULT 'inactive' NOT NULL,
+          merchant_id text,
+          redirect_url text,
+          scan_count integer DEFAULT 0 NOT NULL,
+          created_at timestamp DEFAULT now() NOT NULL,
+          updated_at timestamp DEFAULT now() NOT NULL
+        );
+      `);
+    } catch (e) {
+      console.warn('Notice ensuring nfc_plates table:', e);
+    }
+
     // 1. Check businesses
     const existingBusinesses = await db.select().from(businesses);
     if (existingBusinesses.length === 0) {
