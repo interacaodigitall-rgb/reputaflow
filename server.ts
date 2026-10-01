@@ -35,6 +35,7 @@ import { seedCloudSqlDatabase } from './src/db/seedSql.ts';
 import { db } from './src/db/index.ts';
 import { platformSettings } from './src/db/schema.ts';
 import { eq } from 'drizzle-orm';
+import { supabase } from './src/lib/supabase.ts';
 
 const app = express();
 const PORT = 3000;
@@ -542,12 +543,33 @@ app.get('/qr/:id', async (req, res, next) => {
   }
 
   try {
+    // 1. Try PostgreSQL Cloud SQL
+    let redirectUrl: string | null = null;
     const plate = await getNfcPlateByIdSql(plateId);
-    if (plate && plate.status === 'active' && plate.redirect_url) {
-      // Async scan increment
+    if (plate && String(plate.status).toLowerCase() === 'active' && plate.redirect_url) {
+      redirectUrl = plate.redirect_url;
       incrementNfcScanSql(plateId).catch(() => {});
+    }
 
-      let target = plate.redirect_url.trim();
+    // 2. Fallback to Supabase
+    if (!redirectUrl) {
+      try {
+        const { data } = await supabase
+          .from('nfc_plates')
+          .select('*')
+          .eq('id', plateId)
+          .maybeSingle();
+        if (data && String(data.status).toLowerCase() === 'active' && (data.redirect_url || data.redirectUrl)) {
+          redirectUrl = data.redirect_url || data.redirectUrl;
+          try {
+            await supabase.rpc('increment_nfc_scan', { plate_id: plateId });
+          } catch {}
+        }
+      } catch (err) {}
+    }
+
+    if (redirectUrl) {
+      let target = redirectUrl.trim();
       if (target.startsWith('/')) {
         const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
         const host = req.get('host');
@@ -556,7 +578,7 @@ app.get('/qr/:id', async (req, res, next) => {
         target = 'https://' + target;
       }
 
-      console.log(`[QR 302 Redirect] Plate #${plateId} -> ${target}`);
+      console.log(`[HTTP 302 Server Redirect] Plate #${plateId} -> ${target}`);
       return res.redirect(302, target);
     }
   } catch (err) {

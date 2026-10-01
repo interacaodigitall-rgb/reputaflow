@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import { extractNfcPlateId } from '../../lib/urlHelper';
 import { incrementNfcScan } from '../../lib/nfcService';
-import { Loader2, AlertCircle, ArrowRight, ShieldCheck } from 'lucide-react';
+import { Loader2, AlertCircle, ArrowRight, ShieldCheck, ExternalLink } from 'lucide-react';
 import { BrandLogo } from '../common/BrandLogo';
 
 interface NfcRedirectPageProps {
@@ -12,6 +12,8 @@ interface NfcRedirectPageProps {
 export const NfcRedirectPage: React.FC<NfcRedirectPageProps> = ({ plateId: propPlateId }) => {
   const [loading, setLoading] = useState(true);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [targetUrl, setTargetUrl] = useState<string | null>(null);
+  const [countdown, setCountdown] = useState(3);
   const redirectedRef = useRef(false);
 
   useEffect(() => {
@@ -29,7 +31,6 @@ export const NfcRedirectPage: React.FC<NfcRedirectPageProps> = ({ plateId: propP
       }
 
       try {
-        // Parallel queries to Server REST API, Supabase and local cache
         let plateData: any = null;
 
         // Query 1: Backend Server API (PostgreSQL)
@@ -69,7 +70,7 @@ export const NfcRedirectPage: React.FC<NfcRedirectPageProps> = ({ plateId: propP
           } catch {}
         }
 
-        // 3. Evaluate Plate Status & Redirect URL
+        // 3. Evaluate Plate Status & Target Redirect URL
         const redirectUrl = plateData?.redirect_url || plateData?.redirectUrl;
         const status = String(plateData?.status || '').toLowerCase();
 
@@ -80,19 +81,51 @@ export const NfcRedirectPage: React.FC<NfcRedirectPageProps> = ({ plateId: propP
           incrementNfcScan(plateData.id, Number(plateData.scan_count || plateData.scanCount || 0)).catch(() => {});
 
           // Build full absolute target URL
-          let target = String(redirectUrl).trim();
-          if (target.startsWith('/')) {
-            target = window.location.origin + target;
-          } else if (!/^https?:\/\//i.test(target)) {
-            target = 'https://' + target;
+          let fullTarget = String(redirectUrl).trim();
+          if (fullTarget.startsWith('/')) {
+            fullTarget = window.location.origin + fullTarget;
+          } else if (!/^https?:\/\//i.test(fullTarget)) {
+            fullTarget = 'https://' + fullTarget;
           }
 
-          // Force immediate browser redirect
-          try {
-            window.location.replace(target);
-          } catch {
-            window.location.href = target;
+          setTargetUrl(fullTarget);
+
+          // ----------------------------------------------------
+          // ANDROID / WEBVIEW BULLETPROOF REDIRECTION STRATEGY
+          // ----------------------------------------------------
+
+          // 1. Injeta HTML <meta http-equiv="refresh"> no <head> (Bypass restrições JS em WebViews Android)
+          if (typeof document !== 'undefined') {
+            try {
+              let metaRefresh = document.querySelector('meta[http-equiv="refresh"]') as HTMLMetaElement;
+              if (!metaRefresh) {
+                metaRefresh = document.createElement('meta');
+                metaRefresh.httpEquiv = 'refresh';
+                document.head.appendChild(metaRefresh);
+              }
+              metaRefresh.content = `0; url=${fullTarget}`;
+            } catch (e) {
+              console.warn('Meta refresh injection notice:', e);
+            }
           }
+
+          // 2. Dispara clique simulado em link nativo
+          try {
+            const link = document.createElement('a');
+            link.href = fullTarget;
+            link.rel = 'noopener noreferrer';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+          } catch {}
+
+          // 3. Fallback padrão JavaScript
+          try {
+            window.location.replace(fullTarget);
+          } catch {
+            window.location.href = fullTarget;
+          }
+
           return;
         }
 
@@ -104,7 +137,6 @@ export const NfcRedirectPage: React.FC<NfcRedirectPageProps> = ({ plateId: propP
             : 'Esta placa NFC não foi encontrada no sistema.'
         );
 
-        // Auto redirect to home after 4 seconds
         setTimeout(() => {
           if (!isCancelled) {
             window.location.replace('/');
@@ -129,30 +161,55 @@ export const NfcRedirectPage: React.FC<NfcRedirectPageProps> = ({ plateId: propP
     };
   }, [propPlateId]);
 
-  // Loading State (Visual Feedback with Spinner)
-  if (loading) {
+  // Countdown effect when target is found (for manual fallback button)
+  useEffect(() => {
+    if (!targetUrl) return;
+    const interval = setInterval(() => {
+      setCountdown((prev) => (prev > 1 ? prev - 1 : 1));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [targetUrl]);
+
+  // Redirection in Progress / Loading State (Visual Feedback & Android Fallback CTA)
+  if (loading || targetUrl) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center select-none font-sans">
-        <div className="max-w-sm w-full bg-white border border-slate-200 p-8 rounded-3xl shadow-xl space-y-5">
+        <div className="max-w-sm w-full bg-white border border-slate-200 p-8 rounded-3xl shadow-xl space-y-6">
           <div className="flex justify-center">
             <BrandLogo size="md" />
           </div>
 
-          <div className="py-4 flex flex-col items-center justify-center space-y-3">
-            <Loader2 className="w-9 h-9 text-indigo-600 animate-spin" />
+          <div className="py-2 flex flex-col items-center justify-center space-y-3">
+            <Loader2 className="w-10 h-10 text-indigo-600 animate-spin" />
             <div className="space-y-1">
-              <h2 className="text-sm font-bold text-slate-900">
-                A carregar página de avaliação...
+              <h2 className="text-base font-extrabold text-slate-900">
+                A redirecionar...
               </h2>
-              <p className="text-xs text-slate-400">
-                A validar placa e a redirecionar
+              <p className="text-xs text-slate-500">
+                A carregar a página de avaliação da experiência
               </p>
             </div>
           </div>
 
-          <div className="pt-2 border-t border-slate-100 flex items-center justify-center gap-1 text-[11px] text-slate-400 font-medium">
+          {/* Android Fallback Direct Button if WebView delays JS execution */}
+          {targetUrl && (
+            <div className="pt-2 space-y-2">
+              <a
+                href={targetUrl}
+                className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition flex items-center justify-center gap-2 shadow-md shadow-indigo-900/20"
+              >
+                <span>Abrir Avaliação Agora</span>
+                <ExternalLink className="w-4 h-4" />
+              </a>
+              <p className="text-[11px] text-slate-400">
+                Se não for redirecionado em {countdown}s, clique no botão acima.
+              </p>
+            </div>
+          )}
+
+          <div className="pt-3 border-t border-slate-100 flex items-center justify-center gap-1.5 text-[11px] text-slate-400 font-medium">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-            <span>ReputaFlow • Redirecionamento Seguro</span>
+            <span>ReputaFlow • Redirecionamento Automático</span>
           </div>
         </div>
       </div>
