@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Radio,
   Plus,
@@ -13,13 +13,8 @@ import {
   Unlink,
   QrCode,
   RefreshCw,
-  Sliders,
-  Store,
   Layers,
-  Sparkles,
-  X,
-  Smartphone,
-  Eye
+  X
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Business } from '../../types';
@@ -40,6 +35,11 @@ interface NfcPlatesManagementProps {
 }
 
 export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ businesses }) => {
+  const businessesRef = useRef<Business[]>(businesses);
+  useEffect(() => {
+    businessesRef.current = businesses;
+  }, [businesses]);
+
   const [plates, setPlates] = useState<NfcPlate[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -73,16 +73,21 @@ export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ busine
     setTimeout(() => setToastMessage(null), 4000);
   };
 
-  // Load and Subscribe to NFC Plates
+  // Load and Subscribe to NFC Plates once on mount
   useEffect(() => {
-    setLoading(true);
-    const unsubscribe = subscribeNfcPlates(businesses, (loadedPlates) => {
-      setPlates(loadedPlates);
-      setLoading(false);
+    let isMounted = true;
+    const unsubscribe = subscribeNfcPlates(businessesRef.current, (loadedPlates) => {
+      if (isMounted) {
+        setPlates(loadedPlates);
+        setLoading(false);
+      }
     });
 
-    return () => unsubscribe();
-  }, [businesses]);
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
+  }, []);
 
   // Statistics
   const stats = useMemo(() => {
@@ -143,8 +148,7 @@ export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ busine
       if (res.success) {
         showToast(`Lote com ${res.createdCount} placas gerado com sucesso!`);
         setShowBatchModal(false);
-        // Refresh local list
-        const updated = await getNfcPlates(businesses);
+        const updated = await getNfcPlates(businessesRef.current);
         setPlates(updated);
       } else {
         showToast(res.error || 'Erro ao gerar lote de placas.', 'error');
@@ -202,7 +206,7 @@ export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ busine
       if (res.success) {
         showToast(`Placa #${plateToLink.id} vinculada e ativada com sucesso!`);
         setPlateToLink(null);
-        const updated = await getNfcPlates(businesses);
+        const updated = await getNfcPlates(businessesRef.current);
         setPlates(updated);
       } else {
         showToast(res.error || 'Erro ao vincular placa.', 'error');
@@ -224,7 +228,7 @@ export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ busine
       const res = await unlinkNfcPlate(plate.id);
       if (res.success) {
         showToast(`Placa #${plate.id} desvinculada.`);
-        const updated = await getNfcPlates(businesses);
+        const updated = await getNfcPlates(businessesRef.current);
         setPlates(updated);
       } else {
         showToast(res.error || 'Erro ao desvincular.', 'error');
@@ -243,7 +247,7 @@ export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ busine
       if (res.success) {
         showToast(`Placa #${plateToDelete.id} excluída com sucesso.`);
         setPlateToDelete(null);
-        const updated = await getNfcPlates(businesses);
+        const updated = await getNfcPlates(businessesRef.current);
         setPlates(updated);
       } else {
         showToast(res.error || 'Erro ao excluir placa.', 'error');
@@ -288,7 +292,7 @@ export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ busine
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-full text-xs font-bold">
-              <Radio className="w-3.5 h-3.5 animate-pulse" />
+              <Radio className="w-3.5 h-3.5" />
               <span>Hardware & QR Dinâmico</span>
             </div>
             <h1 className="text-2xl font-extrabold tracking-tight">
@@ -302,17 +306,14 @@ export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ busine
           <div className="flex items-center gap-2.5 shrink-0">
             <button
               onClick={async () => {
-                setLoading(true);
-                const updated = await getNfcPlates(businesses);
+                const updated = await getNfcPlates(businessesRef.current);
                 setPlates(updated);
-                setLoading(false);
-                showToast('Lista de placas atualizada!');
+                showToast('Lista de placas sincronizada!');
               }}
-              disabled={loading}
               className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-bold transition flex items-center gap-2 border border-slate-700 cursor-pointer"
               title="Recarregar dados"
             >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+              <RefreshCw className="w-4 h-4" />
             </button>
 
             <button
@@ -419,10 +420,10 @@ export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ busine
         </div>
 
         {/* Table Content */}
-        {loading ? (
+        {loading && plates.length === 0 ? (
           <div className="p-12 text-center space-y-3">
             <RefreshCw className="w-8 h-8 text-indigo-600 animate-spin mx-auto" />
-            <p className="text-xs font-semibold text-slate-500">A carregar placas do Supabase...</p>
+            <p className="text-xs font-semibold text-slate-500">A carregar placas...</p>
           </div>
         ) : filteredPlates.length === 0 ? (
           <div className="p-12 text-center space-y-4 max-w-md mx-auto">
@@ -462,7 +463,6 @@ export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ busine
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filteredPlates.map((plate) => {
-                  const redirectUrl = getNfcRedirectUrl(plate.id);
                   const isCopied = copiedPlateId === plate.id;
 
                   return (
@@ -493,7 +493,7 @@ export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ busine
                       <td className="py-3.5 px-4">
                         {plate.status === 'active' ? (
                           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/80">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
                             Ativa
                           </span>
                         ) : (
@@ -625,7 +625,7 @@ export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ busine
               </div>
               <button
                 onClick={() => setShowBatchModal(false)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -708,17 +708,17 @@ export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ busine
                 <button
                   type="button"
                   onClick={() => setShowBatchModal(false)}
-                  className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition"
+                  className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={isGeneratingBatch}
-                  className="py-2.5 px-5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-md transition flex items-center gap-2 disabled:opacity-50"
+                  className="py-2.5 px-5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-md transition flex items-center gap-2 disabled:opacity-50 cursor-pointer"
                 >
                   {isGeneratingBatch ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-                  <span>{isGeneratingBatch ? 'A gerar...' : 'Criar Lote no Supabase'}</span>
+                  <span>{isGeneratingBatch ? 'A gerar...' : 'Criar Lote'}</span>
                 </button>
               </div>
             </form>
@@ -746,7 +746,7 @@ export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ busine
               </div>
               <button
                 onClick={() => setPlateToLink(null)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -766,7 +766,7 @@ export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ busine
                     value={selectedMerchantId}
                     onChange={(e) => handleMerchantChange(e.target.value)}
                     required
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-semibold"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-semibold cursor-pointer"
                   >
                     <option value="">Selecione um estabelecimento...</option>
                     {businesses.map((biz) => (
@@ -809,14 +809,14 @@ export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ busine
                 <button
                   type="button"
                   onClick={() => setPlateToLink(null)}
-                  className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition"
+                  className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={isLinking || businesses.length === 0}
-                  className="py-2.5 px-5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-md transition flex items-center gap-2 disabled:opacity-50"
+                  className="py-2.5 px-5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-md transition flex items-center gap-2 disabled:opacity-50 cursor-pointer"
                 >
                   {isLinking ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
                   <span>{isLinking ? 'A salvar...' : 'Salvar e Ativar Placa'}</span>
@@ -839,7 +839,7 @@ export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ busine
               </span>
               <button
                 onClick={() => setQrModalPlate(null)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -867,14 +867,14 @@ export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ busine
             <div className="flex items-center gap-2 pt-2">
               <button
                 onClick={() => handleCopyUrl(qrModalPlate)}
-                className="flex-1 py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-sm"
+                className="flex-1 py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
               >
                 <Copy className="w-3.5 h-3.5" />
                 <span>Copiar Link</span>
               </button>
               <button
                 onClick={() => setQrModalPlate(null)}
-                className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition"
+                className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer"
               >
                 Fechar
               </button>
@@ -904,7 +904,7 @@ export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ busine
               <button
                 type="button"
                 onClick={() => setPlateToDelete(null)}
-                className="flex-1 py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition"
+                className="flex-1 py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer"
               >
                 Cancelar
               </button>
@@ -912,7 +912,7 @@ export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ busine
                 type="button"
                 disabled={isDeleting}
                 onClick={handleConfirmDelete}
-                className="flex-1 py-2.5 px-4 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs transition shadow-sm disabled:opacity-50"
+                className="flex-1 py-2.5 px-4 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs transition shadow-sm disabled:opacity-50 cursor-pointer"
               >
                 {isDeleting ? 'A excluir...' : 'Sim, Excluir'}
               </button>

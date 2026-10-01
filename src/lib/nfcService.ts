@@ -367,25 +367,55 @@ export async function incrementNfcScan(id: string, currentCount: number = 0): Pr
   }
 }
 
+function arePlatesEqual(a: NfcPlate[], b: NfcPlate[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (
+      a[i].id !== b[i].id ||
+      a[i].status !== b[i].status ||
+      a[i].merchant_id !== b[i].merchant_id ||
+      a[i].redirect_url !== b[i].redirect_url ||
+      a[i].scan_count !== b[i].scan_count ||
+      a[i].merchant_name !== b[i].merchant_name
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /**
- * Realtime subscription for NFC plates
+ * Realtime subscription for NFC plates with stability check
  */
 export function subscribeNfcPlates(
   businesses: Business[],
   callback: (plates: NfcPlate[]) => void
 ): () => void {
   let isSubscribed = true;
+  let lastEmittedPlates: NfcPlate[] = [];
 
   const fetchAndNotify = async () => {
+    if (!isSubscribed) return;
     const plates = await getNfcPlates(businesses);
-    if (isSubscribed) {
+    if (!isSubscribed) return;
+
+    if (!arePlatesEqual(plates, lastEmittedPlates)) {
+      lastEmittedPlates = plates;
       callback(plates);
     }
   };
 
+  // 1. Initial fast local/cached load
+  const initialLocal = getLocalNfcCache();
+  if (initialLocal.length > 0) {
+    lastEmittedPlates = initialLocal;
+    callback(initialLocal);
+  }
+
+  // 2. Async fetch from Supabase
   fetchAndNotify();
 
-  const channelName = `rt_nfc_plates_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  const channelName = `rt_nfc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   let channel: any = null;
 
   try {
@@ -396,10 +426,11 @@ export function subscribeNfcPlates(
       })
       .subscribe();
   } catch (err) {
-    console.warn('[Supabase Realtime NFC Channel init error]:', err);
+    console.warn('[Supabase Realtime NFC Channel notice]:', err);
   }
 
-  const interval = setInterval(fetchAndNotify, 3000);
+  // Gentle 10-second sync (not 3-second rapid polling)
+  const interval = setInterval(fetchAndNotify, 10000);
 
   const handleCustomSync = () => {
     fetchAndNotify();
