@@ -1,150 +1,179 @@
-import React, { useEffect, useState } from 'react';
-import { getNfcPlateById, incrementNfcScan } from '../../lib/nfcService';
-import { NfcPlate } from '../../types/nfc';
-import { Radio, Loader2, ArrowRight, AlertCircle, Store } from 'lucide-react';
+import React, { useEffect, useState, useRef } from 'react';
+import { supabase } from '../../lib/supabase';
+import { extractNfcPlateId } from '../../lib/urlHelper';
+import { incrementNfcScan } from '../../lib/nfcService';
+import { Loader2, AlertCircle, ArrowRight, ShieldCheck } from 'lucide-react';
 import { BrandLogo } from '../common/BrandLogo';
 
 interface NfcRedirectPageProps {
-  plateId: string;
+  plateId?: string;
 }
 
-export const NfcRedirectPage: React.FC<NfcRedirectPageProps> = ({ plateId }) => {
+export const NfcRedirectPage: React.FC<NfcRedirectPageProps> = ({ plateId: propPlateId }) => {
   const [loading, setLoading] = useState(true);
-  const [errorStatus, setErrorStatus] = useState<'not_found' | 'inactive' | null>(null);
-  const [plate, setPlate] = useState<NfcPlate | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const redirectedRef = useRef(false);
 
   useEffect(() => {
     let isCancelled = false;
 
-    const performRedirect = async () => {
-      const cleanId = (plateId || '').trim();
-      if (!cleanId) {
-        window.location.replace('/');
+    const handleRedirect = async () => {
+      // 1. Extract plate ID
+      const targetId = (propPlateId || extractNfcPlateId() || '').trim();
+
+      if (!targetId) {
+        if (!isCancelled) {
+          window.location.replace('/');
+        }
         return;
       }
 
       try {
-        const found = await getNfcPlateById(cleanId);
-        if (isCancelled) return;
+        // 2. Fetch from Supabase directly
+        const { data, error } = await supabase
+          .from('nfc_plates')
+          .select('*')
+          .eq('id', targetId)
+          .maybeSingle();
 
-        if (!found) {
-          setErrorStatus('not_found');
-          setLoading(false);
-          // Auto fallback to home after 3s
-          setTimeout(() => {
-            if (!isCancelled) {
-              window.location.replace('/');
+        if (isCancelled || redirectedRef.current) return;
+
+        let plateData = data;
+
+        // Fallback to local cache if offline / temporary network issue
+        if (!plateData) {
+          try {
+            const raw = localStorage.getItem('reputaflow_nfc_plates_cache');
+            if (raw) {
+              const list = JSON.parse(raw);
+              if (Array.isArray(list)) {
+                plateData = list.find((p: any) => String(p.id).trim() === targetId);
+              }
             }
-          }, 3500);
+          } catch {}
+        }
+
+        // 3. Evaluate Plate Status & Redirect URL
+        if (plateData && plateData.status === 'active' && plateData.redirect_url) {
+          redirectedRef.current = true;
+
+          // Asynchronously fire scan counter increment
+          incrementNfcScan(plateData.id, Number(plateData.scan_count || 0)).catch(() => {});
+
+          // Build full absolute target URL
+          let target = String(plateData.redirect_url).trim();
+          if (target.startsWith('/')) {
+            target = window.location.origin + target;
+          } else if (!/^https?:\/\//i.test(target)) {
+            target = 'https://' + target;
+          }
+
+          // Force immediate browser redirect
+          try {
+            window.location.replace(target);
+          } catch {
+            window.location.href = target;
+          }
           return;
         }
 
-        setPlate(found);
+        // 4. Inactive or Not Found State
+        setLoading(false);
+        setStatusMessage(
+          plateData
+            ? 'Esta placa ainda não está ativada. Fale com a gerência.'
+            : 'Esta placa NFC não foi encontrada no sistema.'
+        );
 
-        if (found.status === 'active' && found.redirect_url) {
-          // Increment scan counter
-          try {
-            await incrementNfcScan(found.id, found.scan_count);
-          } catch (err) {
-            console.warn('Scan increment notice:', err);
+        // Auto redirect to home after 4 seconds
+        setTimeout(() => {
+          if (!isCancelled) {
+            window.location.replace('/');
           }
-
-          let targetUrl = found.redirect_url.trim();
-          if (!/^https?:\/\//i.test(targetUrl) && !targetUrl.startsWith('/')) {
-            targetUrl = 'https://' + targetUrl;
-          }
-
-          // Instant 302-equivalent replace
-          window.location.replace(targetUrl);
-        } else {
-          setErrorStatus('inactive');
-          setLoading(false);
-          setTimeout(() => {
-            if (!isCancelled) {
-              window.location.replace('/');
-            }
-          }, 3500);
-        }
+        }, 4000);
       } catch (err) {
-        console.error('Error during NFC redirect:', err);
+        console.error('NFC redirect processing error:', err);
         if (!isCancelled) {
-          window.location.replace('/');
+          setLoading(false);
+          setStatusMessage('Esta placa ainda não está ativada. Fale com a gerência.');
+          setTimeout(() => {
+            window.location.replace('/');
+          }, 4000);
         }
       }
     };
 
-    performRedirect();
+    handleRedirect();
 
     return () => {
       isCancelled = true;
     };
-  }, [plateId]);
+  }, [propPlateId]);
 
+  // Loading State (Visual Feedback with Spinner)
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 text-center select-none font-sans">
-        <div className="max-w-sm w-full bg-slate-900/90 border border-slate-800 p-8 rounded-3xl shadow-2xl space-y-6 animate-pulse">
-          <div className="w-16 h-16 bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
-            <Radio className="w-8 h-8 animate-bounce" />
-          </div>
-
-          <div className="space-y-2">
-            <h1 className="text-lg font-bold text-white tracking-tight">
-              A conectar à Placa NFC #{plateId}
-            </h1>
-            <p className="text-xs text-slate-400">
-              A validar leitura e a redirecionar para a página de avaliação...
-            </p>
-          </div>
-
-          <div className="flex items-center justify-center gap-2 text-indigo-400 text-xs font-semibold">
-            <Loader2 className="w-4 h-4 animate-spin" />
-            <span>A carregar estabelecimento...</span>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (errorStatus === 'inactive' || errorStatus === 'not_found') {
-    return (
-      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 text-center select-none font-sans">
-        <div className="max-w-sm w-full bg-slate-900 border border-slate-800 p-8 rounded-3xl shadow-2xl space-y-6">
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center select-none font-sans">
+        <div className="max-w-sm w-full bg-white border border-slate-200 p-8 rounded-3xl shadow-xl space-y-5">
           <div className="flex justify-center">
-            <BrandLogo size="md" variant="dark" />
+            <BrandLogo size="md" />
           </div>
 
-          <div className="w-14 h-14 bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-2xl flex items-center justify-center mx-auto">
-            <AlertCircle className="w-7 h-7" />
+          <div className="py-4 flex flex-col items-center justify-center space-y-3">
+            <Loader2 className="w-9 h-9 text-indigo-600 animate-spin" />
+            <div className="space-y-1">
+              <h2 className="text-sm font-bold text-slate-900">
+                A carregar página de avaliação...
+              </h2>
+              <p className="text-xs text-slate-400">
+                A validar placa e a redirecionar
+              </p>
+            </div>
           </div>
 
-          <div className="space-y-2">
-            <h2 className="text-base font-bold text-white">
-              {errorStatus === 'inactive' ? 'Placa NFC Inativa' : 'Placa NFC Não Encontrada'}
-            </h2>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              {errorStatus === 'inactive'
-                ? `A placa serial #${plateId} ainda não foi vinculada a um lojista ativo no painel.`
-                : `O código de placa #${plateId} não está registado no sistema.`}
-            </p>
-          </div>
-
-          <div className="pt-2">
-            <a
-              href="/"
-              className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-indigo-900/30"
-            >
-              <span>Ir para a Página Inicial</span>
-              <ArrowRight className="w-4 h-4" />
-            </a>
-            <p className="text-[10px] text-slate-500 mt-3">
-              Redirecionamento automático em 3 segundos...
-            </p>
+          <div className="pt-2 border-t border-slate-100 flex items-center justify-center gap-1 text-[11px] text-slate-400 font-medium">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+            <span>ReputaFlow • Redirecionamento Seguro</span>
           </div>
         </div>
       </div>
     );
   }
 
-  return null;
+  // Inactive / Error State
+  return (
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center select-none font-sans">
+      <div className="max-w-sm w-full bg-white border border-slate-200 p-8 rounded-3xl shadow-xl space-y-6">
+        <div className="flex justify-center">
+          <BrandLogo size="md" />
+        </div>
+
+        <div className="w-14 h-14 bg-amber-50 text-amber-600 border border-amber-200/80 rounded-2xl flex items-center justify-center mx-auto">
+          <AlertCircle className="w-7 h-7" />
+        </div>
+
+        <div className="space-y-2">
+          <h2 className="text-base font-extrabold text-slate-900">
+            Placa não disponível
+          </h2>
+          <p className="text-xs text-slate-600 leading-relaxed font-medium">
+            {statusMessage || 'Esta placa ainda não está ativada. Fale com a gerência.'}
+          </p>
+        </div>
+
+        <div className="pt-2 space-y-2">
+          <a
+            href="/"
+            className="w-full py-3 px-4 bg-slate-900 hover:bg-black text-white text-xs font-bold rounded-xl transition flex items-center justify-center gap-2 shadow-sm"
+          >
+            <span>Ir para a Página Inicial</span>
+            <ArrowRight className="w-4 h-4" />
+          </a>
+          <p className="text-[10px] text-slate-400">
+            A redirecionar automaticamente em 4 segundos...
+          </p>
+        </div>
+      </div>
+    </div>
+  );
 };

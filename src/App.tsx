@@ -49,9 +49,9 @@ function MainAppContent() {
 
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [showQrModal, setShowQrModal] = useState(false);
-  const [isCustomerViewMode, setIsCustomerViewMode] = useState(false);
-  const [reviewSlugFromUrl, setReviewSlugFromUrl] = useState<string | null>(null);
-  const [nfcPlateIdFromUrl, setNfcPlateIdFromUrl] = useState<string | null>(null);
+  const [nfcPlateIdFromUrl, setNfcPlateIdFromUrl] = useState<string | null>(() => extractNfcPlateId());
+  const [reviewSlugFromUrl, setReviewSlugFromUrl] = useState<string | null>(() => extractReviewSlug());
+  const [isCustomerViewMode, setIsCustomerViewMode] = useState<boolean>(() => Boolean(extractReviewSlug()));
 
   // Automatically show Super Admin tab when Super Admin has no businesses registered yet
   useEffect(() => {
