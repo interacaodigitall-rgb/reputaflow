@@ -370,6 +370,47 @@ function MainAppContent() {
 }
 
 export default function App() {
+  const [nfcId, setNfcId] = useState<string | null>(() => extractNfcPlateId());
+  const [reviewSlug, setReviewSlug] = useState<string | null>(() => extractReviewSlug());
+
+  useEffect(() => {
+    const handleUrl = () => {
+      const nid = extractNfcPlateId();
+      if (nid) {
+        setNfcId(nid);
+        return;
+      }
+      const rslug = extractReviewSlug();
+      if (rslug) {
+        setReviewSlug(rslug);
+      }
+    };
+
+    window.addEventListener('popstate', handleUrl);
+    window.addEventListener('hashchange', handleUrl);
+
+    return () => {
+      window.removeEventListener('popstate', handleUrl);
+      window.removeEventListener('hashchange', handleUrl);
+    };
+  }, []);
+
+  // 100% Public & Anonymous NFC QR Redirect (No Auth Required)
+  if (nfcId) {
+    return <NfcRedirectPage plateId={nfcId} />;
+  }
+
+  // 100% Public & Anonymous Customer Review Page (No Auth Required)
+  if (reviewSlug) {
+    return (
+      <PublicReviewPage
+        slug={reviewSlug}
+        businessOverride={null}
+        onBackToApp={undefined}
+      />
+    );
+  }
+
   return (
     <AuthProvider>
       <MainAppContent />
