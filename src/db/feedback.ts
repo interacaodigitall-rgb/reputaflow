@@ -1,8 +1,42 @@
 import { db } from './index.ts';
 import { feedback } from './schema.ts';
 import { eq, desc } from 'drizzle-orm';
+import { INITIAL_FEEDBACK } from '../lib/initialData.ts';
+import fs from 'fs';
+import path from 'path';
 
-const inMemoryFeedback: any[] = [];
+const DB_FILE = path.join(process.cwd(), 'data', 'db.json');
+
+function getInitialFeedback() {
+  const map = new Map<string, any>();
+  INITIAL_FEEDBACK.forEach((f) => {
+    map.set(f.id, {
+      ...f,
+      business_id: f.businessId,
+      createdAt: new Date(f.createdAt)
+    });
+  });
+
+  try {
+    if (fs.existsSync(DB_FILE)) {
+      const raw = fs.readFileSync(DB_FILE, 'utf-8');
+      const json = JSON.parse(raw);
+      if (json && Array.isArray(json.feedback)) {
+        json.feedback.forEach((f: any) => {
+          map.set(f.id, {
+            ...f,
+            business_id: f.businessId || f.business_id,
+            createdAt: new Date(f.createdAt || f.created_at || Date.now())
+          });
+        });
+      }
+    }
+  } catch (e) {}
+
+  return Array.from(map.values());
+}
+
+const inMemoryFeedback: any[] = getInitialFeedback();
 
 export async function getFeedbackSql(businessId?: string) {
   try {

@@ -19,12 +19,55 @@
       "updatedAt": "2026-09-21T13:01:24.346Z"
     }
   ],
+  "customers": [
+    {
+      "id": "cust_teste",
+      "businessId": "biz_mrnavalha",
+      "name": "Cliente Teste",
+      "phone": "+351 919999999",
+      "email": "clienteteste@gmail.com",
+      "reviewsCount": 1,
+      "lastReviewAt": "2026-09-21T10:40:42.283Z",
+      "avgRating": 5,
+      "status": "active",
+      "createdAt": "2026-09-21T10:40:42.283Z",
+      "updatedAt": "2026-09-21T10:40:42.283Z"
+    },
+    {
+      "id": "cust_1",
+      "businessId": "biz_mrnavalha",
+      "name": "Tiago Santos",
+      "phone": "+351 923 456 789",
+      "email": "tiago@email.pt",
+      "reviewsCount": 1,
+      "lastReviewAt": "2026-09-20T10:40:37.507Z",
+      "avgRating": 5,
+      "status": "active",
+      "createdAt": "2026-09-20T10:40:37.507Z",
+      "updatedAt": "2026-09-20T10:40:37.507Z"
+    },
+    {
+      "id": "cust_2",
+      "businessId": "biz_mrnavalha",
+      "name": "Diogo Ribeiro",
+      "phone": "+351 934 567 890",
+      "email": "diogo@email.pt",
+      "reviewsCount": 1,
+      "lastReviewAt": "2026-09-18T10:40:37.507Z",
+      "avgRating": 3,
+      "status": "in_recovery",
+      "internalNotes": "Cliente teve tempo de espera prolongado na barba. Em contacto para resolução.",
+      "createdAt": "2026-09-18T10:40:37.507Z",
+      "updatedAt": "2026-09-21T10:40:37.507Z"
+    }
+  ],
   "reviews": [
     {
       "id": "rev_mub46rl7_as6n",
       "businessId": "biz_mrnavalha",
       "customerName": "Cliente Teste",
       "customerPhone": "+351 919999999",
+      "customerEmail": "clienteteste@gmail.com",
       "rating": 5,
       "channel": "qr",
       "createdAt": "2026-09-21T10:40:42.283Z"
@@ -76,10 +119,142 @@
       "customerEmail": "diogo@email.pt",
       "rating": 3,
       "complaint": "O tempo de espera para a barba foi um pouco acima do agendado.",
-      "status": "pending",
+      "status": "novo",
       "priority": "high",
       "createdAt": "2026-09-18T10:40:37.507Z",
       "updatedAt": "2026-09-21T10:40:37.507Z"
+    }
+  ],
+  "nfcPlates": [
+    {
+      "id": "001",
+      "status": "active",
+      "merchant_id": "biz_mrnavalha",
+      "merchantId": "biz_mrnavalha",
+      "redirect_url": "/?b=mrnavalha",
+      "redirectUrl": "/?b=mrnavalha",
+      "scan_count": 14,
+      "scanCount": 14,
+      "merchant_name": "Mr. Navalha",
+      "merchant_slug": "mrnavalha",
+      "createdAt": "2026-09-21T10:00:00.000Z",
+      "updatedAt": "2026-09-21T12:00:00.000Z"
+    },
+    {
+      "id": "002",
+      "status": "active",
+      "merchant_id": "biz_mrnavalha",
+      "merchantId": "biz_mrnavalha",
+      "redirect_url": "/?b=mrnavalha",
+      "redirectUrl": "/?b=mrnavalha",
+      "scan_count": 3,
+      "scanCount": 3,
+      "merchant_name": "Mr. Navalha",
+      "merchant_slug": "mrnavalha",
+      "createdAt": "2026-09-21T10:00:00.000Z",
+      "updatedAt": "2026-09-21T12:00:00.000Z"
+    },
+    {
+      "id": "003",
+      "status": "active",
+      "merchant_id": "biz_mrnavalha",
+      "merchantId": "biz_mrnavalha",
+      "redirect_url": "/?b=mrnavalha",
+      "redirectUrl": "/?b=mrnavalha",
+      "scan_count": 0,
+      "scanCount": 0,
+      "merchant_name": "Mr. Navalha",
+      "merchant_slug": "mrnavalha",
+      "createdAt": "2026-09-21T10:00:00.000Z",
+      "updatedAt": "2026-09-21T12:00:00.000Z"
+    },
+    {
+      "id": "004",
+      "status": "active",
+      "merchant_id": "biz_mrnavalha",
+      "merchantId": "biz_mrnavalha",
+      "redirect_url": "/?b=mrnavalha",
+      "redirectUrl": "/?b=mrnavalha",
+      "scan_count": 0,
+      "scanCount": 0,
+      "merchant_name": "Mr. Navalha",
+      "merchant_slug": "mrnavalha",
+      "createdAt": "2026-09-21T10:00:00.000Z",
+      "updatedAt": "2026-09-21T12:00:00.000Z"
+    },
+    {
+      "id": "005",
+      "status": "active",
+      "merchant_id": "biz_mrnavalha",
+      "merchantId": "biz_mrnavalha",
+      "redirect_url": "/?b=mrnavalha",
+      "redirectUrl": "/?b=mrnavalha",
+      "scan_count": 0,
+      "scanCount": 0,
+      "merchant_name": "Mr. Navalha",
+      "merchant_slug": "mrnavalha",
+      "createdAt": "2026-09-21T10:00:00.000Z",
+      "updatedAt": "2026-09-21T12:00:00.000Z"
+    },
+    {
+      "id": "006",
+      "status": "inactive",
+      "merchant_id": null,
+      "merchantId": null,
+      "redirect_url": null,
+      "redirectUrl": null,
+      "scan_count": 0,
+      "scanCount": 0,
+      "createdAt": "2026-09-21T10:00:00.000Z",
+      "updatedAt": "2026-09-21T10:00:00.000Z"
+    },
+    {
+      "id": "007",
+      "status": "inactive",
+      "merchant_id": null,
+      "merchantId": null,
+      "redirect_url": null,
+      "redirectUrl": null,
+      "scan_count": 0,
+      "scanCount": 0,
+      "createdAt": "2026-09-21T10:00:00.000Z",
+      "updatedAt": "2026-09-21T10:00:00.000Z"
+    },
+    {
+      "id": "008",
+      "status": "inactive",
+      "merchant_id": null,
+      "merchantId": null,
+      "redirect_url": null,
+      "redirectUrl": null,
+      "scan_count": 0,
+      "scanCount": 0,
+      "createdAt": "2026-09-21T10:00:00.000Z",
+      "updatedAt": "2026-09-21T10:00:00.000Z"
+    },
+    {
+      "id": "009",
+      "status": "inactive",
+      "merchant_id": null,
+      "merchantId": null,
+      "redirect_url": null,
+      "redirectUrl": null,
+      "scan_count": 0,
+      "scanCount": 0,
+      "createdAt": "2026-09-21T10:00:00.000Z",
+      "updatedAt": "2026-09-21T10:00:00.000Z"
+    },
+    {
+      "id": "010",
+      "status": "inactive",
+      "merchant_id": null,
+      "merchantId": null,
+      "redirect_url": null,
+      "redirectUrl": null,
+      "scan_count": 0,
+      "scanCount": 0,
+      "createdAt": "2026-09-21T10:00:00.000Z",
+      "updatedAt": "2026-09-21T10:00:00.000Z"
     }
   ],
   "interactions": []

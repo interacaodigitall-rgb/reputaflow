@@ -1,26 +1,68 @@
 import { db } from './index.ts';
 import { reviews } from './schema.ts';
 import { eq, desc } from 'drizzle-orm';
+import { INITIAL_REVIEWS } from '../lib/initialData.ts';
+import fs from 'fs';
+import path from 'path';
 
-const inMemoryReviews: any[] = [];
+const DB_FILE = path.join(process.cwd(), 'data', 'db.json');
+
+function getInitialReviews() {
+  const map = new Map<string, any>();
+  INITIAL_REVIEWS.forEach((r) => {
+    map.set(r.id, {
+      ...r,
+      business_id: r.businessId,
+      createdAt: new Date(r.createdAt)
+    });
+  });
+
+  try {
+    if (fs.existsSync(DB_FILE)) {
+      const raw = fs.readFileSync(DB_FILE, 'utf-8');
+      const json = JSON.parse(raw);
+      if (json && Array.isArray(json.reviews)) {
+        json.reviews.forEach((r: any) => {
+          map.set(r.id, {
+            ...r,
+            business_id: r.businessId || r.business_id,
+            createdAt: new Date(r.createdAt || r.created_at || Date.now())
+          });
+        });
+      }
+    }
+  } catch (e) {}
+
+  return Array.from(map.values());
+}
+
+const inMemoryReviews: any[] = getInitialReviews();
 
 export async function getReviewsSql(businessId?: string) {
+  let list: any[] = [];
   try {
     if (businessId) {
-      return await db
+      list = await db
         .select()
         .from(reviews)
         .where(eq(reviews.businessId, businessId))
         .orderBy(desc(reviews.createdAt));
+    } else {
+      list = await db.select().from(reviews).orderBy(desc(reviews.createdAt));
     }
-    return await db.select().from(reviews).orderBy(desc(reviews.createdAt));
   } catch (error) {
     console.warn('Database query failed in getReviewsSql, returning in-memory reviews:', error);
-    if (businessId) {
-      return inMemoryReviews.filter((r) => r.businessId === businessId || r.business_id === businessId);
-    }
-    return inMemoryReviews;
   }
+
+  const map = new Map<string, any>();
+  inMemoryReviews.forEach((r) => map.set(r.id, r));
+  list.forEach((r) => map.set(r.id, r));
+
+  const all = Array.from(map.values());
+  if (businessId) {
+    return all.filter((r) => r.businessId === businessId || r.business_id === businessId);
+  }
+  return all;
 }
 
 export async function createReviewSql(data: any) {

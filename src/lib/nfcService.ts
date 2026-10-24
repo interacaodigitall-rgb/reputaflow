@@ -4,16 +4,79 @@ import { Business } from '../types';
 
 const NFC_STORAGE_KEY = 'reputaflow_nfc_plates_cache';
 
+export const INITIAL_NFC_PLATES: NfcPlate[] = [
+  {
+    id: '001',
+    status: 'active',
+    merchant_id: 'biz_mrnavalha',
+    redirect_url: '/?b=mrnavalha',
+    scan_count: 14,
+    merchant_name: 'Mr. Navalha',
+    merchant_slug: 'mrnavalha',
+    created_at: '2026-09-21T10:00:00.000Z',
+    updated_at: '2026-09-21T12:00:00.000Z'
+  },
+  {
+    id: '002',
+    status: 'active',
+    merchant_id: 'biz_mrnavalha',
+    redirect_url: '/?b=mrnavalha',
+    scan_count: 3,
+    merchant_name: 'Mr. Navalha',
+    merchant_slug: 'mrnavalha',
+    created_at: '2026-09-21T10:00:00.000Z',
+    updated_at: '2026-09-21T12:00:00.000Z'
+  },
+  {
+    id: '003',
+    status: 'active',
+    merchant_id: 'biz_mrnavalha',
+    redirect_url: '/?b=mrnavalha',
+    scan_count: 0,
+    merchant_name: 'Mr. Navalha',
+    merchant_slug: 'mrnavalha',
+    created_at: '2026-09-21T10:00:00.000Z',
+    updated_at: '2026-09-21T12:00:00.000Z'
+  },
+  {
+    id: '004',
+    status: 'active',
+    merchant_id: 'biz_mrnavalha',
+    redirect_url: '/?b=mrnavalha',
+    scan_count: 0,
+    merchant_name: 'Mr. Navalha',
+    merchant_slug: 'mrnavalha',
+    created_at: '2026-09-21T10:00:00.000Z',
+    updated_at: '2026-09-21T12:00:00.000Z'
+  },
+  {
+    id: '005',
+    status: 'active',
+    merchant_id: 'biz_mrnavalha',
+    redirect_url: '/?b=mrnavalha',
+    scan_count: 0,
+    merchant_name: 'Mr. Navalha',
+    merchant_slug: 'mrnavalha',
+    created_at: '2026-09-21T10:00:00.000Z',
+    updated_at: '2026-09-21T12:00:00.000Z'
+  },
+  { id: '006', status: 'inactive', merchant_id: null, redirect_url: null, scan_count: 0, created_at: '2026-09-21T10:00:00.000Z', updated_at: '2026-09-21T10:00:00.000Z' },
+  { id: '007', status: 'inactive', merchant_id: null, redirect_url: null, scan_count: 0, created_at: '2026-09-21T10:00:00.000Z', updated_at: '2026-09-21T10:00:00.000Z' },
+  { id: '008', status: 'inactive', merchant_id: null, redirect_url: null, scan_count: 0, created_at: '2026-09-21T10:00:00.000Z', updated_at: '2026-09-21T10:00:00.000Z' },
+  { id: '009', status: 'inactive', merchant_id: null, redirect_url: null, scan_count: 0, created_at: '2026-09-21T10:00:00.000Z', updated_at: '2026-09-21T10:00:00.000Z' },
+  { id: '010', status: 'inactive', merchant_id: null, redirect_url: null, scan_count: 0, created_at: '2026-09-21T10:00:00.000Z', updated_at: '2026-09-21T10:00:00.000Z' }
+];
+
 function getLocalNfcCache(): NfcPlate[] {
-  if (typeof window === 'undefined') return [];
+  if (typeof window === 'undefined') return [...INITIAL_NFC_PLATES];
   try {
     const raw = localStorage.getItem(NFC_STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
     }
   } catch {}
-  return [];
+  return [...INITIAL_NFC_PLATES];
 }
 
 function saveLocalNfcCache(plates: NfcPlate[]): void {

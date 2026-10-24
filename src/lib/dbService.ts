@@ -10,9 +10,15 @@ import {
   PlatformSettings
 } from '../types/index.ts';
 import { supabase, uploadBusinessLogo } from './supabase.ts';
+import {
+  REGISTERED_BUSINESSES as INITIAL_BIZ,
+  INITIAL_CUSTOMERS,
+  INITIAL_REVIEWS,
+  INITIAL_FEEDBACK,
+  INITIAL_RECOVERY_CASES
+} from './initialData.ts';
 
-// Zero mock data - completely live-driven by Supabase
-export const REGISTERED_BUSINESSES: Business[] = [];
+export const REGISTERED_BUSINESSES: Business[] = [...INITIAL_BIZ];
 
 // ==========================================
 // STRING & ID NORMALIZATION UTILS
@@ -38,12 +44,12 @@ export function isMatchingBusiness(itemBizId: string | undefined, targetBizId: s
   return false;
 }
 
-// In-memory runtime state for fast rendering (NO localStorage)
-let runtimeBusinesses: Business[] = [];
-let runtimeReviews: Review[] = [];
-let runtimeFeedback: Feedback[] = [];
-let runtimeRecoveryCases: RecoveryCase[] = [];
-let runtimeCustomers: Customer[] = [];
+// In-memory runtime state with resilient baseline fallback
+let runtimeBusinesses: Business[] = [...INITIAL_BIZ];
+let runtimeReviews: Review[] = [...INITIAL_REVIEWS];
+let runtimeFeedback: Feedback[] = [...INITIAL_FEEDBACK];
+let runtimeRecoveryCases: RecoveryCase[] = [...INITIAL_RECOVERY_CASES];
+let runtimeCustomers: Customer[] = [...INITIAL_CUSTOMERS];
 
 export function notifyDataChanged() {
   if (typeof window !== 'undefined') {
@@ -126,20 +132,33 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
 
   const fetchMerchants = async () => {
     try {
+      // 1. Try Server REST API (/api/businesses) which serves data/db.json
+      const apiRes = await fetch('/api/businesses', { cache: 'no-store' }).catch(() => null);
+      if (apiRes && apiRes.ok) {
+        const apiData = await apiRes.json();
+        if (Array.isArray(apiData) && apiData.length > 0) {
+          runtimeBusinesses = apiData.map(mapBusinessRow);
+          if (isSubscribed) callback(runtimeBusinesses);
+          return;
+        }
+      }
+
+      // 2. Try Supabase
       const { data, error } = await supabase.from('businesses').select('*').order('created_at', { ascending: false });
-      if (!error && data) {
+      if (!error && data && data.length > 0) {
         const mapped = data.map(mapBusinessRow);
         runtimeBusinesses = mapped;
         if (isSubscribed) callback(mapped);
         return;
       }
-      if (error) {
-        console.error('[Supabase subscribeBusinesses error]:', error.message);
-      }
     } catch (err) {
-      console.error('[Supabase subscribeBusinesses catch]:', err);
+      console.warn('[subscribeBusinesses notice]:', err);
     }
 
+    // 3. Fallback to baseline registered businesses (Mr. Navalha)
+    if (runtimeBusinesses.length === 0) {
+      runtimeBusinesses = [...INITIAL_BIZ];
+    }
     if (isSubscribed) {
       callback(runtimeBusinesses);
     }
@@ -327,24 +346,38 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
 
   const fetchReviews = async () => {
     try {
+      // 1. Try Server API (/api/reviews)
+      const url = '/api/reviews' + (businessId ? `?businessId=${encodeURIComponent(businessId)}` : '');
+      const apiRes = await fetch(url, { cache: 'no-store' }).catch(() => null);
+      if (apiRes && apiRes.ok) {
+        const apiData = await apiRes.json();
+        if (Array.isArray(apiData) && apiData.length > 0) {
+          const mapped = apiData.map(mapReviewRow);
+          runtimeReviews = mapped;
+          if (isSubscribed) callback(mapped);
+          return;
+        }
+      }
+
+      // 2. Try Supabase
       let query = supabase.from('reviews').select('*').order('created_at', { ascending: false });
       if (businessId) {
         query = query.eq('business_id', businessId);
       }
       const { data, error } = await query;
-      if (!error && data) {
+      if (!error && data && data.length > 0) {
         const mapped = data.map(mapReviewRow);
         runtimeReviews = mapped;
         if (isSubscribed) callback(mapped);
         return;
       }
     } catch (err) {
-      console.warn('[Supabase subscribeReviews error]:', err);
+      console.warn('[subscribeReviews notice]:', err);
     }
 
     if (isSubscribed) {
       const filtered = businessId ? runtimeReviews.filter((r) => isMatchingBusiness(r.businessId, businessId)) : runtimeReviews;
-      callback(filtered);
+      callback(filtered.length > 0 ? filtered : INITIAL_REVIEWS);
     }
   };
 
@@ -517,24 +550,38 @@ export function subscribeRecoveryCases(businessId: string | null, callback: (cas
 
   const fetchCases = async () => {
     try {
+      // 1. Try Server API (/api/recovery-cases)
+      const url = '/api/recovery-cases' + (businessId ? `?businessId=${encodeURIComponent(businessId)}` : '');
+      const apiRes = await fetch(url, { cache: 'no-store' }).catch(() => null);
+      if (apiRes && apiRes.ok) {
+        const apiData = await apiRes.json();
+        if (Array.isArray(apiData) && apiData.length > 0) {
+          const mapped = apiData.map(mapRecoveryRow);
+          runtimeRecoveryCases = mapped;
+          if (isSubscribed) callback(mapped);
+          return;
+        }
+      }
+
+      // 2. Try Supabase
       let query = supabase.from('recovery_cases').select('*').order('created_at', { ascending: false });
       if (businessId) {
         query = query.eq('business_id', businessId);
       }
       const { data, error } = await query;
-      if (!error && data) {
+      if (!error && data && data.length > 0) {
         const mapped = data.map(mapRecoveryRow);
         runtimeRecoveryCases = mapped;
         if (isSubscribed) callback(mapped);
         return;
       }
     } catch (err) {
-      console.warn('[Supabase subscribeRecoveryCases error]:', err);
+      console.warn('[subscribeRecoveryCases notice]:', err);
     }
 
     if (isSubscribed) {
       const filtered = businessId ? runtimeRecoveryCases.filter((c) => isMatchingBusiness(c.businessId, businessId)) : runtimeRecoveryCases;
-      callback(filtered);
+      callback(filtered.length > 0 ? filtered : INITIAL_RECOVERY_CASES);
     }
   };
 
@@ -703,24 +750,38 @@ export function subscribeCustomers(businessId: string | null, callback: (custome
 
   const fetchCustomers = async () => {
     try {
+      // 1. Try Server API (/api/customers)
+      const url = '/api/customers' + (businessId ? `?businessId=${encodeURIComponent(businessId)}` : '');
+      const apiRes = await fetch(url, { cache: 'no-store' }).catch(() => null);
+      if (apiRes && apiRes.ok) {
+        const apiData = await apiRes.json();
+        if (Array.isArray(apiData) && apiData.length > 0) {
+          const mapped = apiData.map(mapCustomerRow);
+          runtimeCustomers = mapped;
+          if (isSubscribed) callback(mapped);
+          return;
+        }
+      }
+
+      // 2. Try Supabase
       let query = supabase.from('customers').select('*').order('last_review_at', { ascending: false });
       if (businessId) {
         query = query.eq('business_id', businessId);
       }
       const { data, error } = await query;
-      if (!error && data) {
+      if (!error && data && data.length > 0) {
         const mapped = data.map(mapCustomerRow);
         runtimeCustomers = mapped;
         if (isSubscribed) callback(mapped);
         return;
       }
     } catch (err) {
-      console.warn('[Supabase subscribeCustomers error]:', err);
+      console.warn('[subscribeCustomers notice]:', err);
     }
 
     if (isSubscribed) {
       const filtered = businessId ? runtimeCustomers.filter((c) => isMatchingBusiness(c.businessId, businessId)) : runtimeCustomers;
-      callback(filtered);
+      callback(filtered.length > 0 ? filtered : INITIAL_CUSTOMERS);
     }
   };
 

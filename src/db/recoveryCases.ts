@@ -1,8 +1,44 @@
 import { db } from './index.ts';
 import { recoveryCases } from './schema.ts';
 import { eq, desc } from 'drizzle-orm';
+import { INITIAL_RECOVERY_CASES } from '../lib/initialData.ts';
+import fs from 'fs';
+import path from 'path';
 
-const inMemoryRecoveryCases: any[] = [];
+const DB_FILE = path.join(process.cwd(), 'data', 'db.json');
+
+function getInitialRecoveryCases() {
+  const map = new Map<string, any>();
+  INITIAL_RECOVERY_CASES.forEach((rc) => {
+    map.set(rc.id, {
+      ...rc,
+      business_id: rc.businessId,
+      createdAt: new Date(rc.createdAt),
+      updatedAt: new Date(rc.updatedAt || rc.createdAt)
+    });
+  });
+
+  try {
+    if (fs.existsSync(DB_FILE)) {
+      const raw = fs.readFileSync(DB_FILE, 'utf-8');
+      const json = JSON.parse(raw);
+      if (json && Array.isArray(json.recoveryCases)) {
+        json.recoveryCases.forEach((rc: any) => {
+          map.set(rc.id, {
+            ...rc,
+            business_id: rc.businessId || rc.business_id,
+            createdAt: new Date(rc.createdAt || rc.created_at || Date.now()),
+            updatedAt: new Date(rc.updatedAt || rc.updated_at || Date.now())
+          });
+        });
+      }
+    }
+  } catch (e) {}
+
+  return Array.from(map.values());
+}
+
+const inMemoryRecoveryCases: any[] = getInitialRecoveryCases();
 
 export async function getRecoveryCasesSql(businessId?: string) {
   try {

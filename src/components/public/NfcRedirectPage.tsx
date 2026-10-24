@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import { extractNfcPlateId } from '../../lib/urlHelper';
-import { incrementNfcScan } from '../../lib/nfcService';
+import { incrementNfcScan, INITIAL_NFC_PLATES } from '../../lib/nfcService';
 import { Loader2, AlertCircle, ArrowRight, ShieldCheck, ExternalLink } from 'lucide-react';
 import { BrandLogo } from '../common/BrandLogo';
 
@@ -68,6 +68,11 @@ export const NfcRedirectPage: React.FC<NfcRedirectPageProps> = ({ plateId: propP
               }
             }
           } catch {}
+        }
+
+        // Query 4: Baseline Pre-configured Fallback (e.g. Plate 001 for Mr. Navalha)
+        if (!plateData) {
+          plateData = INITIAL_NFC_PLATES.find((p) => String(p.id).trim() === targetId);
         }
 
         // 3. Evaluate Plate Status & Target Redirect URL
