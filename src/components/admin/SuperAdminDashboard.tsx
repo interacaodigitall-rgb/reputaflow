@@ -311,12 +311,6 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
       return;
     }
 
-    if (!newBizPhone.trim()) {
-      setCreateError('Por favor, informe o telefone/WhatsApp de contacto do estabelecimento.');
-      showToast('Por favor, informe o telefone ou WhatsApp do estabelecimento.', 'error');
-      return;
-    }
-
     setCreating(true);
     setCreateError(null);
 
@@ -1049,11 +1043,10 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-[10px] font-bold text-slate-700 mb-0.5">
-                      E-mail de Login *
+                      E-mail de Login
                     </label>
                     <input
                       type="email"
-                      required
                       placeholder="comercio@reputaflow.com"
                       value={newBizEmail}
                       onChange={(e) => setNewBizEmail(e.target.value)}
@@ -1062,12 +1055,11 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                   </div>
                   <div>
                     <label className="block text-[10px] font-bold text-slate-700 mb-0.5">
-                      Senha Inicial *
+                      Senha Inicial
                     </label>
                     <input
                       type="password"
-                      required
-                      placeholder="Mínimo 6 caracteres"
+                      placeholder="Padrão: reputa123"
                       value={newBizPassword}
                       onChange={(e) => setNewBizPassword(e.target.value)}
                       className="w-full text-xs p-2.5 bg-white rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"

@@ -83,14 +83,44 @@ function normalizeSlug(str: string = ''): string {
 }
 
 export async function getAllBusinessesSql() {
+  // Always sync any records persisted in data/db.json into inMemoryBusinesses
+  try {
+    const jsonDb = readDbJson();
+    if (Array.isArray(jsonDb.businesses)) {
+      for (const item of jsonDb.businesses) {
+        if (!item || !item.id) continue;
+        const idx = inMemoryBusinesses.findIndex(
+          b => b.id === item.id || (item.slug && normalizeSlug(b.slug) === normalizeSlug(item.slug))
+        );
+        const normalizedItem = {
+          ...item,
+          createdAt: item.createdAt ? new Date(item.createdAt) : new Date(),
+          updatedAt: item.updatedAt ? new Date(item.updatedAt) : new Date()
+        };
+        if (idx !== -1) {
+          inMemoryBusinesses[idx] = { ...inMemoryBusinesses[idx], ...normalizedItem };
+        } else {
+          inMemoryBusinesses.unshift(normalizedItem);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[getAllBusinessesSql] db.json merge notice:', e);
+  }
+
   try {
     const list = await db.select().from(businesses).orderBy(desc(businesses.createdAt));
     if (list && list.length > 0) {
-      // Merge with in-memory store for newly added businesses
+      // Merge Cloud SQL records with in-memory store without losing any newly created businesses
       for (const item of list) {
-        const idx = inMemoryBusinesses.findIndex(b => b.id === item.id);
-        if (idx !== -1) inMemoryBusinesses[idx] = item;
-        else inMemoryBusinesses.unshift(item);
+        const idx = inMemoryBusinesses.findIndex(
+          b => b.id === item.id || (item.slug && normalizeSlug(b.slug) === normalizeSlug(item.slug))
+        );
+        if (idx !== -1) {
+          inMemoryBusinesses[idx] = { ...inMemoryBusinesses[idx], ...item };
+        } else {
+          inMemoryBusinesses.push(item);
+        }
       }
       return inMemoryBusinesses;
     }
@@ -130,17 +160,32 @@ export async function getBusinessBySlugSql(slug: string) {
 }
 
 export async function upsertBusinessSql(data: any) {
-  const cleanSlug = normalizeSlug(data.slug || data.name);
+  let cleanSlug = normalizeSlug(data.slug || data.name);
+  if (!cleanSlug) {
+    cleanSlug = `comercio-${Date.now().toString(36)}`;
+  }
   const id = data.id || `biz_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+
+  // Ensure slug uniqueness if this is a brand new ID
+  let slugToUse = cleanSlug;
+  let counter = 2;
+  while (
+    inMemoryBusinesses.some(
+      b => normalizeSlug(b.slug) === slugToUse && b.id !== id
+    )
+  ) {
+    slugToUse = `${cleanSlug}-${counter}`;
+    counter++;
+  }
 
   const memoryRecord = {
     id,
-    name: data.name,
-    slug: cleanSlug,
+    name: String(data.name || '').trim(),
+    slug: slugToUse,
     category: data.category || 'Comércio & Serviços',
     logoUrl: data.logoUrl || data.logo_url || null,
     phone: data.phone || '',
-    email: data.email || '',
+    email: data.email || `${slugToUse}@reputaflow.com`,
     address: data.address || '',
     googleReviewUrl: data.googleReviewUrl || data.google_review_url || null,
     status: data.status || 'active',
@@ -152,7 +197,7 @@ export async function upsertBusinessSql(data: any) {
     updatedAt: new Date()
   };
 
-  const existingIdx = inMemoryBusinesses.findIndex(b => b.id === id || normalizeSlug(b.slug) === cleanSlug);
+  const existingIdx = inMemoryBusinesses.findIndex(b => b.id === id);
   if (existingIdx !== -1) {
     inMemoryBusinesses[existingIdx] = { ...inMemoryBusinesses[existingIdx], ...memoryRecord };
   } else {
@@ -162,7 +207,7 @@ export async function upsertBusinessSql(data: any) {
   try {
     const jsonDb = readDbJson();
     if (!Array.isArray(jsonDb.businesses)) jsonDb.businesses = [];
-    const idx = jsonDb.businesses.findIndex((b: any) => b.id === id || normalizeSlug(b.slug) === cleanSlug);
+    const idx = jsonDb.businesses.findIndex((b: any) => b.id === id);
     if (idx !== -1) jsonDb.businesses[idx] = memoryRecord;
     else jsonDb.businesses.unshift(memoryRecord);
     writeDbJson(jsonDb);
@@ -171,6 +216,12 @@ export async function upsertBusinessSql(data: any) {
   }
 
   try {
+    // Check if slug already exists in Cloud SQL under a different ID to avoid unique constraint failure
+    const existingBySlug = await db.select().from(businesses).where(eq(businesses.slug, memoryRecord.slug));
+    if (existingBySlug.length > 0 && existingBySlug[0].id !== id) {
+      memoryRecord.slug = `${slugToUse}-${Date.now().toString(36).slice(-3)}`;
+    }
+
     const result = await db
       .insert(businesses)
       .values(memoryRecord)
@@ -178,7 +229,7 @@ export async function upsertBusinessSql(data: any) {
         target: businesses.id,
         set: {
           name: memoryRecord.name,
-          slug: cleanSlug,
+          slug: memoryRecord.slug,
           category: memoryRecord.category,
           logoUrl: memoryRecord.logoUrl,
           phone: memoryRecord.phone,
@@ -196,7 +247,7 @@ export async function upsertBusinessSql(data: any) {
 
     return result[0] || memoryRecord;
   } catch (error) {
-    console.warn('[upsertBusinessSql] Cloud SQL insert failed, saved to in-memory fallback:', error);
+    console.warn('[upsertBusinessSql] Cloud SQL insert failed, saved to db.json & in-memory fallback:', error);
     return memoryRecord;
   }
 }

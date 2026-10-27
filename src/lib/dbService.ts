@@ -45,8 +45,112 @@ export function isMatchingBusiness(itemBizId: string | undefined, targetBizId: s
   return false;
 }
 
-// In-memory runtime state with resilient baseline fallback
-let runtimeBusinesses: Business[] = [...INITIAL_BIZ];
+const LOCAL_BUSINESSES_STORAGE_KEY = 'reputaflow_persisted_businesses_v1';
+const LOCAL_DELETED_BUSINESSES_KEY = 'reputaflow_deleted_businesses_v1';
+
+function readDeletedBusinessKeys(): Set<string> {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const raw = localStorage.getItem(LOCAL_DELETED_BUSINESSES_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) return new Set(arr.map((x) => String(x).toLowerCase().trim()));
+    }
+  } catch {}
+  return new Set();
+}
+
+function markBusinessKeyDeleted(idOrSlug: string) {
+  if (typeof window === 'undefined' || !idOrSlug) return;
+  try {
+    const set = readDeletedBusinessKeys();
+    set.add(idOrSlug.toLowerCase().trim());
+    localStorage.setItem(LOCAL_DELETED_BUSINESSES_KEY, JSON.stringify(Array.from(set)));
+  } catch {}
+}
+
+function unmarkBusinessKeyDeleted(id: string, slug: string) {
+  if (typeof window === 'undefined') return;
+  try {
+    const set = readDeletedBusinessKeys();
+    set.delete(id.toLowerCase().trim());
+    if (slug) set.delete(slug.toLowerCase().trim());
+    localStorage.setItem(LOCAL_DELETED_BUSINESSES_KEY, JSON.stringify(Array.from(set)));
+  } catch {}
+}
+
+function readCachedBusinesses(): Business[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(LOCAL_BUSINESSES_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((b) => b && b.id && b.name);
+      }
+    }
+  } catch (e) {
+    console.warn('[readCachedBusinesses notice]:', e);
+  }
+  return [];
+}
+
+function saveCachedBusinesses(list: Business[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(LOCAL_BUSINESSES_STORAGE_KEY, JSON.stringify(list));
+  } catch (e) {
+    console.warn('[saveCachedBusinesses notice]:', e);
+  }
+}
+
+function mergeBusinessLists(...lists: Business[][]): Business[] {
+  const deleted = readDeletedBusinessKeys();
+  const byId = new Map<string, Business>();
+  const slugToId = new Map<string, string>();
+
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    for (const item of list) {
+      if (!item || !item.name) continue;
+      const cleanId = String(item.id || '').trim();
+      const cleanSlug = String(item.slug || normalizeKey(item.name)).toLowerCase().trim();
+      if (!cleanId) continue;
+
+      if (deleted.has(cleanId.toLowerCase()) || (cleanSlug && deleted.has(cleanSlug))) {
+        continue;
+      }
+
+      const existingIdBySlug = cleanSlug ? slugToId.get(cleanSlug) : undefined;
+      const targetId = byId.has(cleanId) ? cleanId : existingIdBySlug || cleanId;
+      const existing = byId.get(targetId);
+
+      if (!existing) {
+        byId.set(targetId, item);
+        if (cleanSlug) slugToId.set(cleanSlug, targetId);
+      } else {
+        const existingTime = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
+        const itemTime = item.updatedAt ? new Date(item.updatedAt).getTime() : 0;
+        if (itemTime >= existingTime) {
+          const merged: Business = {
+            ...existing,
+            ...item,
+            id: existing.id,
+            logoUrl: item.logoUrl || existing.logoUrl || '',
+            googleReviewUrl: item.googleReviewUrl || existing.googleReviewUrl || ''
+          };
+          byId.set(targetId, merged);
+        }
+      }
+    }
+  }
+
+  const result = Array.from(byId.values());
+  return result.length > 0 ? result : [...INITIAL_BIZ];
+}
+
+// In-memory runtime state initialized from localStorage + baseline fallback
+let runtimeBusinesses: Business[] = mergeBusinessLists(readCachedBusinesses(), [...INITIAL_BIZ]);
 let runtimeReviews: Review[] = [...INITIAL_REVIEWS];
 let runtimeFeedback: Feedback[] = [...INITIAL_FEEDBACK];
 let runtimeRecoveryCases: RecoveryCase[] = [...INITIAL_RECOVERY_CASES];
@@ -76,31 +180,111 @@ export async function uploadImage(file: File, businessId?: string): Promise<stri
 }
 
 // ==========================================
-// BUSINESSES / MERCHANTS SERVICE (SUPABASE ONLY)
+// BUSINESSES / MERCHANTS SERVICE
 // ==========================================
 function mapBusinessRow(row: any): Business {
   return {
     id: String(row.id || ''),
-    name: String(row.name || ''),
+    name: String(row.name || row.business_name || row.title || ''),
     slug: String(row.slug || normalizeKey(row.name || String(row.id || ''))),
     category: row.category || 'Comércio & Serviços',
     address: row.address || '',
-    phone: row.phone || '',
+    phone: row.phone || row.whatsapp || '',
     email: row.email || '',
-    googleReviewUrl: row.google_review_url || row.googleReviewUrl || '',
+    googleReviewUrl: row.google_review_url || row.googleReviewUrl || row.google_url || '',
     logoUrl: row.logo_url || row.logoUrl || '',
     bannerUrl: row.banner_url || row.bannerUrl || '',
     minRatingForGoogle: Number(row.min_rating_for_google ?? row.minRatingForGoogle ?? 4),
     qrThemeColor: row.qr_theme_color || row.qrThemeColor || '#4f46e5',
     activePlan: row.active_plan || row.activePlan || row.plan_id || 'pro',
     planId: row.plan_id || row.planId || 'plan_pro',
-    ownerId: row.owner_id || row.ownerId || '',
+    ownerId: row.owner_id || row.ownerId || row.tenant_id || '',
     currency: (row.currency as 'EUR' | 'BRL') || 'EUR',
-    status: (row.status as any) || 'active',
+    status: (row.status as any) || (row.is_active === false ? 'suspended' : 'active'),
     password: row.password || 'reputa123',
     createdAt: row.created_at || row.createdAt || new Date().toISOString(),
-    updatedAt: row.updated_at || row.updatedAt || new Date().toISOString()
+    updatedAt: row.updated_at || row.updatedAt || row.created_at || row.createdAt || new Date().toISOString()
   };
+}
+
+// Adaptive Supabase insert helper that automatically strips unsupported columns or non-UUID keys
+async function insertBusinessToSupabaseAdaptive(tableName: string, basePayload: Record<string, any>): Promise<boolean> {
+  let currentPayload = { ...basePayload };
+
+  for (let attempt = 0; attempt < 12; attempt++) {
+    try {
+      const { error } = await supabase.from(tableName).insert([currentPayload]);
+      if (!error) {
+        return true;
+      }
+
+      const msg = error.message || '';
+      const code = error.code || '';
+
+      // If table does not exist at all, stop trying this table
+      if (code === '42P01' || (msg.includes('relation') && msg.includes('does not exist'))) {
+        return false;
+      }
+
+      // If duplicate key (already exists), treat as success
+      if (code === '23505' || msg.includes('duplicate key')) {
+        return true;
+      }
+
+      // Check if error is about a missing column in schema cache (PGRST204 or 42703)
+      const colMatch =
+        msg.match(/Could not find the '([^']+)' column/i) ||
+        msg.match(/column "([^"]+)" of relation/i) ||
+        msg.match(/column '([^']+)'/i);
+
+      if (colMatch && colMatch[1] && colMatch[1] in currentPayload) {
+        delete currentPayload[colMatch[1]];
+        continue;
+      }
+
+      // Check if error is UUID syntax (22P02) or Foreign Key constraint (23503)
+      if (code === '22P02' || code === '23503' || msg.includes('uuid') || msg.includes('foreign key')) {
+        if ('owner_id' in currentPayload) {
+          delete currentPayload.owner_id;
+          continue;
+        }
+        if ('tenant_id' in currentPayload) {
+          delete currentPayload.tenant_id;
+          continue;
+        }
+        if ('id' in currentPayload && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(currentPayload.id))) {
+          delete currentPayload.id;
+          continue;
+        }
+      }
+
+      // Progressive fallback to minimal columns if other schema error occurred
+      if (attempt === 4) {
+        currentPayload = {
+          name: basePayload.name,
+          slug: basePayload.slug,
+          phone: basePayload.phone,
+          email: basePayload.email,
+          google_review_url: basePayload.google_review_url,
+          logo_url: basePayload.logo_url,
+          status: basePayload.status
+        };
+        continue;
+      }
+      if (attempt === 5) {
+        currentPayload = {
+          name: basePayload.name,
+          slug: basePayload.slug
+        };
+        continue;
+      }
+
+      break;
+    } catch {
+      break;
+    }
+  }
+  return false;
 }
 
 // Helper for safe isolated Supabase realtime subscriptions
@@ -131,47 +315,68 @@ function createSafeTableSubscription(tableName: string, onUpdate: () => void): (
 export function subscribeBusinesses(callback: (businesses: Business[]) => void) {
   let isSubscribed = true;
 
+  // Immediately emit current merged state (localStorage + baseline) so UI never flashes empty
+  const initialMerged = mergeBusinessLists(readCachedBusinesses(), runtimeBusinesses, [...INITIAL_BIZ]);
+  runtimeBusinesses = initialMerged;
+  callback(runtimeBusinesses);
+
   const fetchMerchants = async () => {
+    let apiBusinesses: Business[] = [];
+    let supabaseBusinesses: Business[] = [];
+    let apiAvailable = false;
+
+    // 1. Try Server REST API (/api/businesses) safely checking content-type for JSON
     try {
-      // 1. Try Server REST API (/api/businesses) which serves data/db.json
       const apiRes = await fetch('/api/businesses', { cache: 'no-store' }).catch(() => null);
-      if (apiRes && apiRes.ok) {
+      const contentType = apiRes?.headers?.get('content-type') || '';
+      if (apiRes && apiRes.ok && contentType.includes('application/json')) {
         const apiData = await apiRes.json();
-        if (Array.isArray(apiData) && apiData.length > 0) {
-          runtimeBusinesses = apiData.map(mapBusinessRow);
-          if (isSubscribed) callback(runtimeBusinesses);
-          return;
+        if (Array.isArray(apiData)) {
+          apiAvailable = true;
+          apiBusinesses = apiData.map(mapBusinessRow);
         }
       }
+    } catch (apiErr) {
+      console.warn('[subscribeBusinesses API check]:', apiErr);
+    }
 
-      // 2. Try Supabase
-      const { data, error } = await supabase.from('businesses').select('*').order('created_at', { ascending: false });
-      if (!error && data && data.length > 0) {
-        const mapped = data.map(mapBusinessRow);
-        runtimeBusinesses = mapped;
-        if (isSubscribed) callback(mapped);
-        return;
-      }
-
-      // 2.1 Fallback: check Supabase 'tenants' table
-      try {
+    // 2. Try Supabase ('businesses' and fallback 'tenants' / 'establishments')
+    try {
+      const { data, error } = await supabase.from('businesses').select('*');
+      if (!error && Array.isArray(data) && data.length > 0) {
+        supabaseBusinesses = data.map(mapBusinessRow);
+      } else {
         const { data: tenantData } = await supabase.from('tenants').select('*');
-        if (tenantData && tenantData.length > 0) {
-          const mapped = tenantData.map(mapBusinessRow);
-          runtimeBusinesses = mapped;
-          if (isSubscribed) callback(mapped);
-          return;
+        if (Array.isArray(tenantData) && tenantData.length > 0) {
+          supabaseBusinesses = tenantData.map(mapBusinessRow);
         }
-      } catch (_) {}
-    } catch (err) {
-      console.warn('[subscribeBusinesses notice]:', err);
+      }
+    } catch (supaErr) {
+      console.warn('[subscribeBusinesses Supabase check]:', supaErr);
     }
 
-    // 3. Fallback to baseline registered businesses (Mr. Navalha) if empty
-    if (runtimeBusinesses.length === 0) {
-      runtimeBusinesses = [...INITIAL_BIZ];
+    // 3. Merge all sources: localStorage cache + current memory + API + Supabase + INITIAL_BIZ
+    const cached = readCachedBusinesses();
+    const merged = mergeBusinessLists(cached, runtimeBusinesses, apiBusinesses, supabaseBusinesses, [...INITIAL_BIZ]);
+
+    // 4. If API is available and any cached/local business is missing on the server, sync it automatically
+    if (apiAvailable && cached.length > 0) {
+      const apiIds = new Set(apiBusinesses.map((b) => b.id));
+      const apiSlugs = new Set(apiBusinesses.map((b) => (b.slug || '').toLowerCase()));
+      for (const localBiz of cached) {
+        if (!apiIds.has(localBiz.id) && !apiSlugs.has((localBiz.slug || '').toLowerCase())) {
+          fetch('/api/businesses', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(localBiz)
+          }).catch(() => {});
+        }
+      }
     }
-    if (isSubscribed && runtimeBusinesses.length > 0) {
+
+    runtimeBusinesses = merged;
+    saveCachedBusinesses(merged);
+    if (isSubscribed) {
       callback(runtimeBusinesses);
     }
   };
@@ -179,13 +384,16 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
   fetchMerchants();
 
   const unsubscribeRealtime = createSafeTableSubscription('businesses', fetchMerchants);
-  const interval = setInterval(fetchMerchants, 3000);
+  const interval = setInterval(fetchMerchants, 4000);
 
   const handleCustomEvent = () => {
+    const merged = mergeBusinessLists(readCachedBusinesses(), runtimeBusinesses);
+    runtimeBusinesses = merged;
     if (isSubscribed) callback(runtimeBusinesses);
   };
   if (typeof window !== 'undefined') {
     window.addEventListener('reputaflow_live_sync', handleCustomEvent);
+    window.addEventListener('reputaflow_businesses_updated', handleCustomEvent);
   }
 
   return () => {
@@ -194,6 +402,7 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
     clearInterval(interval);
     if (typeof window !== 'undefined') {
       window.removeEventListener('reputaflow_live_sync', handleCustomEvent);
+      window.removeEventListener('reputaflow_businesses_updated', handleCustomEvent);
     }
   };
 }
@@ -203,6 +412,29 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
   const normSlug = normalizeKey(clean);
   if (!normSlug) return null;
 
+  // 1. Check merged local & runtime businesses first for instant response
+  const mergedLocal = mergeBusinessLists(readCachedBusinesses(), runtimeBusinesses, [...INITIAL_BIZ]);
+  const localMatch = mergedLocal.find(
+    (b) =>
+      normalizeKey(b.slug) === normSlug ||
+      normalizeKey(b.id) === normSlug ||
+      normalizeKey(b.name) === normSlug
+  );
+  if (localMatch) return localMatch;
+
+  // 2. Check Server REST API (/api/businesses/:slug)
+  try {
+    const apiRes = await fetch(`/api/businesses/${encodeURIComponent(clean)}`, { cache: 'no-store' }).catch(() => null);
+    const contentType = apiRes?.headers?.get('content-type') || '';
+    if (apiRes && apiRes.ok && contentType.includes('application/json')) {
+      const apiBiz = await apiRes.json();
+      if (apiBiz && apiBiz.id) {
+        return mapBusinessRow(apiBiz);
+      }
+    }
+  } catch {}
+
+  // 3. Check Supabase
   try {
     const { data, error } = await supabase
       .from('businesses')
@@ -216,14 +448,7 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
     console.error('[getBusinessBySlug catch]:', e);
   }
 
-  return (
-    runtimeBusinesses.find(
-      (b) =>
-        normalizeKey(b.slug) === normSlug ||
-        normalizeKey(b.id) === normSlug ||
-        normalizeKey(b.name) === normSlug
-    ) || null
-  );
+  return null;
 }
 
 export async function getBusinessById(id: string): Promise<Business | null> {
@@ -231,6 +456,7 @@ export async function getBusinessById(id: string): Promise<Business | null> {
 }
 
 export function getLocalBusinesses(): Business[] {
+  runtimeBusinesses = mergeBusinessLists(readCachedBusinesses(), runtimeBusinesses, [...INITIAL_BIZ]);
   return runtimeBusinesses;
 }
 
@@ -245,17 +471,19 @@ export async function addBusiness(data: Omit<Business, 'id' | 'createdAt' | 'upd
   }
 
   // 2. Ensure unique slug against registered/runtime businesses
+  const currentAll = mergeBusinessLists(readCachedBusinesses(), runtimeBusinesses, [...INITIAL_BIZ]);
   let uniqueSlug = baseSlug;
   let counter = 2;
-  while (runtimeBusinesses.some((b) => b.slug.toLowerCase() === uniqueSlug.toLowerCase() && b.id !== id)) {
+  while (currentAll.some((b) => b.slug.toLowerCase() === uniqueSlug.toLowerCase() && b.id !== id)) {
     uniqueSlug = `${baseSlug}-${counter}`;
     counter++;
   }
 
   // 3. Set valid ownerId / tenant_id
-  const ownerId = data.ownerId && data.ownerId.trim()
-    ? data.ownerId.trim()
-    : `owner_${uniqueSlug}_${Date.now().toString(36).slice(-4)}`;
+  const ownerId =
+    data.ownerId && data.ownerId.trim()
+      ? data.ownerId.trim()
+      : `owner_${uniqueSlug}_${Date.now().toString(36).slice(-4)}`;
 
   const newBiz: Business = {
     ...data,
@@ -280,22 +508,38 @@ export async function addBusiness(data: Omit<Business, 'id' | 'createdAt' | 'upd
     updatedAt: now
   };
 
-  // 4. Primary persistence: Backend Server REST API (writes to PostgreSQL Cloud SQL & data/db.json)
+  // 4. IMMEDIATELY persist to localStorage and update runtime state BEFORE async calls
+  // so even if the user refreshes immediately, the business NEVER disappears!
+  unmarkBusinessKeyDeleted(id, uniqueSlug);
+  runtimeBusinesses = [newBiz, ...currentAll.filter((b) => b.id !== id)];
+  saveCachedBusinesses(runtimeBusinesses);
+  notifyDataChanged();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated'));
+  }
+
+  // 5. Primary persistence: Backend Server REST API (writes to PostgreSQL Cloud SQL & data/db.json)
   try {
     const apiRes = await fetch('/api/businesses', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newBiz)
     });
-    if (!apiRes.ok) {
-      console.warn('[Server API /api/businesses notice]: HTTP status', apiRes.status);
+    const contentType = apiRes.headers.get('content-type') || '';
+    if (apiRes.ok && contentType.includes('application/json')) {
+      const savedOnServer = await apiRes.json();
+      if (savedOnServer && savedOnServer.id) {
+        const mappedServer = mapBusinessRow(savedOnServer);
+        runtimeBusinesses = runtimeBusinesses.map((b) => (b.id === id ? { ...newBiz, ...mappedServer, id: newBiz.id } : b));
+        saveCachedBusinesses(runtimeBusinesses);
+      }
     }
   } catch (apiErr) {
     console.warn('[Server API /api/businesses network warning]:', apiErr);
   }
 
-  // 5. Secondary persistence: Supabase (with fallback table names and non-crashing catch)
-  const payload = {
+  // 6. Secondary persistence: Adaptive Supabase insert across 'businesses', 'tenants', and 'establishments'
+  const payload: Record<string, any> = {
     id,
     name: newBiz.name,
     slug: newBiz.slug,
@@ -314,21 +558,15 @@ export async function addBusiness(data: Omit<Business, 'id' | 'createdAt' | 'upd
   };
 
   try {
-    const { error } = await supabase.from('businesses').insert([payload]);
-    if (error) {
-      console.warn('[Supabase addBusiness warning]:', error.message);
-      // Fallback in case table is named 'establishments' or 'tenants'
-      if (error.message?.includes('does not exist') || error.code === '42P01') {
-        try { await supabase.from('establishments').insert([payload]); } catch (_) {}
-        try { await supabase.from('tenants').insert([payload]); } catch (_) {}
-      }
+    const insertedBiz = await insertBusinessToSupabaseAdaptive('businesses', payload);
+    if (!insertedBiz) {
+      await insertBusinessToSupabaseAdaptive('tenants', payload);
+      await insertBusinessToSupabaseAdaptive('establishments', payload);
     }
   } catch (err: any) {
     console.warn('[Supabase addBusiness caught]:', err);
   }
 
-  // 6. Update in-memory state and notify listeners immediately
-  runtimeBusinesses = [newBiz, ...runtimeBusinesses.filter((b) => b.id !== id)];
   notifyDataChanged();
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated'));
@@ -341,7 +579,8 @@ export const createBusiness = addBusiness;
 
 export async function updateBusiness(id: string, data: Partial<Business>): Promise<void> {
   const cleanId = String(id || '').trim();
-  const existing = runtimeBusinesses.find(
+  const currentAll = mergeBusinessLists(readCachedBusinesses(), runtimeBusinesses, [...INITIAL_BIZ]);
+  const existing = currentAll.find(
     (b) => b.id === cleanId || (b.slug && b.slug.toLowerCase() === cleanId.toLowerCase())
   );
   const establishmentId = existing?.id || cleanId;
@@ -349,8 +588,7 @@ export async function updateBusiness(id: string, data: Partial<Business>): Promi
   const now = new Date().toISOString();
 
   // PASSO 1: BLINDAGEM DO PAYLOAD DE UPDATE
-  // Construção do objeto seguro de atualização, prevenindo sobrescrita de campos críticos
-  const dbUpdates: any = { updated_at: now };
+  const dbUpdates: Record<string, any> = { updated_at: now };
   if (data.name !== undefined) dbUpdates.name = String(data.name).trim();
   if (data.category !== undefined) dbUpdates.category = String(data.category).trim();
   if (data.address !== undefined) dbUpdates.address = String(data.address).trim();
@@ -362,28 +600,49 @@ export async function updateBusiness(id: string, data: Partial<Business>): Promi
   if (data.bannerUrl !== undefined) dbUpdates.banner_url = data.bannerUrl || null;
   if (data.planId !== undefined) dbUpdates.plan_id = data.planId;
 
-  // Slug: atualizar apenas se explicitamente fornecido, não vazio e sanitizado
+  let cleanSlug = existingSlug;
   if (data.slug && data.slug.trim()) {
-    const cleanSlug = data.slug.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-');
-    if (cleanSlug) {
-      dbUpdates.slug = cleanSlug;
+    const candidateSlug = data.slug.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-');
+    if (candidateSlug) {
+      dbUpdates.slug = candidateSlug;
+      cleanSlug = candidateSlug;
     }
   }
 
-  // Preservação rigorosa do status e do is_active para evitar que filtros de listagem ocultem o comércio
   const safeStatus = data.status || existing?.status || 'active';
   dbUpdates.status = safeStatus;
-  dbUpdates.is_active = safeStatus === 'active';
 
-  // Blindagem de chaves imutáveis: NUNCA permitir id, tenant_id ou created_at no payload de update
   delete dbUpdates.id;
   delete dbUpdates.tenant_id;
   delete dbUpdates.created_at;
   delete dbUpdates.createdAt;
 
-  // 1. Persistência Principal no Backend REST API (/api/businesses/:id)
+  // 1. Atualização imediata em memória e em localStorage (garante persistência imediata no F5)
+  runtimeBusinesses = currentAll.map((b) => {
+    if (b.id === establishmentId || (b.slug && b.slug.toLowerCase() === existingSlug.toLowerCase())) {
+      return {
+        ...b,
+        ...data,
+        id: b.id,
+        slug: cleanSlug || b.slug,
+        ownerId: b.ownerId,
+        status: safeStatus,
+        createdAt: b.createdAt,
+        updatedAt: now
+      };
+    }
+    return b;
+  });
+  saveCachedBusinesses(runtimeBusinesses);
+  notifyDataChanged();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated'));
+  }
+
+  // 2. Persistência no Backend REST API (/api/businesses/:id, com fallback POST /api/businesses se 404)
   try {
-    await fetch(`/api/businesses/${encodeURIComponent(establishmentId)}`, {
+    const updatedRecord = runtimeBusinesses.find((b) => b.id === establishmentId);
+    const putRes = await fetch(`/api/businesses/${encodeURIComponent(establishmentId)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -393,69 +652,81 @@ export async function updateBusiness(id: string, data: Partial<Business>): Promi
         updatedAt: now
       })
     });
+    if (putRes.status === 404 && updatedRecord) {
+      await fetch('/api/businesses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedRecord)
+      });
+    }
   } catch (apiErr) {
     console.warn('[updateBusiness API sync warning]:', apiErr);
   }
 
-  // 2. Persistência no Supabase (com cláusula .eq rigorosa e suporte a 'businesses', 'tenants' e 'establishments')
+  // 3. Persistência no Supabase com remoção adaptativa de colunas inexistentes
   try {
-    // Tenta atualizar na tabela businesses pelo id
-    const { error: bizErr, count } = await supabase
-      .from('businesses')
-      .update(dbUpdates)
-      .eq('id', establishmentId);
+    let supaUpdates = { ...dbUpdates };
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const { error: bizErr } = await supabase
+        .from('businesses')
+        .update(supaUpdates)
+        .eq('id', establishmentId);
 
-    if (bizErr) {
-      console.warn('[Supabase updateBusiness eq(id) notice]:', bizErr.message);
-      // Tenta por slug se o id não tiver sido encontrado
-      await supabase.from('businesses').update(dbUpdates).eq('slug', existingSlug);
+      if (!bizErr) break;
+      const colMatch =
+        bizErr.message?.match(/Could not find the '([^']+)' column/i) ||
+        bizErr.message?.match(/column "([^"]+)" of relation/i);
+      if (colMatch && colMatch[1] && colMatch[1] in supaUpdates) {
+        delete supaUpdates[colMatch[1]];
+        continue;
+      }
+      await supabase.from('businesses').update(supaUpdates).eq('slug', existingSlug);
+      break;
     }
 
-    // Atualização de espelho nas tabelas tenants e establishments se existirem no projeto Supabase
     try {
-      await supabase.from('tenants').update(dbUpdates).or(`id.eq.${establishmentId},slug.eq.${existingSlug}`);
+      await supabase.from('tenants').update(supaUpdates).or(`id.eq.${establishmentId},slug.eq.${existingSlug}`);
     } catch (_) {}
     try {
-      await supabase.from('establishments').update(dbUpdates).or(`id.eq.${establishmentId},slug.eq.${existingSlug}`);
+      await supabase.from('establishments').update(supaUpdates).or(`id.eq.${establishmentId},slug.eq.${existingSlug}`);
     } catch (_) {}
   } catch (err) {
     console.error('[Supabase updateBusiness catch]:', err);
-  }
-
-  // 3. Atualização local imediata e imutável do estado em memória
-  runtimeBusinesses = runtimeBusinesses.map((b) => {
-    if (b.id === establishmentId || (b.slug && b.slug.toLowerCase() === existingSlug.toLowerCase())) {
-      return {
-        ...b,
-        ...data,
-        id: b.id, // Preserva rigorosamente o ID original
-        ownerId: b.ownerId, // Preserva rigorosamente o owner/tenant
-        status: safeStatus,
-        createdAt: b.createdAt,
-        updatedAt: now
-      };
-    }
-    return b;
-  });
-
-  notifyDataChanged();
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated'));
   }
 }
 
 export const updateEstablishment = updateBusiness;
 
 export async function deleteBusiness(id: string): Promise<void> {
+  const cleanId = String(id || '').trim();
+  const target = runtimeBusinesses.find((b) => b.id === cleanId);
+
+  markBusinessKeyDeleted(cleanId);
+  if (target?.slug) {
+    markBusinessKeyDeleted(target.slug);
+  }
+
+  runtimeBusinesses = runtimeBusinesses.filter((b) => b.id !== cleanId);
+  saveCachedBusinesses(runtimeBusinesses);
+  notifyDataChanged();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated'));
+  }
+
   try {
-    const { error } = await supabase.from('businesses').delete().eq('id', id);
+    await fetch(`/api/businesses/${encodeURIComponent(cleanId)}`, { method: 'DELETE' });
+  } catch (apiErr) {
+    console.warn('[deleteBusiness API warning]:', apiErr);
+  }
+
+  try {
+    const { error } = await supabase.from('businesses').delete().eq('id', cleanId);
     if (error) console.error('[Supabase deleteBusiness error]:', error);
+    try { await supabase.from('tenants').delete().eq('id', cleanId); } catch (_) {}
+    try { await supabase.from('establishments').delete().eq('id', cleanId); } catch (_) {}
   } catch (err) {
     console.error('[Supabase deleteBusiness catch]:', err);
   }
-
-  runtimeBusinesses = runtimeBusinesses.filter((b) => b.id !== id);
-  notifyDataChanged();
 }
 
 // ==========================================
@@ -483,7 +754,8 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
       // 1. Try Server API (/api/reviews)
       const url = '/api/reviews' + (businessId ? `?businessId=${encodeURIComponent(businessId)}` : '');
       const apiRes = await fetch(url, { cache: 'no-store' }).catch(() => null);
-      if (apiRes && apiRes.ok) {
+      const contentType = apiRes?.headers?.get('content-type') || '';
+      if (apiRes && apiRes.ok && contentType.includes('application/json')) {
         const apiData = await apiRes.json();
         if (Array.isArray(apiData) && apiData.length > 0) {
           const mapped = apiData.map(mapReviewRow);
@@ -698,7 +970,8 @@ export function subscribeRecoveryCases(businessId: string | null, callback: (cas
       // 1. Try Server API (/api/recovery-cases)
       const url = '/api/recovery-cases' + (businessId ? `?businessId=${encodeURIComponent(businessId)}` : '');
       const apiRes = await fetch(url, { cache: 'no-store' }).catch(() => null);
-      if (apiRes && apiRes.ok) {
+      const contentType = apiRes?.headers?.get('content-type') || '';
+      if (apiRes && apiRes.ok && contentType.includes('application/json')) {
         const apiData = await apiRes.json();
         if (Array.isArray(apiData) && apiData.length > 0) {
           const mapped = apiData.map(mapRecoveryRow);
@@ -936,7 +1209,8 @@ export function subscribeCustomers(businessId: string | null, callback: (custome
       // 1. Try Server API (/api/customers)
       const url = '/api/customers' + (businessId ? `?businessId=${encodeURIComponent(businessId)}` : '');
       const apiRes = await fetch(url, { cache: 'no-store' }).catch(() => null);
-      if (apiRes && apiRes.ok) {
+      const contentType = apiRes?.headers?.get('content-type') || '';
+      if (apiRes && apiRes.ok && contentType.includes('application/json')) {
         const apiData = await apiRes.json();
         if (Array.isArray(apiData) && apiData.length > 0) {
           const mapped = apiData.map(mapCustomerRow);
