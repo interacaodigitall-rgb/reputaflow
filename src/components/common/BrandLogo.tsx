@@ -6,8 +6,9 @@ interface BrandLogoProps {
   variant?: 'dark' | 'light';
 }
 
-export const BRAND_ICON_URL = '/assets/aistudio/FAVICON_8738add6.png';
-export const BRAND_LOGO_URL = '/assets/aistudio/FAVICON_8738add6.png';
+export const BRAND_FAVICON_URL = '/assets/aistudio/FAVICON_8738add6.png';
+export const BRAND_ICON_URL = '/assets/aistudio/Logotipo_b8b8f273.png';
+export const BRAND_LOGO_URL = '/assets/aistudio/Logotipo_b8b8f273.png';
 
 export const BrandLogo: React.FC<BrandLogoProps> = ({
   className = '',
@@ -17,10 +18,10 @@ export const BrandLogo: React.FC<BrandLogoProps> = ({
   const [imgError, setImgError] = useState(false);
 
   const sizeClasses = {
-    sm: 'w-8 h-8',
-    md: 'w-10 h-10',
-    lg: 'w-20 h-20',
-    xl: 'w-24 h-24'
+    sm: 'w-9 h-9',
+    md: 'w-12 h-12',
+    lg: 'w-28 h-28',
+    xl: 'w-36 h-36 sm:w-40 sm:h-40'
   };
 
   if (imgError) {
@@ -40,7 +41,7 @@ export const BrandLogo: React.FC<BrandLogoProps> = ({
 
   return (
     <img
-      src={BRAND_ICON_URL}
+      src={BRAND_LOGO_URL}
       alt="GlowfyHub"
       onError={() => setImgError(true)}
       className={`${sizeClasses[size]} object-contain rounded-xl shrink-0 ${
