@@ -152,15 +152,26 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
         if (isSubscribed) callback(mapped);
         return;
       }
+
+      // 2.1 Fallback: check Supabase 'tenants' table
+      try {
+        const { data: tenantData } = await supabase.from('tenants').select('*');
+        if (tenantData && tenantData.length > 0) {
+          const mapped = tenantData.map(mapBusinessRow);
+          runtimeBusinesses = mapped;
+          if (isSubscribed) callback(mapped);
+          return;
+        }
+      } catch (_) {}
     } catch (err) {
       console.warn('[subscribeBusinesses notice]:', err);
     }
 
-    // 3. Fallback to baseline registered businesses (Mr. Navalha)
+    // 3. Fallback to baseline registered businesses (Mr. Navalha) if empty
     if (runtimeBusinesses.length === 0) {
       runtimeBusinesses = [...INITIAL_BIZ];
     }
-    if (isSubscribed) {
+    if (isSubscribed && runtimeBusinesses.length > 0) {
       callback(runtimeBusinesses);
     }
   };
@@ -329,30 +340,111 @@ export async function addBusiness(data: Omit<Business, 'id' | 'createdAt' | 'upd
 export const createBusiness = addBusiness;
 
 export async function updateBusiness(id: string, data: Partial<Business>): Promise<void> {
+  const cleanId = String(id || '').trim();
+  const existing = runtimeBusinesses.find(
+    (b) => b.id === cleanId || (b.slug && b.slug.toLowerCase() === cleanId.toLowerCase())
+  );
+  const establishmentId = existing?.id || cleanId;
+  const existingSlug = existing?.slug || cleanId;
   const now = new Date().toISOString();
+
+  // PASSO 1: BLINDAGEM DO PAYLOAD DE UPDATE
+  // Construção do objeto seguro de atualização, prevenindo sobrescrita de campos críticos
   const dbUpdates: any = { updated_at: now };
-  if (data.name !== undefined) dbUpdates.name = data.name;
-  if (data.slug !== undefined) dbUpdates.slug = data.slug.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-');
-  if (data.category !== undefined) dbUpdates.category = data.category;
-  if (data.address !== undefined) dbUpdates.address = data.address;
-  if (data.phone !== undefined) dbUpdates.phone = data.phone;
-  if (data.email !== undefined) dbUpdates.email = data.email;
-  if (data.status !== undefined) dbUpdates.status = data.status;
+  if (data.name !== undefined) dbUpdates.name = String(data.name).trim();
+  if (data.category !== undefined) dbUpdates.category = String(data.category).trim();
+  if (data.address !== undefined) dbUpdates.address = String(data.address).trim();
+  if (data.phone !== undefined) dbUpdates.phone = String(data.phone).trim();
+  if (data.email !== undefined) dbUpdates.email = String(data.email).trim();
   if (data.currency !== undefined) dbUpdates.currency = data.currency;
-  if (data.googleReviewUrl !== undefined) dbUpdates.google_review_url = data.googleReviewUrl;
-  if (data.logoUrl !== undefined) dbUpdates.logo_url = data.logoUrl;
+  if (data.googleReviewUrl !== undefined) dbUpdates.google_review_url = data.googleReviewUrl || null;
+  if (data.logoUrl !== undefined) dbUpdates.logo_url = data.logoUrl || null;
+  if (data.bannerUrl !== undefined) dbUpdates.banner_url = data.bannerUrl || null;
   if (data.planId !== undefined) dbUpdates.plan_id = data.planId;
 
+  // Slug: atualizar apenas se explicitamente fornecido, não vazio e sanitizado
+  if (data.slug && data.slug.trim()) {
+    const cleanSlug = data.slug.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-');
+    if (cleanSlug) {
+      dbUpdates.slug = cleanSlug;
+    }
+  }
+
+  // Preservação rigorosa do status e do is_active para evitar que filtros de listagem ocultem o comércio
+  const safeStatus = data.status || existing?.status || 'active';
+  dbUpdates.status = safeStatus;
+  dbUpdates.is_active = safeStatus === 'active';
+
+  // Blindagem de chaves imutáveis: NUNCA permitir id, tenant_id ou created_at no payload de update
+  delete dbUpdates.id;
+  delete dbUpdates.tenant_id;
+  delete dbUpdates.created_at;
+  delete dbUpdates.createdAt;
+
+  // 1. Persistência Principal no Backend REST API (/api/businesses/:id)
   try {
-    const { error } = await supabase.from('businesses').update(dbUpdates).eq('id', id);
-    if (error) console.error('[Supabase updateBusiness error]:', error);
+    await fetch(`/api/businesses/${encodeURIComponent(establishmentId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...data,
+        id: establishmentId,
+        status: safeStatus,
+        updatedAt: now
+      })
+    });
+  } catch (apiErr) {
+    console.warn('[updateBusiness API sync warning]:', apiErr);
+  }
+
+  // 2. Persistência no Supabase (com cláusula .eq rigorosa e suporte a 'businesses', 'tenants' e 'establishments')
+  try {
+    // Tenta atualizar na tabela businesses pelo id
+    const { error: bizErr, count } = await supabase
+      .from('businesses')
+      .update(dbUpdates)
+      .eq('id', establishmentId);
+
+    if (bizErr) {
+      console.warn('[Supabase updateBusiness eq(id) notice]:', bizErr.message);
+      // Tenta por slug se o id não tiver sido encontrado
+      await supabase.from('businesses').update(dbUpdates).eq('slug', existingSlug);
+    }
+
+    // Atualização de espelho nas tabelas tenants e establishments se existirem no projeto Supabase
+    try {
+      await supabase.from('tenants').update(dbUpdates).or(`id.eq.${establishmentId},slug.eq.${existingSlug}`);
+    } catch (_) {}
+    try {
+      await supabase.from('establishments').update(dbUpdates).or(`id.eq.${establishmentId},slug.eq.${existingSlug}`);
+    } catch (_) {}
   } catch (err) {
     console.error('[Supabase updateBusiness catch]:', err);
   }
 
-  runtimeBusinesses = runtimeBusinesses.map((b) => (b.id === id ? { ...b, ...data, updatedAt: now } : b));
+  // 3. Atualização local imediata e imutável do estado em memória
+  runtimeBusinesses = runtimeBusinesses.map((b) => {
+    if (b.id === establishmentId || (b.slug && b.slug.toLowerCase() === existingSlug.toLowerCase())) {
+      return {
+        ...b,
+        ...data,
+        id: b.id, // Preserva rigorosamente o ID original
+        ownerId: b.ownerId, // Preserva rigorosamente o owner/tenant
+        status: safeStatus,
+        createdAt: b.createdAt,
+        updatedAt: now
+      };
+    }
+    return b;
+  });
+
   notifyDataChanged();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated'));
+  }
 }
+
+export const updateEstablishment = updateBusiness;
 
 export async function deleteBusiness(id: string): Promise<void> {
   try {

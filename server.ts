@@ -32,6 +32,7 @@ import {
   incrementNfcScanSql
 } from './src/db/nfcPlates.ts';
 import { INITIAL_NFC_PLATES } from './src/lib/nfcService.ts';
+import { extractSlugFromUrl } from './src/lib/urlHelper.ts';
 import { seedCloudSqlDatabase } from './src/db/seedSql.ts';
 import { db } from './src/db/index.ts';
 import { platformSettings } from './src/db/schema.ts';
@@ -677,80 +678,122 @@ app.post('/api/convert-google-review-url', async (req, res) => {
   }
 });
 
-// GET /qr/:id - High-speed Server-side Instant Redirect for Mobile QR / NFC Scanners (Passo 1 & 2)
-app.get('/qr/:id', async (req, res, next) => {
-  const plateId = (req.params.id || '').trim();
-  if (!plateId) {
-    return res.redirect(302, '/');
+// GET /qr/:code (and /qrc/:code) - 100% Server-Side Instant Redirect for QR Codes (Passo 1 & 2)
+app.get(['/qr/:code', '/qrc/:code'], async (req, res) => {
+  const code = (req.params.code || '').trim();
+  if (!code) {
+    return res.redirect(302, '/?error=qr_nao_atribuido');
   }
 
+  const cleanCode = code.toUpperCase();
+  const stripped = cleanCode.replace(/^(?:QRC|NFC)-?/i, '');
+  const numOnly = stripped.replace(/^0+/, '') || '0';
+  const norm3 = numOnly.padStart(3, '0');
+
   try {
+    let tenantSlug: string | null = null;
     let redirectUrl: string | null = null;
-    let resolvedPlateId = plateId;
+    let resolvedPlateId = cleanCode;
 
-    const stripped = plateId.replace(/^(?:QRC|NFC)-?/i, '');
-    const numOnly = stripped.replace(/^0+/, '') || '0';
-    const norm3 = numOnly.padStart(3, '0');
+    // 1. Fast check in INITIAL_NFC_PLATES (synchronous/immediate fallback)
+    const initFound = INITIAL_NFC_PLATES.find((p) => {
+      const pId = String(p.id).toUpperCase();
+      const pNum = pId.replace(/^0+/, '') || '0';
+      return (
+        pId === cleanCode ||
+        pId === stripped ||
+        pId === norm3 ||
+        pNum === numOnly
+      );
+    });
 
-    // 1. Try PostgreSQL Cloud SQL & Local DB with plateId, stripped prefix or normalized number
-    let plate = await getNfcPlateByIdSql(plateId);
-    if (!plate && stripped !== plateId) {
-      plate = await getNfcPlateByIdSql(stripped);
-      if (!plate) plate = await getNfcPlateByIdSql(norm3);
+    if (initFound && String(initFound.status).toLowerCase() === 'active') {
+      tenantSlug = initFound.merchant_slug || extractSlugFromUrl(initFound.redirect_url);
+      redirectUrl = initFound.redirect_url || null;
+      resolvedPlateId = initFound.id;
     }
 
-    if (plate && String(plate.status).toLowerCase() === 'active' && plate.redirect_url) {
-      redirectUrl = plate.redirect_url;
-      resolvedPlateId = plate.id;
-    }
-
-    // 2. Check pre-configured baseline batch (INITIAL_NFC_PLATES)
-    if (!redirectUrl) {
-      const initFound = INITIAL_NFC_PLATES.find((p) => {
-        const pId = String(p.id).toLowerCase();
-        const pCode = plateId.toLowerCase();
-        return pId === pCode || pId === stripped.toLowerCase() || pId === norm3;
-      });
-      if (initFound && String(initFound.status).toLowerCase() === 'active' && initFound.redirect_url) {
-        redirectUrl = initFound.redirect_url;
-        resolvedPlateId = initFound.id;
+    // 2. Query Cloud SQL & Local DB
+    if (!tenantSlug && !redirectUrl) {
+      let plate = await getNfcPlateByIdSql(cleanCode);
+      if (!plate && stripped !== cleanCode) {
+        plate = await getNfcPlateByIdSql(stripped);
+        if (!plate) plate = await getNfcPlateByIdSql(norm3);
+      }
+      if (plate && String(plate.status).toLowerCase() === 'active') {
+        tenantSlug = plate.merchant_slug || extractSlugFromUrl(plate.redirect_url);
+        redirectUrl = plate.redirect_url || null;
+        resolvedPlateId = plate.id;
       }
     }
 
-    // 3. Fallback to Supabase (nfc_plates and qr_plates) with fast timeout
-    if (!redirectUrl) {
+    // 3. Supabase: Query 'qr_plates' and 'nfc_plates' with .ilike() (as requested in Passo 1)
+    if (!tenantSlug && !redirectUrl) {
       try {
-        const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 800));
-        const queryPromise = (async () => {
+        const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500));
+
+        const supabaseLookup = (async () => {
+          // A. Try qr_plates with .ilike('qr_code_id', cleanCode) and joined tenants
           try {
-            const { data } = await supabase
-              .from('nfc_plates')
-              .select('*')
-              .or(`id.eq.${plateId},qr_code_id.eq.${plateId}`)
-              .maybeSingle();
-            if (data) return data;
-            const { data: qrData } = await supabase
+            const { data: qrPlate, error: qrErr } = await supabase
               .from('qr_plates')
-              .select('*')
-              .or(`id.eq.${plateId},qr_code_id.eq.${plateId}`)
+              .select('tenant_id, qr_code_id, status, redirect_url, tenants(slug, custom_domain)')
+              .or(`qr_code_id.ilike.${cleanCode},id.ilike.${cleanCode},qr_code_id.ilike.${norm3},id.ilike.${norm3}`)
               .maybeSingle();
-            return qrData;
-          } catch {
-            return null;
-          }
+
+            if (!qrErr && qrPlate) {
+              const tenantsObj: any = qrPlate.tenants;
+              const slug = tenantsObj?.slug || extractSlugFromUrl(qrPlate.redirect_url) || qrPlate.tenant_id;
+              if (slug) {
+                return { slug, plate: qrPlate };
+              }
+            }
+          } catch (e) {}
+
+          // B. Try nfc_plates with .ilike('id', cleanCode) and joined businesses
+          try {
+            const { data: nfcPlate, error: nfcErr } = await supabase
+              .from('nfc_plates')
+              .select('id, qr_code_id, status, redirect_url, merchant_id, merchant_slug, businesses(slug)')
+              .or(`id.ilike.${cleanCode},qr_code_id.ilike.${cleanCode},id.ilike.${norm3},id.ilike.${stripped}`)
+              .maybeSingle();
+
+            if (!nfcErr && nfcPlate) {
+              const bizObj: any = nfcPlate.businesses;
+              const slug = nfcPlate.merchant_slug || bizObj?.slug || extractSlugFromUrl(nfcPlate.redirect_url);
+              if (slug || nfcPlate.redirect_url) {
+                return { slug, plate: nfcPlate };
+              }
+            }
+          } catch (e) {}
+
+          return null;
         })();
 
-        const res: any = await Promise.race([queryPromise, timeout]);
-        if (res && String(res.status).toLowerCase() === 'active' && (res.redirect_url || res.redirectUrl)) {
-          redirectUrl = res.redirect_url || res.redirectUrl;
-          resolvedPlateId = res.id || plateId;
+        const match: any = await Promise.race([supabaseLookup, timeout]);
+        if (match && match.plate && String(match.plate.status || 'active').toLowerCase() === 'active') {
+          tenantSlug = match.slug || null;
+          redirectUrl = match.plate.redirect_url || null;
+          resolvedPlateId = match.plate.id || match.plate.qr_code_id || cleanCode;
         }
-      } catch (err) {}
+      } catch (err) {
+        console.warn('[Supabase QR Redirect error]:', err);
+      }
     }
 
-    if (redirectUrl) {
+    // 4. Redirecionamento 100% instantâneo no servidor para a página de avaliação do lojista
+    if (tenantSlug || redirectUrl) {
       incrementNfcScanSql(resolvedPlateId).catch(() => {});
-      let target = redirectUrl.trim();
+
+      let target = '';
+      if (tenantSlug && !tenantSlug.startsWith('http') && !tenantSlug.startsWith('/')) {
+        target = `/r/${encodeURIComponent(tenantSlug)}`;
+      } else if (redirectUrl) {
+        target = redirectUrl.trim();
+      } else if (tenantSlug) {
+        target = tenantSlug.trim();
+      }
+
       if (target.startsWith('/')) {
         const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
         const host = req.get('host');
@@ -759,15 +802,17 @@ app.get('/qr/:id', async (req, res, next) => {
         target = 'https://' + target;
       }
 
-      console.log(`[HTTP 302 Server Instant Redirect] Plate #${plateId} -> ${target}`);
+      console.log(`[HTTP 302 Native Server-Side Redirect] Code ${cleanCode} -> ${target}`);
       return res.redirect(302, target);
     }
-  } catch (err) {
-    console.warn('[QR Redirect Server fallback]:', err);
-  }
 
-  // Pass through to SPA so client displays clean "Placa Disponível para Atribuição" message
-  next();
+    // Se não encontrar ou não estiver atribuído, redireciona para home com erro limpo
+    console.log(`[HTTP 302 Server-Side Redirect: Não atribuído] Code ${cleanCode} -> /?error=qr_nao_atribuido`);
+    return res.redirect(302, '/?error=qr_nao_atribuido');
+  } catch (error) {
+    console.error('QR server-side redirect error:', error);
+    return res.redirect(302, '/?error=qr_nao_atribuido');
+  }
 });
 
 // ==========================================

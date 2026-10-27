@@ -98,8 +98,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Listen to businesses via Supabase
   useEffect(() => {
     const unsubscribe = subscribeBusinesses((bizList) => {
-      setBusinesses(bizList);
-      if (bizList.length > 0) {
+      if (bizList && bizList.length > 0) {
+        setBusinesses(bizList);
         setSelectedBusiness((prev) => {
           if (currentUser?.email) {
             const userEmail = currentUser.email.toLowerCase().trim();
@@ -120,8 +120,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
           }
           if (!prev) return bizList[0];
-          const found = bizList.find((b) => b.id === prev.id);
-          return found || bizList[0];
+          const found = bizList.find(
+            (b) => b.id === prev.id || (prev.slug && b.slug.toLowerCase() === prev.slug.toLowerCase())
+          );
+          return found || prev || bizList[0];
         });
       }
     });

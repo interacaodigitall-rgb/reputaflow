@@ -41,6 +41,8 @@ export const LoginPage: React.FC = () => {
     }
   };
 
+  const isQrUnassigned = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('error') === 'qr_nao_atribuido';
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50/60 py-12 px-4 sm:px-6 lg:px-8 font-sans">
       <div className="max-w-md w-full space-y-8 bg-white p-8 rounded-3xl border border-slate-200 shadow-xl transition-all duration-300">
@@ -59,6 +61,19 @@ export const LoginPage: React.FC = () => {
             </p>
           </div>
         </div>
+
+        {/* Unassigned QR Alert Section */}
+        {isQrUnassigned && (
+          <div className="p-3.5 bg-amber-50 border border-amber-200 text-amber-900 rounded-2xl text-xs font-semibold flex items-start gap-2.5 animate-fade-in">
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold">Placa QR não atribuída</p>
+              <p className="text-[11px] text-amber-700 font-normal mt-0.5">
+                Esta placa ainda não está vinculada a nenhum estabelecimento. Inicie sessão no painel Super Admin para atribuí-la a uma loja.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Error / Alert Section */}
         {error && (

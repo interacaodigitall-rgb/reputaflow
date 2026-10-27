@@ -253,6 +253,9 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
     setTimeout(() => setLogoFeedback(null), 3000);
   };
 
+  // Global Toast Feedback (Passo 3)
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -260,7 +263,7 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
     setSaveError(null);
 
     try {
-      const cleanSlug = slug.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-');
+      const cleanSlug = (slug || '').toLowerCase().trim().replace(/[^a-z0-9-]/g, '-');
 
       // Passo 2: Normalização do Link do Google Reviews antes de salvar
       let normalizedGoogleUrl = (googleReviewUrl || '').trim();
@@ -275,21 +278,32 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
         }
       }
 
+      // PASSO 1: BLINDAGEM DO PAYLOAD DE UPDATE
+      // Nunca envia id, tenant_id ou created_at no corpo do update
       const updatedData: Partial<Business> = {
         name: (name || '').trim(),
-        slug: cleanSlug,
         category: (category || '').trim(),
         phone: (phone || '').trim(),
         email: (email || '').trim(),
         address: (address || '').trim(),
         logoUrl: (logoUrl || '').trim() || undefined,
         googleReviewUrl: normalizedGoogleUrl || undefined,
-        currency
+        currency,
+        status: business.status || 'active'
       };
 
+      if (cleanSlug && cleanSlug !== business.slug) {
+        updatedData.slug = cleanSlug;
+      }
+
+      // Salva no banco de dados com ID rigorosamente preservado na cláusula .eq('id', business.id)
       await updateBusiness(business.id, updatedData);
+
       setGoogleReviewUrl(normalizedGoogleUrl);
       setSavedSuccess(true);
+      setToastMessage('Alterações guardadas com sucesso!');
+      setTimeout(() => setToastMessage(null), 5000);
+
       if (wasGoogleUrlOptimized) {
         setGoogleToast({
           type: 'success',
@@ -297,13 +311,26 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
         });
         setTimeout(() => setGoogleToast(null), 4500);
       }
+
+      // PASSO 2: PRESERVAÇÃO DA LISTAGEM E ESTADO LOCAL
+      // Preserva estritamente o id, ownerId e createdAt do estabelecimento ativo
+      const updatedBusinessRecord: Business = {
+        ...business,
+        ...updatedData,
+        id: business.id,
+        ownerId: business.ownerId,
+        status: business.status || 'active',
+        createdAt: business.createdAt
+      };
+
       if (onBusinessUpdated) {
-        onBusinessUpdated({ ...business, ...updatedData });
+        onBusinessUpdated(updatedBusinessRecord);
       }
-      setTimeout(() => setSavedSuccess(false), 3500);
+      setTimeout(() => setSavedSuccess(false), 4000);
     } catch (err: any) {
       console.error('Error saving business settings:', err);
-      setSaveError('Erro ao guardar as alterações: ' + (err.message || 'Tente novamente.'));
+      const errMsg = 'Erro ao guardar as alterações: ' + (err.message || 'Tente novamente.');
+      setSaveError(errMsg);
     } finally {
       setSaving(false);
     }
@@ -430,6 +457,23 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
         </p>
       </div>
 
+      {/* Floating Success Toast (Passo 3) */}
+      {toastMessage && (
+        <div className="p-3.5 bg-emerald-50 border border-emerald-300 text-emerald-900 rounded-2xl flex items-center justify-between text-xs font-bold shadow-xs animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0" />
+            <span>{toastMessage}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setToastMessage(null)}
+            className="text-emerald-700 hover:text-emerald-900 font-bold px-2"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left 2 Cols: Form Container */}
         <div className="lg:col-span-2 space-y-6">
@@ -438,7 +482,7 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
               {savedSuccess && (
                 <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl text-xs font-semibold flex items-center gap-2 animate-fade-in">
                   <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>Configurações atualizadas com sucesso na base de dados!</span>
+                  <span>Alterações guardadas com sucesso!</span>
                 </div>
               )}
 
@@ -974,3 +1018,5 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
     </div>
   );
 };
+
+export const EstablishmentSettings = MerchantSettings;

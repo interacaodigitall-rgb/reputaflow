@@ -167,6 +167,89 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   const [deleting, setDeleting] = useState(false);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // Edit Business Modal State (Passo 1 & 2)
+  const [editingBusiness, setEditingBusiness] = useState<Business | null>(null);
+  const [editBizName, setEditBizName] = useState('');
+  const [editBizSlug, setEditBizSlug] = useState('');
+  const [editBizCategory, setEditBizCategory] = useState('');
+  const [editBizPhone, setEditBizPhone] = useState('');
+  const [editBizEmail, setEditBizEmail] = useState('');
+  const [editBizAddress, setEditBizAddress] = useState('');
+  const [editBizPlan, setEditBizPlan] = useState('plan_pro');
+  const [editBizCurrency, setEditBizCurrency] = useState<'EUR' | 'BRL'>('EUR');
+  const [editBizGoogleUrl, setEditBizGoogleUrl] = useState('');
+  const [editBizLogoUrl, setEditBizLogoUrl] = useState('');
+  const [editBizStatus, setEditBizStatus] = useState<'active' | 'suspended'>('active');
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  const handleOpenEditModal = (biz: Business) => {
+    setEditingBusiness(biz);
+    setEditBizName(biz.name);
+    setEditBizSlug(biz.slug);
+    setEditBizCategory(biz.category || '');
+    setEditBizPhone(biz.phone || '');
+    setEditBizEmail(biz.email || '');
+    setEditBizAddress(biz.address || '');
+    setEditBizPlan(biz.planId || 'plan_pro');
+    setEditBizCurrency(biz.currency || 'EUR');
+    setEditBizGoogleUrl(biz.googleReviewUrl || '');
+    setEditBizLogoUrl(biz.logoUrl || '');
+    setEditBizStatus(biz.status === 'suspended' ? 'suspended' : 'active');
+    setEditError(null);
+  };
+
+  const handleSaveEditBusiness = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingBusiness) return;
+
+    if (!editBizName.trim()) {
+      setEditError('Por favor, informe o nome do estabelecimento.');
+      return;
+    }
+
+    setSavingEdit(true);
+    setEditError(null);
+
+    try {
+      const cleanSlug = slugify(editBizSlug || editBizName);
+      let normalizedGoogleUrl = (editBizGoogleUrl || '').trim();
+      if (normalizedGoogleUrl) {
+        const norm = normalizeGoogleReviewUrl(normalizedGoogleUrl);
+        if (norm.url) normalizedGoogleUrl = norm.url;
+      }
+
+      // PASSO 1: BLINDAGEM DO PAYLOAD DE UPDATE
+      const payload: Partial<Business> = {
+        name: editBizName.trim(),
+        category: editBizCategory.trim() || 'Comércio & Serviços',
+        phone: editBizPhone.trim(),
+        email: editBizEmail.trim(),
+        address: editBizAddress.trim(),
+        planId: editBizPlan,
+        currency: editBizCurrency,
+        googleReviewUrl: normalizedGoogleUrl || undefined,
+        logoUrl: editBizLogoUrl.trim() || undefined,
+        status: editBizStatus
+      };
+
+      if (cleanSlug && cleanSlug !== editingBusiness.slug) {
+        payload.slug = cleanSlug;
+      }
+
+      await updateBusiness(editingBusiness.id, payload);
+      setEditingBusiness(null);
+      showToast('Alterações guardadas com sucesso!', 'success');
+    } catch (err: any) {
+      console.error('Error saving business edits in SuperAdmin:', err);
+      const errMsg = err?.message || 'Erro ao guardar alterações. Tente novamente.';
+      setEditError(errMsg);
+      showToast(errMsg, 'error');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     setToast({ text, type });
     setTimeout(() => setToast(null), 5000);
@@ -632,6 +715,15 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                           >
                             <LogIn className="w-3.5 h-3.5" />
                             <span>Aceder ao CRM</span>
+                          </button>
+
+                          {/* Editar Estabelecimento (Passo 1 & 2) */}
+                          <button
+                            onClick={() => handleOpenEditModal(b)}
+                            title="Editar dados deste estabelecimento"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
                           </button>
 
                           {/* Suspender / Ativar */}
@@ -1212,6 +1304,183 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                 )}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Business Modal (Passo 1 & 2) */}
+      {editingBusiness && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 my-8">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                  <Edit2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Editar Estabelecimento</h3>
+                  <p className="text-[11px] text-slate-400">ID: {editingBusiness.id} • Slug: {editingBusiness.slug}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingBusiness(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {editError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-semibold mb-4 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{editError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveEditBusiness} className="space-y-3.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Nome do Estabelecimento *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editBizName}
+                    onChange={(e) => setEditBizName(e.target.value)}
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Segmento</label>
+                  <input
+                    type="text"
+                    value={editBizCategory}
+                    onChange={(e) => setEditBizCategory(e.target.value)}
+                    placeholder="Ex: Barbearia, Restaurante"
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Telefone / WhatsApp</label>
+                  <input
+                    type="text"
+                    value={editBizPhone}
+                    onChange={(e) => setEditBizPhone(e.target.value)}
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">E-mail</label>
+                  <input
+                    type="email"
+                    value={editBizEmail}
+                    onChange={(e) => setEditBizEmail(e.target.value)}
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Endereço</label>
+                <input
+                  type="text"
+                  value={editBizAddress}
+                  onChange={(e) => setEditBizAddress(e.target.value)}
+                  placeholder="Rua, Número, Cidade"
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Plano</label>
+                  <select
+                    value={editBizPlan}
+                    onChange={(e) => setEditBizPlan(e.target.value)}
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                  >
+                    <option value="plan_starter">Starter</option>
+                    <option value="plan_pro">Pro</option>
+                    <option value="plan_enterprise">Enterprise</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Moeda</label>
+                  <select
+                    value={editBizCurrency}
+                    onChange={(e) => setEditBizCurrency(e.target.value as 'EUR' | 'BRL')}
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                  >
+                    <option value="EUR">Euro (€)</option>
+                    <option value="BRL">Real (R$)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Estado</label>
+                  <select
+                    value={editBizStatus}
+                    onChange={(e) => setEditBizStatus(e.target.value as 'active' | 'suspended')}
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                  >
+                    <option value="active">Ativo</option>
+                    <option value="suspended">Suspenso</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Link do Google Reviews / Maps</label>
+                <input
+                  type="url"
+                  value={editBizGoogleUrl}
+                  onChange={(e) => setEditBizGoogleUrl(e.target.value)}
+                  placeholder="https://search.google.com/local/writereview?placeid=..."
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">URL do Logótipo</label>
+                <input
+                  type="url"
+                  value={editBizLogoUrl}
+                  onChange={(e) => setEditBizLogoUrl(e.target.value)}
+                  placeholder="https://..."
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  disabled={savingEdit}
+                  onClick={() => setEditingBusiness(null)}
+                  className="py-2.5 px-4 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingEdit}
+                  className="py-2.5 px-5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-md shadow-indigo-200 transition flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                >
+                  {savingEdit ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>A guardar...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-3.5 h-3.5" />
+                      <span>Guardar Alterações</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

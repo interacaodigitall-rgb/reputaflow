@@ -202,25 +202,55 @@ export async function upsertBusinessSql(data: any) {
 }
 
 export async function updateBusinessSql(id: string, updates: any) {
-  const existingIdx = inMemoryBusinesses.findIndex(b => b.id === id);
+  const cleanId = String(id || '').trim();
+  const cleanSlug = updates.slug ? normalizeSlug(updates.slug) : '';
+
+  // 1. Locate existing record in memory by id OR slug
+  let existingIdx = inMemoryBusinesses.findIndex(
+    b => b.id === cleanId || normalizeSlug(b.slug) === normalizeSlug(cleanId)
+  );
+  if (existingIdx === -1 && cleanSlug) {
+    existingIdx = inMemoryBusinesses.findIndex(b => normalizeSlug(b.slug) === cleanSlug);
+  }
+
+  // Safe guarded payload: NEVER overwrite id, createdAt, or ownerId
+  const safeUpdates = { ...updates };
+  delete safeUpdates.id;
+  delete safeUpdates.tenant_id;
+  delete safeUpdates.createdAt;
+  delete safeUpdates.created_at;
+
+  const resolvedId = existingIdx !== -1 ? inMemoryBusinesses[existingIdx].id : cleanId;
+
   if (existingIdx !== -1) {
     inMemoryBusinesses[existingIdx] = {
       ...inMemoryBusinesses[existingIdx],
-      ...updates,
+      ...safeUpdates,
+      status: safeUpdates.status || inMemoryBusinesses[existingIdx].status || 'active',
       updatedAt: new Date()
     };
-    if (updates.slug) {
-      inMemoryBusinesses[existingIdx].slug = normalizeSlug(updates.slug);
+    if (cleanSlug) {
+      inMemoryBusinesses[existingIdx].slug = cleanSlug;
     }
   }
 
   try {
     const jsonDb = readDbJson();
     if (Array.isArray(jsonDb.businesses)) {
-      const idx = jsonDb.businesses.findIndex((b: any) => b.id === id);
+      let idx = jsonDb.businesses.findIndex(
+        (b: any) => b.id === cleanId || normalizeSlug(b.slug) === normalizeSlug(cleanId)
+      );
+      if (idx === -1 && cleanSlug) {
+        idx = jsonDb.businesses.findIndex((b: any) => normalizeSlug(b.slug) === cleanSlug);
+      }
       if (idx !== -1) {
-        jsonDb.businesses[idx] = { ...jsonDb.businesses[idx], ...updates, updatedAt: new Date() };
-        if (updates.slug) jsonDb.businesses[idx].slug = normalizeSlug(updates.slug);
+        jsonDb.businesses[idx] = {
+          ...jsonDb.businesses[idx],
+          ...safeUpdates,
+          status: safeUpdates.status || jsonDb.businesses[idx].status || 'active',
+          updatedAt: new Date()
+        };
+        if (cleanSlug) jsonDb.businesses[idx].slug = cleanSlug;
         writeDbJson(jsonDb);
       }
     }
@@ -230,29 +260,29 @@ export async function updateBusinessSql(id: string, updates: any) {
     const fieldsToUpdate: Record<string, any> = {
       updatedAt: new Date()
     };
-    if (updates.name !== undefined) fieldsToUpdate.name = updates.name;
-    if (updates.slug !== undefined) fieldsToUpdate.slug = normalizeSlug(updates.slug);
-    if (updates.category !== undefined) fieldsToUpdate.category = updates.category;
-    if (updates.logoUrl !== undefined) fieldsToUpdate.logoUrl = updates.logoUrl;
-    if (updates.phone !== undefined) fieldsToUpdate.phone = updates.phone;
-    if (updates.email !== undefined) fieldsToUpdate.email = updates.email;
-    if (updates.address !== undefined) fieldsToUpdate.address = updates.address;
-    if (updates.googleReviewUrl !== undefined) fieldsToUpdate.googleReviewUrl = updates.googleReviewUrl;
-    if (updates.status !== undefined) fieldsToUpdate.status = updates.status;
-    if (updates.planId !== undefined) fieldsToUpdate.planId = updates.planId;
-    if (updates.currency !== undefined) fieldsToUpdate.currency = updates.currency;
-    if (updates.password !== undefined) fieldsToUpdate.password = updates.password;
+    if (safeUpdates.name !== undefined) fieldsToUpdate.name = safeUpdates.name;
+    if (cleanSlug) fieldsToUpdate.slug = cleanSlug;
+    if (safeUpdates.category !== undefined) fieldsToUpdate.category = safeUpdates.category;
+    if (safeUpdates.logoUrl !== undefined) fieldsToUpdate.logoUrl = safeUpdates.logoUrl;
+    if (safeUpdates.phone !== undefined) fieldsToUpdate.phone = safeUpdates.phone;
+    if (safeUpdates.email !== undefined) fieldsToUpdate.email = safeUpdates.email;
+    if (safeUpdates.address !== undefined) fieldsToUpdate.address = safeUpdates.address;
+    if (safeUpdates.googleReviewUrl !== undefined) fieldsToUpdate.googleReviewUrl = safeUpdates.googleReviewUrl;
+    if (safeUpdates.status !== undefined) fieldsToUpdate.status = safeUpdates.status;
+    if (safeUpdates.planId !== undefined) fieldsToUpdate.planId = safeUpdates.planId;
+    if (safeUpdates.currency !== undefined) fieldsToUpdate.currency = safeUpdates.currency;
+    if (safeUpdates.password !== undefined) fieldsToUpdate.password = safeUpdates.password;
 
     const result = await db
       .update(businesses)
       .set(fieldsToUpdate)
-      .where(eq(businesses.id, id))
+      .where(eq(businesses.id, resolvedId))
       .returning();
 
-    return result[0] || inMemoryBusinesses[existingIdx] || null;
+    return result[0] || (existingIdx !== -1 ? inMemoryBusinesses[existingIdx] : null);
   } catch (error) {
     console.warn('[updateBusinessSql] Cloud SQL update failed, updated in-memory store:', error);
-    return inMemoryBusinesses[existingIdx] || null;
+    return existingIdx !== -1 ? inMemoryBusinesses[existingIdx] : null;
   }
 }
 
