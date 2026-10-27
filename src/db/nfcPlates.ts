@@ -2,7 +2,7 @@ import { db } from './index.ts';
 import { nfcPlates } from './schema.ts';
 import { eq, desc } from 'drizzle-orm';
 import { NfcPlate, CreateNfcBatchOptions } from '../types/nfc.ts';
-import { extractSlugFromUrl } from '../lib/urlHelper.ts';
+import { extractSlugFromUrl, isSamePlateCode, findBestMatchingPlate } from '../lib/urlHelper.ts';
 import { getAllBusinessesSql } from './businesses.ts';
 import fs from 'fs';
 import path from 'path';
@@ -32,20 +32,6 @@ function writeDbJson(data: any): void {
   }
 }
 
-function isSamePlateCode(aRaw: string, bRaw: string): boolean {
-  const a = String(aRaw || '').trim().toUpperCase();
-  const b = String(bRaw || '').trim().toUpperCase();
-  if (!a || !b) return false;
-  if (a === b) return true;
-  const aStrip = a.replace(/^(?:QRC|NFC)-?/i, '');
-  const bStrip = b.replace(/^(?:QRC|NFC)-?/i, '');
-  if (aStrip && bStrip && aStrip === bStrip) return true;
-  const aNum = aStrip.replace(/^0+/, '');
-  const bNum = bStrip.replace(/^0+/, '');
-  if (aNum && bNum && /^\d+$/.test(aNum) && /^\d+$/.test(bNum) && aNum === bNum) return true;
-  return false;
-}
-
 export async function getAllNfcPlatesSql(): Promise<NfcPlate[]> {
   const allBiz = await getAllBusinessesSql().catch(() => []);
   const jsonDb = readDbJson();
@@ -55,14 +41,34 @@ export async function getAllNfcPlatesSql(): Promise<NfcPlate[]> {
     const mId = raw.merchant_id || raw.merchantId || null;
     const redir = raw.redirect_url || raw.redirectUrl || null;
     const slugFromUrl = extractSlugFromUrl(redir);
-    const matchedBiz = allBiz.find(
-      (b) => (mId && b.id === mId) || (slugFromUrl && b.slug.toLowerCase() === slugFromUrl.toLowerCase())
-    );
+
+    const bizById = mId
+      ? allBiz.find((b) => b.id === mId || b.slug.toLowerCase() === String(mId).toLowerCase())
+      : undefined;
+    const bizBySlug = slugFromUrl
+      ? allBiz.find((b) => b.slug.toLowerCase() === slugFromUrl.toLowerCase() || b.id === slugFromUrl)
+      : undefined;
+
+    let matchedBiz = bizById || bizBySlug;
+    if (bizById && bizById.id !== 'biz_mrnavalha') {
+      matchedBiz = bizById;
+    } else if (bizBySlug && bizBySlug.id !== 'biz_mrnavalha') {
+      matchedBiz = bizBySlug;
+    }
+
+    const resolvedSlug =
+      (bizById && bizById.id !== 'biz_mrnavalha' ? bizById.slug : null) ||
+      (slugFromUrl && slugFromUrl !== 'mrnavalha' ? slugFromUrl : null) ||
+      matchedBiz?.slug ||
+      slugFromUrl ||
+      raw.merchant_slug ||
+      raw.merchantSlug;
+
     return {
       id: String(raw.id).trim(),
       status: String(raw.status).toLowerCase() === 'active' ? 'active' : 'inactive',
-      merchant_id: mId,
-      redirect_url: redir,
+      merchant_id: matchedBiz?.id || mId,
+      redirect_url: resolvedSlug ? `/?b=${encodeURIComponent(resolvedSlug)}` : redir,
       scan_count: Number(raw.scan_count ?? raw.scanCount ?? 0),
       created_at:
         raw.createdAt instanceof Date
@@ -73,7 +79,7 @@ export async function getAllNfcPlatesSql(): Promise<NfcPlate[]> {
           ? raw.updatedAt.toISOString()
           : raw.updatedAt || raw.updated_at || new Date().toISOString(),
       merchant_name: matchedBiz?.name || raw.merchant_name || raw.merchantName,
-      merchant_slug: slugFromUrl || matchedBiz?.slug || raw.merchant_slug || raw.merchantSlug
+      merchant_slug: resolvedSlug
     };
   };
 
@@ -103,14 +109,7 @@ export async function getNfcPlateByIdSql(id: string): Promise<NfcPlate | null> {
   if (!clean) return null;
 
   const allPlates = await getAllNfcPlatesSql();
-
-  // 1. Exact ID match first (case-insensitive)
-  const exact = allPlates.find((p) => p.id.toUpperCase() === clean.toUpperCase());
-  if (exact) return exact;
-
-  // 2. Normalized code match (e.g. QRC0004 <-> 004)
-  const normMatch = allPlates.find((p) => isSamePlateCode(p.id, clean));
-  return normMatch || null;
+  return findBestMatchingPlate(allPlates, clean);
 }
 
 export async function createNfcBatchSql(options: CreateNfcBatchOptions): Promise<NfcPlate[]> {
@@ -273,14 +272,21 @@ export async function unlinkNfcPlateSql(id: string): Promise<boolean> {
 
   const jsonDb = readDbJson();
   const plates: any[] = jsonDb.nfcPlates || [];
-  const idx = plates.findIndex((p: any) => String(p.id).trim() === cleanId);
-  if (idx >= 0) {
-    plates[idx].status = 'inactive';
-    plates[idx].merchant_id = null;
-    plates[idx].merchantId = null;
-    plates[idx].redirect_url = null;
-    plates[idx].redirectUrl = null;
-    plates[idx].updatedAt = now.toISOString();
+  let updated = false;
+  for (let i = 0; i < plates.length; i++) {
+    if (isSamePlateCode(plates[i].id, cleanId)) {
+      updated = true;
+      plates[i].status = 'inactive';
+      plates[i].merchant_id = null;
+      plates[i].merchantId = null;
+      plates[i].redirect_url = null;
+      plates[i].redirectUrl = null;
+      delete plates[i].merchant_name;
+      delete plates[i].merchant_slug;
+      plates[i].updatedAt = now.toISOString();
+    }
+  }
+  if (updated) {
     jsonDb.nfcPlates = plates;
     writeDbJson(jsonDb);
   }
@@ -295,7 +301,7 @@ export async function deleteNfcPlateSql(id: string): Promise<boolean> {
   } catch (error) {}
 
   const jsonDb = readDbJson();
-  jsonDb.nfcPlates = (jsonDb.nfcPlates || []).filter((p: any) => String(p.id).trim() !== cleanId);
+  jsonDb.nfcPlates = (jsonDb.nfcPlates || []).filter((p: any) => !isSamePlateCode(p.id, cleanId));
   writeDbJson(jsonDb);
   return true;
 }
@@ -310,13 +316,13 @@ export async function incrementNfcScanSql(id: string): Promise<void> {
           scanCount: (plate.scan_count || 0) + 1,
           updatedAt: new Date()
         })
-        .where(eq(nfcPlates.id, cleanId));
+        .where(eq(nfcPlates.id, plate.id));
     }
   } catch (error) {}
 
   const jsonDb = readDbJson();
   const plates: any[] = jsonDb.nfcPlates || [];
-  const idx = plates.findIndex((p: any) => String(p.id).trim() === cleanId);
+  const idx = plates.findIndex((p: any) => isSamePlateCode(p.id, cleanId));
   if (idx >= 0) {
     const curr = Number(plates[idx].scan_count || plates[idx].scanCount || 0);
     plates[idx].scan_count = curr + 1;

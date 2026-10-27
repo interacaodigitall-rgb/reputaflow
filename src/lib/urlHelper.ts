@@ -90,9 +90,9 @@ export function extractNfcPlateId(): string | null {
   if (typeof window === 'undefined') return null;
 
   try {
-    // 1. Pathname routing (/qr/:id or /nfc/:id)
+    // 1. Pathname routing (/qr/:id, /qrc/:id or /nfc/:id)
     const pathParts = window.location.pathname.split('/').filter(Boolean);
-    if ((pathParts[0] === 'qr' || pathParts[0] === 'nfc') && pathParts[1]) {
+    if ((pathParts[0] === 'qr' || pathParts[0] === 'qrc' || pathParts[0] === 'nfc') && pathParts[1]) {
       return decodeURIComponent(pathParts[1].trim());
     }
 
@@ -100,6 +100,7 @@ export function extractNfcPlateId(): string | null {
     const searchParams = new URLSearchParams(window.location.search);
     const fromSearch =
       searchParams.get('qr') ||
+      searchParams.get('qrc') ||
       searchParams.get('nfc') ||
       searchParams.get('nfc_id') ||
       searchParams.get('plate');
@@ -116,6 +117,7 @@ export function extractNfcPlateId(): string | null {
         const hashParams = new URLSearchParams(hash.substring(qIndex));
         const fromHashQuery =
           hashParams.get('qr') ||
+          hashParams.get('qrc') ||
           hashParams.get('nfc') ||
           hashParams.get('nfc_id') ||
           hashParams.get('plate');
@@ -125,7 +127,7 @@ export function extractNfcPlateId(): string | null {
       }
 
       const pathSegments = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
-      if ((pathSegments[0] === 'qr' || pathSegments[0] === 'nfc') && pathSegments[1]) {
+      if ((pathSegments[0] === 'qr' || pathSegments[0] === 'qrc' || pathSegments[0] === 'nfc') && pathSegments[1]) {
         return decodeURIComponent(pathSegments[1].trim());
       }
     }
@@ -393,11 +395,86 @@ export async function convertGoogleMapsToReviewUrl(
 export function extractSlugFromUrl(url: string | null | undefined): string | null {
   if (!url) return null;
   const clean = url.trim();
-  const matchB = clean.match(/[?&]b=([^&#]+)/i);
-  if (matchB) return decodeURIComponent(matchB[1]);
-  const matchR = clean.match(/(?:\/r\/|\/review\/|\/b\/)([^/?#]+)/i);
-  if (matchR) return decodeURIComponent(matchR[1]);
+  const matchQuery = clean.match(/[?&](?:b|business|review|slug|id)=([^&#]+)/i);
+  if (matchQuery && matchQuery[1]) return decodeURIComponent(matchQuery[1].trim());
+  const matchPath = clean.match(/(?:\/r\/|\/review\/|\/b\/|\/business\/)([^/?#]+)/i);
+  if (matchPath && matchPath[1]) return decodeURIComponent(matchPath[1].trim());
   return null;
+}
+
+/**
+ * Compares two QR/NFC plate codes (e.g. 'QRC0004' vs '004' vs 'NFC-004').
+ */
+export function isSamePlateCode(aRaw: string | null | undefined, bRaw: string | null | undefined): boolean {
+  const a = String(aRaw || '').trim().toUpperCase().replace(/^#+/, '');
+  const b = String(bRaw || '').trim().toUpperCase().replace(/^#+/, '');
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const aStrip = a.replace(/^(?:QRC|NFC|QR)-?/i, '');
+  const bStrip = b.replace(/^(?:QRC|NFC|QR)-?/i, '');
+  if (aStrip && bStrip && aStrip === bStrip) return true;
+  const aNum = aStrip.replace(/^0+/, '');
+  const bNum = bStrip.replace(/^0+/, '');
+  if (aNum && bNum && /^\d+$/.test(aNum) && /^\d+$/.test(bNum) && aNum === bNum) return true;
+  return false;
+}
+
+/**
+ * Finds the best matching plate from a list of plates for a given code (e.g. 'QRC0004'),
+ * strictly prioritizing active plates, exact code matches, custom merchant assignments, and newest timestamps.
+ */
+export function findBestMatchingPlate<T extends Record<string, any>>(plates: T[], targetCode: string): T | null {
+  const cleanTarget = String(targetCode || '').trim().toUpperCase().replace(/^#+/, '');
+  if (!cleanTarget || !Array.isArray(plates) || plates.length === 0) return null;
+
+  const candidates = plates.filter((p) => {
+    if (!p) return false;
+    const pId = p.id || p.qr_code_id || p.code || '';
+    const pQr = p.qr_code_id || '';
+    return isSamePlateCode(pId, cleanTarget) || (pQr && isSamePlateCode(pQr, cleanTarget));
+  });
+
+  if (candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0];
+
+  return candidates.sort((a, b) => {
+    const aStatus = String(a.status || 'active').toLowerCase() === 'active';
+    const bStatus = String(b.status || 'active').toLowerCase() === 'active';
+    const aHasTarget = Boolean(a.redirect_url || a.redirectUrl || a.merchant_id || a.merchantId || a.tenant_id || a.merchant_slug);
+    const bHasTarget = Boolean(b.redirect_url || b.redirectUrl || b.merchant_id || b.merchantId || b.tenant_id || b.merchant_slug);
+
+    const aActive = aStatus && aHasTarget ? 1 : 0;
+    const bActive = bStatus && bHasTarget ? 1 : 0;
+    if (aActive !== bActive) return bActive - aActive;
+
+    // Prefer custom (non-default-seed) merchant assignment if plate is not #002
+    const isPlate2 = isSamePlateCode(cleanTarget, 'QRC0002');
+    if (!isPlate2) {
+      const aSlug = extractSlugFromUrl(a.redirect_url || a.redirectUrl) || a.merchant_slug || '';
+      const bSlug = extractSlugFromUrl(b.redirect_url || b.redirectUrl) || b.merchant_slug || '';
+      const aCustom = (aSlug && aSlug !== 'mrnavalha') || (a.merchant_id && a.merchant_id !== 'biz_mrnavalha') ? 1 : 0;
+      const bCustom = (bSlug && bSlug !== 'mrnavalha') || (b.merchant_id && b.merchant_id !== 'biz_mrnavalha') ? 1 : 0;
+      if (aCustom !== bCustom) return bCustom - aCustom;
+    }
+
+    // Prefer exact code match (e.g. 'QRC0004' === 'QRC0004' over '004')
+    const aExact =
+      String(a.id || '').trim().toUpperCase() === cleanTarget ||
+      String(a.qr_code_id || '').trim().toUpperCase() === cleanTarget
+        ? 1
+        : 0;
+    const bExact =
+      String(b.id || '').trim().toUpperCase() === cleanTarget ||
+      String(b.qr_code_id || '').trim().toUpperCase() === cleanTarget
+        ? 1
+        : 0;
+    if (aExact !== bExact) return bExact - aExact;
+
+    // Prefer newer updated_at timestamp
+    const aTime = new Date(a.updated_at || a.updatedAt || a.created_at || a.createdAt || 0).getTime() || 0;
+    const bTime = new Date(b.updated_at || b.updatedAt || b.created_at || b.createdAt || 0).getTime() || 0;
+    return bTime - aTime;
+  })[0];
 }
 
 

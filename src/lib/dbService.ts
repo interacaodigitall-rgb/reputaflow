@@ -11,6 +11,7 @@ import {
 } from '../types/index.ts';
 import { supabase, uploadBusinessLogo } from './supabase.ts';
 import { slugify } from './urlHelper.ts';
+import { fetchGlobalCloudData, pushGlobalCloudData } from './cloudSync.ts';
 import {
   REGISTERED_BUSINESSES as INITIAL_BIZ,
   INITIAL_CUSTOMERS,
@@ -322,6 +323,7 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
 
   const fetchMerchants = async () => {
     let apiBusinesses: Business[] = [];
+    let cloudBusinesses: Business[] = [];
     let supabaseBusinesses: Business[] = [];
     let apiAvailable = false;
 
@@ -340,7 +342,15 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
       console.warn('[subscribeBusinesses API check]:', apiErr);
     }
 
-    // 2. Try Supabase ('businesses' and fallback 'tenants' / 'establishments')
+    // 2. Try Global Cloud Sync (works across Vercel, mobile & desktop)
+    try {
+      const cloudData = await fetchGlobalCloudData();
+      if (cloudData && Array.isArray(cloudData.businesses) && cloudData.businesses.length > 0) {
+        cloudBusinesses = cloudData.businesses.map(mapBusinessRow);
+      }
+    } catch {}
+
+    // 3. Try Supabase ('businesses' and fallback 'tenants' / 'establishments')
     try {
       const { data, error } = await supabase.from('businesses').select('*');
       if (!error && Array.isArray(data) && data.length > 0) {
@@ -355,11 +365,18 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
       console.warn('[subscribeBusinesses Supabase check]:', supaErr);
     }
 
-    // 3. Merge all sources: localStorage cache + current memory + API + Supabase + INITIAL_BIZ
+    // 4. Merge all sources: localStorage cache + current memory + API + CloudSync + Supabase + INITIAL_BIZ
     const cached = readCachedBusinesses();
-    const merged = mergeBusinessLists(cached, runtimeBusinesses, apiBusinesses, supabaseBusinesses, [...INITIAL_BIZ]);
+    const merged = mergeBusinessLists(
+      cached,
+      runtimeBusinesses,
+      apiBusinesses,
+      cloudBusinesses,
+      supabaseBusinesses,
+      [...INITIAL_BIZ]
+    );
 
-    // 4. If API is available and any cached/local business is missing on the server, sync it automatically
+    // 5. If API is available and any cached/local business is missing on the server, sync it automatically
     if (apiAvailable && cached.length > 0) {
       const apiIds = new Set(apiBusinesses.map((b) => b.id));
       const apiSlugs = new Set(apiBusinesses.map((b) => (b.slug || '').toLowerCase()));
@@ -371,6 +388,15 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
             body: JSON.stringify(localBiz)
           }).catch(() => {});
         }
+      }
+    }
+
+    // 6. If any local business is missing from CloudSync, push to CloudSync for mobile QR access
+    if (cached.length > 0) {
+      const cloudSlugs = new Set(cloudBusinesses.map((b) => (b.slug || '').toLowerCase()));
+      const hasMissingInCloud = cached.some((b) => !cloudSlugs.has((b.slug || '').toLowerCase()));
+      if (hasMissingInCloud) {
+        pushGlobalCloudData({ businesses: merged }).catch(() => {});
       }
     }
 
@@ -429,25 +455,50 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
     }
   } catch {}
 
-  // 2. Check Supabase across 'businesses', 'tenants', and 'establishments'
+  // 2. Check Global Cloud Sync (works across Vercel, mobile & desktop)
+  try {
+    const cloudData = await fetchGlobalCloudData(true);
+    if (cloudData && Array.isArray(cloudData.businesses)) {
+      const cloudMatch = cloudData.businesses
+        .map(mapBusinessRow)
+        .find(
+          (b) =>
+            normalizeKey(b.slug) === normSlug ||
+            normalizeKey(b.id) === normSlug ||
+            normalizeKey(b.name) === normSlug
+        );
+      if (cloudMatch) {
+        runtimeBusinesses = mergeBusinessLists([cloudMatch], runtimeBusinesses, readCachedBusinesses());
+        saveCachedBusinesses(runtimeBusinesses);
+        return cloudMatch;
+      }
+    }
+  } catch {}
+
+  // 3. Check Supabase across 'businesses', 'tenants', and 'establishments' using safe .select('*')
   const tables = ['businesses', 'tenants', 'establishments'];
   for (const tbl of tables) {
     try {
-      const { data, error } = await supabase
-        .from(tbl)
-        .select('*')
-        .or(`slug.ilike.${clean},slug.ilike.${normSlug},id.ilike.${clean}`);
-
-      if (!error && data && data.length > 0) {
-        const mapped = mapBusinessRow(data[0]);
-        runtimeBusinesses = mergeBusinessLists([mapped], runtimeBusinesses, readCachedBusinesses());
-        saveCachedBusinesses(runtimeBusinesses);
-        return mapped;
+      const { data, error } = await supabase.from(tbl).select('*');
+      if (!error && Array.isArray(data) && data.length > 0) {
+        const match = data
+          .map(mapBusinessRow)
+          .find(
+            (b) =>
+              normalizeKey(b.slug) === normSlug ||
+              normalizeKey(b.id) === normSlug ||
+              normalizeKey(b.name) === normSlug
+          );
+        if (match) {
+          runtimeBusinesses = mergeBusinessLists([match], runtimeBusinesses, readCachedBusinesses());
+          saveCachedBusinesses(runtimeBusinesses);
+          return match;
+        }
       }
     } catch {}
   }
 
-  // 3. Check merged local & runtime businesses strictly matching normSlug
+  // 4. Check merged local & runtime businesses strictly matching normSlug
   const mergedLocal = mergeBusinessLists(readCachedBusinesses(), runtimeBusinesses, [...INITIAL_BIZ]);
   const localMatch = mergedLocal.find(
     (b) =>
@@ -536,6 +587,7 @@ export async function addBusiness(data: Omit<Business, 'id' | 'createdAt' | 'upd
   unmarkBusinessKeyDeleted(id, uniqueSlug);
   runtimeBusinesses = [newBiz, ...currentAll.filter((b) => b.id !== id)];
   saveCachedBusinesses(runtimeBusinesses);
+  pushGlobalCloudData({ businesses: runtimeBusinesses }).catch(() => {});
   notifyDataChanged();
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated'));
@@ -657,6 +709,7 @@ export async function updateBusiness(id: string, data: Partial<Business>): Promi
     return b;
   });
   saveCachedBusinesses(runtimeBusinesses);
+  pushGlobalCloudData({ businesses: runtimeBusinesses }).catch(() => {});
   notifyDataChanged();
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated'));
@@ -731,6 +784,10 @@ export async function deleteBusiness(id: string): Promise<void> {
 
   runtimeBusinesses = runtimeBusinesses.filter((b) => b.id !== cleanId);
   saveCachedBusinesses(runtimeBusinesses);
+  pushGlobalCloudData({
+    businesses: runtimeBusinesses,
+    deletedBusinessIds: Array.from(readDeletedBusinessKeys())
+  }).catch(() => {});
   notifyDataChanged();
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated'));

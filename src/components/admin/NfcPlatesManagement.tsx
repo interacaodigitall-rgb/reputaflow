@@ -228,13 +228,13 @@ export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ busine
     const mId = plate.merchant_id || (businesses.length > 0 ? businesses[0].id : '');
     setSelectedMerchantId(mId);
 
-    if (plate.redirect_url) {
+    const biz = businesses.find((b) => b.id === mId);
+    if (biz) {
+      setCustomRedirectUrl(getPublicReviewUrl(biz.slug || biz.id));
+    } else if (plate.redirect_url) {
       setCustomRedirectUrl(plate.redirect_url);
-    } else if (mId) {
-      const biz = businesses.find((b) => b.id === mId);
-      if (biz) {
-        setCustomRedirectUrl(getPublicReviewUrl(biz.slug || biz.id));
-      }
+    } else {
+      setCustomRedirectUrl('');
     }
   };
 
@@ -257,16 +257,23 @@ export const NfcPlatesManagement: React.FC<NfcPlatesManagementProps> = ({ busine
       return;
     }
 
-    if (!customRedirectUrl.trim()) {
+    const selectedBiz = businesses.find((b) => b.id === selectedMerchantId);
+    const effectiveRedirectUrl = selectedBiz
+      ? getPublicReviewUrl(selectedBiz.slug || selectedBiz.id)
+      : customRedirectUrl.trim();
+
+    if (!effectiveRedirectUrl) {
       showToast('Por favor, informe ou gere a URL de redirecionamento.', 'error');
       return;
     }
 
     setIsLinking(true);
     try {
-      const res = await linkNfcPlate(plateToLink.id, selectedMerchantId, customRedirectUrl.trim());
+      const res = await linkNfcPlate(plateToLink.id, selectedMerchantId, effectiveRedirectUrl);
       if (res.success) {
-        showToast(`Placa #${plateToLink.id} vinculada e ativada com sucesso!`);
+        showToast(
+          `Placa #${plateToLink.id} vinculada a "${selectedBiz?.name || selectedMerchantId}" e ativada com sucesso!`
+        );
         setPlateToLink(null);
         const updated = await getNfcPlates(businessesRef.current);
         setPlates(updated);
