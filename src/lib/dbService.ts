@@ -412,7 +412,42 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
   const normSlug = normalizeKey(clean);
   if (!normSlug) return null;
 
-  // 1. Check merged local & runtime businesses first for instant response
+  // 1. Check Server REST API (/api/businesses/:slug) with cache-busting for fresh multi-device resolution
+  try {
+    const apiRes = await fetch(`/api/businesses/${encodeURIComponent(clean)}?_v=${Date.now()}`, {
+      cache: 'no-store'
+    }).catch(() => null);
+    const contentType = apiRes?.headers?.get('content-type') || '';
+    if (apiRes && apiRes.ok && contentType.includes('application/json')) {
+      const apiBiz = await apiRes.json();
+      if (apiBiz && apiBiz.id) {
+        const mapped = mapBusinessRow(apiBiz);
+        runtimeBusinesses = mergeBusinessLists([mapped], runtimeBusinesses, readCachedBusinesses());
+        saveCachedBusinesses(runtimeBusinesses);
+        return mapped;
+      }
+    }
+  } catch {}
+
+  // 2. Check Supabase across 'businesses', 'tenants', and 'establishments'
+  const tables = ['businesses', 'tenants', 'establishments'];
+  for (const tbl of tables) {
+    try {
+      const { data, error } = await supabase
+        .from(tbl)
+        .select('*')
+        .or(`slug.ilike.${clean},slug.ilike.${normSlug},id.ilike.${clean}`);
+
+      if (!error && data && data.length > 0) {
+        const mapped = mapBusinessRow(data[0]);
+        runtimeBusinesses = mergeBusinessLists([mapped], runtimeBusinesses, readCachedBusinesses());
+        saveCachedBusinesses(runtimeBusinesses);
+        return mapped;
+      }
+    } catch {}
+  }
+
+  // 3. Check merged local & runtime businesses strictly matching normSlug
   const mergedLocal = mergeBusinessLists(readCachedBusinesses(), runtimeBusinesses, [...INITIAL_BIZ]);
   const localMatch = mergedLocal.find(
     (b) =>
@@ -421,32 +456,6 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
       normalizeKey(b.name) === normSlug
   );
   if (localMatch) return localMatch;
-
-  // 2. Check Server REST API (/api/businesses/:slug)
-  try {
-    const apiRes = await fetch(`/api/businesses/${encodeURIComponent(clean)}`, { cache: 'no-store' }).catch(() => null);
-    const contentType = apiRes?.headers?.get('content-type') || '';
-    if (apiRes && apiRes.ok && contentType.includes('application/json')) {
-      const apiBiz = await apiRes.json();
-      if (apiBiz && apiBiz.id) {
-        return mapBusinessRow(apiBiz);
-      }
-    }
-  } catch {}
-
-  // 3. Check Supabase
-  try {
-    const { data, error } = await supabase
-      .from('businesses')
-      .select('*')
-      .or(`slug.eq.${clean},slug.eq.${normSlug},id.eq.${clean}`);
-
-    if (!error && data && data.length > 0) {
-      return mapBusinessRow(data[0]);
-    }
-  } catch (e) {
-    console.error('[getBusinessBySlug catch]:', e);
-  }
 
   return null;
 }

@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { NfcPlate, CreateNfcBatchOptions } from '../types/nfc';
 import { Business } from '../types';
+import { extractSlugFromUrl } from './urlHelper';
 export type { NfcPlate, CreateNfcBatchOptions } from '../types/nfc';
 
 const NFC_STORAGE_KEY = 'reputaflow_nfc_plates_cache';
@@ -129,18 +130,22 @@ export function findFastNfcPlate(idOrCode: string): NfcPlate | null {
 
 function mapNfcRow(row: any, businesses: Business[] = []): NfcPlate {
   const mId = row.merchant_id || row.merchantId || null;
-  const matchedBiz = mId ? businesses.find((b) => b.id === mId) : undefined;
+  const redir = row.redirect_url || row.redirectUrl || null;
+  const slugFromUrl = extractSlugFromUrl(redir);
+  const matchedBiz = businesses.find(
+    (b) => (mId && b.id === mId) || (slugFromUrl && b.slug.toLowerCase() === slugFromUrl.toLowerCase())
+  );
 
   return {
     id: String(row.id || '').trim(),
     status: String(row.status || '').toLowerCase() === 'active' ? 'active' : 'inactive',
     merchant_id: mId,
-    redirect_url: row.redirect_url || row.redirectUrl || null,
+    redirect_url: redir,
     scan_count: Number(row.scan_count ?? row.scanCount ?? 0),
     created_at: row.created_at || row.createdAt || new Date().toISOString(),
     updated_at: row.updated_at || row.updatedAt || new Date().toISOString(),
     merchant_name: matchedBiz?.name || row.merchant_name,
-    merchant_slug: matchedBiz?.slug || row.merchant_slug,
+    merchant_slug: slugFromUrl || matchedBiz?.slug || row.merchant_slug,
     merchant_logo_url: matchedBiz?.logoUrl || row.merchant_logo_url
   };
 }
@@ -185,11 +190,14 @@ export async function getNfcPlates(businesses: Business[] = []): Promise<NfcPlat
   }
 
   const merged = Array.from(plateMap.values()).map((p) => {
-    const matchedBiz = p.merchant_id ? businesses.find((b) => b.id === p.merchant_id) : undefined;
+    const slugFromUrl = extractSlugFromUrl(p.redirect_url);
+    const matchedBiz = businesses.find(
+      (b) => (p.merchant_id && b.id === p.merchant_id) || (slugFromUrl && b.slug.toLowerCase() === slugFromUrl.toLowerCase())
+    );
     return {
       ...p,
       merchant_name: matchedBiz?.name || p.merchant_name,
-      merchant_slug: matchedBiz?.slug || p.merchant_slug,
+      merchant_slug: slugFromUrl || matchedBiz?.slug || p.merchant_slug,
       merchant_logo_url: matchedBiz?.logoUrl || p.merchant_logo_url
     };
   });
@@ -328,24 +336,41 @@ export async function linkNfcPlate(
   redirectUrl: string
 ): Promise<{ success: boolean; error?: string }> {
   const now = new Date().toISOString();
+  const cleanRedirect = redirectUrl.trim();
+  const slugFromUrl = extractSlugFromUrl(cleanRedirect) || undefined;
 
-  // 1. Update local cache
+  // 1. Update local cache (matching both exact ID and normalized numeric ID e.g. 004 <-> QRC0004)
   const localCache = getLocalNfcCache();
-  const idx = localCache.findIndex((p) => p.id === id);
-  if (idx >= 0) {
-    localCache[idx] = {
-      ...localCache[idx],
-      status: 'active',
-      merchant_id: merchantId,
-      redirect_url: redirectUrl.trim(),
-      updated_at: now
-    };
-  } else {
+  const cleanTarget = id.trim().toLowerCase();
+  const strippedTarget = cleanTarget.replace(/^(?:qrc|nfc)-?/i, '');
+  const numTarget = strippedTarget.replace(/^0+/, '');
+
+  let matchedInCache = false;
+  for (let i = 0; i < localCache.length; i++) {
+    const pId = String(localCache[i].id || '').trim().toLowerCase();
+    const pStripped = pId.replace(/^(?:qrc|nfc)-?/i, '');
+    const pNum = pStripped.replace(/^0+/, '');
+    if (pId === cleanTarget || (numTarget && pNum === numTarget)) {
+      matchedInCache = true;
+      localCache[i] = {
+        ...localCache[i],
+        status: 'active',
+        merchant_id: merchantId,
+        redirect_url: cleanRedirect,
+        merchant_slug: slugFromUrl,
+        merchant_name: undefined,
+        updated_at: now
+      };
+    }
+  }
+
+  if (!matchedInCache) {
     localCache.push({
       id,
       status: 'active',
       merchant_id: merchantId,
-      redirect_url: redirectUrl.trim(),
+      redirect_url: cleanRedirect,
+      merchant_slug: slugFromUrl,
       scan_count: 0,
       created_at: now,
       updated_at: now
@@ -358,24 +383,41 @@ export async function linkNfcPlate(
     await fetch('/api/nfc/link', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, merchantId, redirectUrl })
+      body: JSON.stringify({ id, merchantId, redirectUrl: cleanRedirect })
     });
   } catch (e) {}
 
-  // 3. Persist to Supabase
+  // 3. Persist to Supabase (nfc_plates and qr_plates)
   try {
     await supabase
       .from('nfc_plates')
-      .upsert({
-        id,
-        status: 'active',
-        merchant_id: merchantId || null,
-        redirect_url: redirectUrl.trim(),
-        updated_at: now
-      }, { onConflict: 'id' });
+      .upsert(
+        {
+          id,
+          status: 'active',
+          merchant_id: merchantId || null,
+          redirect_url: cleanRedirect,
+          updated_at: now
+        },
+        { onConflict: 'id' }
+      );
   } catch (err) {
     console.warn('[linkNfcPlate catch]:', err);
   }
+
+  try {
+    await supabase
+      .from('qr_plates')
+      .upsert(
+        {
+          qr_code_id: id.toUpperCase(),
+          tenant_id: merchantId || slugFromUrl || null,
+          status: 'active',
+          redirect_url: cleanRedirect
+        },
+        { onConflict: 'qr_code_id' }
+      );
+  } catch {}
 
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('reputaflow_nfc_sync'));

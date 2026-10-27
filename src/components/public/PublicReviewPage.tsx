@@ -17,7 +17,14 @@ import {
   Loader2
 } from 'lucide-react';
 import { Business } from '../../types';
-import { getBusinessBySlug, submitReview, submitFeedbackAndRecovery, getLocalBusinesses } from '../../lib/dbService';
+import {
+  getBusinessBySlug,
+  submitReview,
+  submitFeedbackAndRecovery,
+  getLocalBusinesses,
+  normalizeKey
+} from '../../lib/dbService';
+import { extractReviewSlug } from '../../lib/urlHelper';
 import { BusinessLogo } from '../common/BusinessLogo';
 
 interface PublicReviewPageProps {
@@ -31,10 +38,20 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
   businessOverride,
   onBackToApp
 }) => {
-  // Synchronous initial probe
+  // PASSO 3: ISOLAMENTO MULTI-TENANT - Lê o slug exclusivamente a partir do parâmetro atual da URL (ou prop direta)
+  const urlSlug = extractReviewSlug();
+  const activeSlug = (urlSlug || slug || '').trim();
+  const normActiveSlug = normalizeKey(activeSlug);
+
+  // Match síncrono APENAS se o registo local corresponder estritamente ao slug solicitado
   const initialLocalMatch =
-    businessOverride ||
-    (slug ? getLocalBusinesses().find((b: Business) => b.slug === slug || b.id === slug) : null) ||
+    (!urlSlug && businessOverride) ||
+    (normActiveSlug
+      ? getLocalBusinesses().find(
+          (b: Business) =>
+            normalizeKey(b.slug) === normActiveSlug || normalizeKey(b.id) === normActiveSlug
+        )
+      : null) ||
     null;
 
   const [business, setBusiness] = useState<Business | null>(initialLocalMatch);
@@ -57,39 +74,47 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const fetchBusiness = async () => {
-    if (businessOverride) {
+    const currentSlug = (extractReviewSlug() || slug || '').trim();
+    const currentNorm = normalizeKey(currentSlug);
+
+    // Se estiver apenas em modo de pré-visualização interna sem slug na URL
+    if (!extractReviewSlug() && businessOverride) {
       setBusiness(businessOverride);
       setLoading(false);
       return;
     }
 
-    if (!slug || !slug.trim()) {
-      // If no slug provided, check if there is at least one local business available
-      const local = getLocalBusinesses();
-      if (local.length > 0) {
-        setBusiness(local[0]);
-      } else {
-        setLoadError('Nenhum estabelecimento especificado no link (?b=slug).');
-      }
+    if (!currentSlug) {
+      setBusiness(null);
+      setLoadError('Nenhum estabelecimento especificado no link (?b=slug ou /r/slug).');
       setLoading(false);
       return;
     }
 
-    if (!business) {
+    // Se o estado atual pertence a outro comércio, limpa imediatamente antes de buscar
+    let hasMatchingCurrent = false;
+    if (
+      business &&
+      (normalizeKey(business.slug) === currentNorm || normalizeKey(business.id) === currentNorm)
+    ) {
+      hasMatchingCurrent = true;
+    } else {
+      setBusiness(null);
       setLoading(true);
     }
+
     setLoadError(null);
 
     try {
-      const found = await getBusinessBySlug(slug);
+      const found = await getBusinessBySlug(currentSlug);
       if (found) {
         setBusiness(found);
-      } else if (!business) {
-        setLoadError(`Estabelecimento não encontrado para o link informado ("${slug}").`);
+      } else if (!hasMatchingCurrent) {
+        setLoadError(`Estabelecimento não encontrado para o link informado ("${currentSlug}").`);
       }
     } catch (err: any) {
       console.warn('Error loading business for review:', err);
-      if (!business) {
+      if (!hasMatchingCurrent) {
         setLoadError('Não foi possível carregar os dados do estabelecimento.');
       }
     } finally {
@@ -98,11 +123,18 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
   };
 
   useEffect(() => {
+    // Limpa tokens ou slugs antigos de estabelecimentos anteriores no cliente (Passo 1)
+    try {
+      localStorage.removeItem('active_tenant_slug');
+      localStorage.removeItem('current_establishment_id');
+    } catch {}
+
     fetchBusiness();
 
     const handleUpdate = () => {
-      if (slug) {
-        getBusinessBySlug(slug).then((b) => {
+      const currentSlug = (extractReviewSlug() || slug || '').trim();
+      if (currentSlug) {
+        getBusinessBySlug(currentSlug).then((b) => {
           if (b) setBusiness(b);
         });
       }
@@ -115,7 +147,7 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
       window.removeEventListener('reputaflow_businesses_updated', handleUpdate);
       clearInterval(interval);
     };
-  }, [slug, businessOverride]);
+  }, [activeSlug, businessOverride]);
 
   const handleSelectStar = (rating: number) => {
     setSelectedRating(rating);

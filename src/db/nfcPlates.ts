@@ -2,6 +2,8 @@ import { db } from './index.ts';
 import { nfcPlates } from './schema.ts';
 import { eq, desc } from 'drizzle-orm';
 import { NfcPlate, CreateNfcBatchOptions } from '../types/nfc.ts';
+import { extractSlugFromUrl } from '../lib/urlHelper.ts';
+import { getAllBusinessesSql } from './businesses.ts';
 import fs from 'fs';
 import path from 'path';
 
@@ -30,75 +32,85 @@ function writeDbJson(data: any): void {
   }
 }
 
+function isSamePlateCode(aRaw: string, bRaw: string): boolean {
+  const a = String(aRaw || '').trim().toUpperCase();
+  const b = String(bRaw || '').trim().toUpperCase();
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const aStrip = a.replace(/^(?:QRC|NFC)-?/i, '');
+  const bStrip = b.replace(/^(?:QRC|NFC)-?/i, '');
+  if (aStrip && bStrip && aStrip === bStrip) return true;
+  const aNum = aStrip.replace(/^0+/, '');
+  const bNum = bStrip.replace(/^0+/, '');
+  if (aNum && bNum && /^\d+$/.test(aNum) && /^\d+$/.test(bNum) && aNum === bNum) return true;
+  return false;
+}
+
 export async function getAllNfcPlatesSql(): Promise<NfcPlate[]> {
+  const allBiz = await getAllBusinessesSql().catch(() => []);
+  const jsonDb = readDbJson();
+  const jsonPlates: any[] = jsonDb.nfcPlates || [];
+
+  const mapPlate = (raw: any): NfcPlate => {
+    const mId = raw.merchant_id || raw.merchantId || null;
+    const redir = raw.redirect_url || raw.redirectUrl || null;
+    const slugFromUrl = extractSlugFromUrl(redir);
+    const matchedBiz = allBiz.find(
+      (b) => (mId && b.id === mId) || (slugFromUrl && b.slug.toLowerCase() === slugFromUrl.toLowerCase())
+    );
+    return {
+      id: String(raw.id).trim(),
+      status: String(raw.status).toLowerCase() === 'active' ? 'active' : 'inactive',
+      merchant_id: mId,
+      redirect_url: redir,
+      scan_count: Number(raw.scan_count ?? raw.scanCount ?? 0),
+      created_at:
+        raw.createdAt instanceof Date
+          ? raw.createdAt.toISOString()
+          : raw.createdAt || raw.created_at || new Date().toISOString(),
+      updated_at:
+        raw.updatedAt instanceof Date
+          ? raw.updatedAt.toISOString()
+          : raw.updatedAt || raw.updated_at || new Date().toISOString(),
+      merchant_name: matchedBiz?.name || raw.merchant_name || raw.merchantName,
+      merchant_slug: slugFromUrl || matchedBiz?.slug || raw.merchant_slug || raw.merchantSlug
+    };
+  };
+
+  const plateMap = new Map<string, NfcPlate>();
+  jsonPlates.forEach((p) => {
+    const mapped = mapPlate(p);
+    plateMap.set(mapped.id.toUpperCase(), mapped);
+  });
+
   try {
     const rows = await db.select().from(nfcPlates).orderBy(desc(nfcPlates.createdAt));
     if (rows && rows.length > 0) {
-      return rows.map((r) => ({
-        id: r.id,
-        status: r.status as any,
-        merchant_id: r.merchantId,
-        redirect_url: r.redirectUrl,
-        scan_count: r.scanCount,
-        created_at: r.createdAt.toISOString(),
-        updated_at: r.updatedAt.toISOString()
-      }));
+      rows.forEach((r) => {
+        const mapped = mapPlate(r);
+        plateMap.set(mapped.id.toUpperCase(), mapped);
+      });
     }
   } catch (error) {
     // Cloud SQL table may not exist, fallback to db.json
   }
 
-  const jsonDb = readDbJson();
-  const plates = jsonDb.nfcPlates || [];
-  return plates.map((p: any) => ({
-    id: String(p.id).trim(),
-    status: String(p.status).toLowerCase() === 'active' ? 'active' : 'inactive',
-    merchant_id: p.merchant_id || p.merchantId || null,
-    redirect_url: p.redirect_url || p.redirectUrl || null,
-    scan_count: Number(p.scan_count ?? p.scanCount ?? 0),
-    created_at: p.createdAt || p.created_at || new Date().toISOString(),
-    updated_at: p.updatedAt || p.updated_at || new Date().toISOString(),
-    merchant_name: p.merchant_name || p.merchantName,
-    merchant_slug: p.merchant_slug || p.merchantSlug
-  }));
+  return Array.from(plateMap.values());
 }
 
 export async function getNfcPlateByIdSql(id: string): Promise<NfcPlate | null> {
-  const clean = id.trim();
-  try {
-    const rows = await db.select().from(nfcPlates).where(eq(nfcPlates.id, clean)).limit(1);
-    if (rows.length > 0) {
-      const r = rows[0];
-      return {
-        id: r.id,
-        status: r.status as any,
-        merchant_id: r.merchantId,
-        redirect_url: r.redirectUrl,
-        scan_count: r.scanCount,
-        created_at: r.createdAt.toISOString(),
-        updated_at: r.updatedAt.toISOString()
-      };
-    }
-  } catch (error) {
-    // Fallback to db.json
-  }
+  const clean = (id || '').trim();
+  if (!clean) return null;
 
-  const jsonDb = readDbJson();
-  const plates: any[] = jsonDb.nfcPlates || [];
-  const found = plates.find((p: any) => String(p.id).trim() === clean);
-  if (!found) return null;
+  const allPlates = await getAllNfcPlatesSql();
 
-  return {
-    id: String(found.id).trim(),
-    status: String(found.status).toLowerCase() === 'active' ? 'active' : 'inactive',
-    merchant_id: found.merchant_id || found.merchantId || null,
-    redirect_url: found.redirect_url || found.redirectUrl || null,
-    scan_count: Number(found.scan_count ?? found.scanCount ?? 0),
-    created_at: found.createdAt || found.created_at || new Date().toISOString(),
-    updated_at: found.updatedAt || found.updated_at || new Date().toISOString(),
-    merchant_name: found.merchant_name || found.merchantName,
-    merchant_slug: found.merchant_slug || found.merchantSlug
-  };
+  // 1. Exact ID match first (case-insensitive)
+  const exact = allPlates.find((p) => p.id.toUpperCase() === clean.toUpperCase());
+  if (exact) return exact;
+
+  // 2. Normalized code match (e.g. QRC0004 <-> 004)
+  const normMatch = allPlates.find((p) => isSamePlateCode(p.id, clean));
+  return normMatch || null;
 }
 
 export async function createNfcBatchSql(options: CreateNfcBatchOptions): Promise<NfcPlate[]> {
@@ -164,43 +176,79 @@ export async function createNfcBatchSql(options: CreateNfcBatchOptions): Promise
 
 export async function linkNfcPlateSql(id: string, merchantId: string, redirectUrl: string): Promise<boolean> {
   const cleanId = id.trim();
+  const cleanRedirect = redirectUrl.trim();
   const now = new Date();
 
+  const allBiz = await getAllBusinessesSql().catch(() => []);
+  const slugFromUrl = extractSlugFromUrl(cleanRedirect);
+  const targetBiz = allBiz.find(
+    (b) => (merchantId && b.id === merchantId) || (slugFromUrl && b.slug.toLowerCase() === slugFromUrl.toLowerCase())
+  );
+  const resolvedSlug = slugFromUrl || targetBiz?.slug || undefined;
+  const resolvedName = targetBiz?.name || undefined;
+
   try {
-    await db.update(nfcPlates)
-      .set({
+    await db
+      .insert(nfcPlates)
+      .values({
+        id: cleanId,
         status: 'active',
         merchantId: merchantId || null,
-        redirectUrl: redirectUrl.trim(),
+        redirectUrl: cleanRedirect,
+        scanCount: 0,
+        createdAt: now,
         updatedAt: now
       })
-      .where(eq(nfcPlates.id, cleanId));
+      .onConflictDoUpdate({
+        target: nfcPlates.id,
+        set: {
+          status: 'active',
+          merchantId: merchantId || null,
+          redirectUrl: cleanRedirect,
+          updatedAt: now
+        }
+      });
   } catch (error) {}
 
   const jsonDb = readDbJson();
   const plates: any[] = jsonDb.nfcPlates || [];
-  const idx = plates.findIndex((p: any) => String(p.id).trim() === cleanId);
-  const targetBiz = (jsonDb.businesses || []).find((b: any) => b.id === merchantId);
+  let matchedAny = false;
 
-  const updatedObj = {
-    id: cleanId,
-    status: 'active',
-    merchant_id: merchantId || null,
-    merchantId: merchantId || null,
-    redirect_url: redirectUrl.trim(),
-    redirectUrl: redirectUrl.trim(),
-    scan_count: idx >= 0 ? Number(plates[idx].scan_count || plates[idx].scanCount || 0) : 0,
-    scanCount: idx >= 0 ? Number(plates[idx].scan_count || plates[idx].scanCount || 0) : 0,
-    merchant_name: targetBiz?.name,
-    merchant_slug: targetBiz?.slug,
-    createdAt: idx >= 0 ? plates[idx].createdAt || plates[idx].created_at || now.toISOString() : now.toISOString(),
-    updatedAt: now.toISOString()
-  };
+  for (let i = 0; i < plates.length; i++) {
+    if (isSamePlateCode(plates[i].id, cleanId)) {
+      matchedAny = true;
+      const scanCnt = Number(plates[i].scan_count || plates[i].scanCount || 0);
+      plates[i] = {
+        ...plates[i],
+        status: 'active',
+        merchant_id: merchantId || null,
+        merchantId: merchantId || null,
+        redirect_url: cleanRedirect,
+        redirectUrl: cleanRedirect,
+        scan_count: scanCnt,
+        scanCount: scanCnt,
+        merchant_name: resolvedName,
+        merchant_slug: resolvedSlug,
+        updatedAt: now.toISOString()
+      };
+    }
+  }
 
-  if (idx >= 0) {
-    plates[idx] = updatedObj;
-  } else {
-    plates.push(updatedObj);
+  if (!matchedAny) {
+    plates.push({
+      id: cleanId,
+      status: 'active',
+      merchant_id: merchantId || null,
+      merchantId: merchantId || null,
+      redirect_url: cleanRedirect,
+      redirectUrl: cleanRedirect,
+      scan_count: 0,
+      scanCount: 0,
+      merchant_name: resolvedName,
+      merchant_slug: resolvedSlug,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString()
+    });
   }
 
   jsonDb.nfcPlates = plates;

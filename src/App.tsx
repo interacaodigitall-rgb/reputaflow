@@ -78,23 +78,25 @@ function MainAppContent() {
   // Check URL parameters on mount and when history changes (?b=slug or /qr/:id or ?nfc=:id)
   useEffect(() => {
     const handleUrlChange = () => {
-      // 1. Check NFC plate route
+      // 1. Check NFC plate route - Always delegate to NfcRedirectPage to clear session & fetch fresh plate binding
       const nfcId = extractNfcPlateId();
       if (nfcId) {
-        const fast = findFastNfcPlate(nfcId);
-        const fastSlug = fast?.merchant_slug || extractSlugFromUrl(fast?.redirect_url);
-        if (fast && fast.status === 'active' && fastSlug) {
-          setReviewSlugFromUrl(fastSlug);
-          setIsCustomerViewMode(true);
-          return;
-        }
+        try {
+          localStorage.removeItem('active_tenant_slug');
+          localStorage.removeItem('current_establishment_id');
+          sessionStorage.clear();
+        } catch {}
         setNfcPlateIdFromUrl(nfcId);
         return;
       }
 
-      // 2. Check public review slug
+      // 2. Check public review slug exclusively from URL
       const bSlug = extractReviewSlug();
       if (bSlug) {
+        try {
+          localStorage.removeItem('active_tenant_slug');
+          localStorage.removeItem('current_establishment_id');
+        } catch {}
         setReviewSlugFromUrl(bSlug);
         setIsCustomerViewMode(true);
       }
@@ -204,10 +206,14 @@ function MainAppContent() {
 
   // If in public review view (e.g., client scanned QR code or user clicked preview)
   if (isCustomerViewMode) {
+    // PASSO 3: ISOLAMENTO MULTI-TENANT - Prioriza estritamente o slug ativo na URL
+    const currentUrlSlug = extractReviewSlug() || reviewSlugFromUrl;
+    const effectiveSlug = currentUrlSlug || selectedBusiness?.slug || '';
     return (
       <PublicReviewPage
-        slug={reviewSlugFromUrl || selectedBusiness?.slug || ''}
-        businessOverride={!reviewSlugFromUrl ? selectedBusiness : null}
+        key={effectiveSlug}
+        slug={effectiveSlug}
+        businessOverride={!currentUrlSlug ? selectedBusiness : null}
         onBackToApp={() => {
           setIsCustomerViewMode(false);
           // remove query param if exists without reload
