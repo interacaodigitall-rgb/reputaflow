@@ -32,7 +32,8 @@ import {
   getPlans,
   getPlatformSettings
 } from './lib/dbService';
-import { extractReviewSlug, extractNfcPlateId } from './lib/urlHelper';
+import { extractReviewSlug, extractNfcPlateId, extractSlugFromUrl, getPublicReviewUrl } from './lib/urlHelper';
+import { findFastNfcPlate } from './lib/nfcService';
 import { ArrowLeft, ShieldAlert, Store, Plus } from 'lucide-react';
 
 function MainAppContent() {
@@ -80,6 +81,13 @@ function MainAppContent() {
       // 1. Check NFC plate route
       const nfcId = extractNfcPlateId();
       if (nfcId) {
+        const fast = findFastNfcPlate(nfcId);
+        const fastSlug = fast?.merchant_slug || extractSlugFromUrl(fast?.redirect_url);
+        if (fast && fast.status === 'active' && fastSlug) {
+          setReviewSlugFromUrl(fastSlug);
+          setIsCustomerViewMode(true);
+          return;
+        }
         setNfcPlateIdFromUrl(nfcId);
         return;
       }
@@ -165,7 +173,19 @@ function MainAppContent() {
 
   // If in NFC plate redirect route (e.g. /qr/001 or ?nfc=001)
   if (nfcPlateIdFromUrl) {
-    return <NfcRedirectPage plateId={nfcPlateIdFromUrl} />;
+    return (
+      <NfcRedirectPage
+        plateId={nfcPlateIdFromUrl}
+        onPlateResolved={(slug) => {
+          setNfcPlateIdFromUrl(null);
+          setReviewSlugFromUrl(slug);
+          setIsCustomerViewMode(true);
+          if (window.history.replaceState) {
+            window.history.replaceState(null, '', getPublicReviewUrl(slug));
+          }
+        }}
+      />
+    );
   }
 
   // If in public review view (e.g., client scanned QR code or user clicked preview)
@@ -370,13 +390,44 @@ function MainAppContent() {
 }
 
 export default function App() {
-  const [nfcId, setNfcId] = useState<string | null>(() => extractNfcPlateId());
-  const [reviewSlug, setReviewSlug] = useState<string | null>(() => extractReviewSlug());
+  const [nfcId, setNfcId] = useState<string | null>(() => {
+    const rawNfc = extractNfcPlateId();
+    if (rawNfc) {
+      const fast = findFastNfcPlate(rawNfc);
+      const fastSlug = fast?.merchant_slug || extractSlugFromUrl(fast?.redirect_url);
+      if (fast && fast.status === 'active' && fastSlug) {
+        return null;
+      }
+    }
+    return rawNfc;
+  });
+
+  const [reviewSlug, setReviewSlug] = useState<string | null>(() => {
+    const rawNfc = extractNfcPlateId();
+    if (rawNfc) {
+      const fast = findFastNfcPlate(rawNfc);
+      const fastSlug = fast?.merchant_slug || extractSlugFromUrl(fast?.redirect_url);
+      if (fast && fast.status === 'active' && fastSlug) {
+        return fastSlug;
+      }
+    }
+    return extractReviewSlug();
+  });
 
   useEffect(() => {
     const handleUrl = () => {
       const nid = extractNfcPlateId();
       if (nid) {
+        const fast = findFastNfcPlate(nid);
+        const fastSlug = fast?.merchant_slug || extractSlugFromUrl(fast?.redirect_url);
+        if (fast && fast.status === 'active' && fastSlug) {
+          setNfcId(null);
+          setReviewSlug(fastSlug);
+          if (window.history.replaceState) {
+            window.history.replaceState(null, '', getPublicReviewUrl(fastSlug));
+          }
+          return;
+        }
         setNfcId(nid);
         return;
       }
@@ -397,7 +448,18 @@ export default function App() {
 
   // 100% Public & Anonymous NFC QR Redirect (No Auth Required)
   if (nfcId) {
-    return <NfcRedirectPage plateId={nfcId} />;
+    return (
+      <NfcRedirectPage
+        plateId={nfcId}
+        onPlateResolved={(slug) => {
+          setNfcId(null);
+          setReviewSlug(slug);
+          if (window.history.replaceState) {
+            window.history.replaceState(null, '', getPublicReviewUrl(slug));
+          }
+        }}
+      />
+    );
   }
 
   // 100% Public & Anonymous Customer Review Page (No Auth Required)

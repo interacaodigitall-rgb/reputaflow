@@ -387,3 +387,17 @@ export async function convertGoogleMapsToReviewUrl(
   };
 }
 
+/**
+ * Extracts a tenant/business slug from any internal redirect URL (e.g. '/?b=mrnavalha', '/r/mrnavalha').
+ */
+export function extractSlugFromUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const clean = url.trim();
+  const matchB = clean.match(/[?&]b=([^&#]+)/i);
+  if (matchB) return decodeURIComponent(matchB[1]);
+  const matchR = clean.match(/(?:\/r\/|\/review\/|\/b\/)([^/?#]+)/i);
+  if (matchR) return decodeURIComponent(matchR[1]);
+  return null;
+}
+
+

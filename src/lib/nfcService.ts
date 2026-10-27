@@ -87,6 +87,46 @@ function saveLocalNfcCache(plates: NfcPlate[]): void {
   } catch {}
 }
 
+/**
+ * Synchronous fast-lookup for a plate by ID or QR code from local cache or pre-configured batch.
+ * Enables zero-delay instant redirection without showing intermediate loading screens.
+ */
+export function findFastNfcPlate(idOrCode: string): NfcPlate | null {
+  if (!idOrCode) return null;
+  const clean = idOrCode.trim().toLowerCase();
+  const stripped = clean.replace(/^(?:qrc|nfc)-?/i, '');
+  const numOnly = stripped.replace(/^0+/, '') || '0';
+  const norm3 = numOnly.padStart(3, '0');
+
+  // 1. Check local storage cache
+  try {
+    const raw = typeof window !== 'undefined' ? localStorage.getItem(NFC_STORAGE_KEY) : null;
+    if (raw) {
+      const list = JSON.parse(raw);
+      if (Array.isArray(list)) {
+        const found = list.find((p: any) => {
+          const pId = String(p.id || '').trim().toLowerCase();
+          const pQr = String(p.qr_code_id || '').trim().toLowerCase();
+          const pStripped = pId.replace(/^(?:qrc|nfc)-?/i, '');
+          const pNum = pStripped.replace(/^0+/, '') || '0';
+          return pId === clean || pQr === clean || pStripped === stripped || pNum === numOnly || pId === norm3;
+        });
+        if (found) return found;
+      }
+    }
+  } catch {}
+
+  // 2. Check INITIAL_NFC_PLATES
+  const initFound = INITIAL_NFC_PLATES.find((p) => {
+    const pId = String(p.id || '').trim().toLowerCase();
+    const pStripped = pId.replace(/^(?:qrc|nfc)-?/i, '');
+    const pNum = pStripped.replace(/^0+/, '') || '0';
+    return pId === clean || pStripped === stripped || pNum === numOnly || pId === norm3;
+  });
+
+  return initFound || null;
+}
+
 function mapNfcRow(row: any, businesses: Business[] = []): NfcPlate {
   const mId = row.merchant_id || row.merchantId || null;
   const matchedBiz = mId ? businesses.find((b) => b.id === mId) : undefined;
