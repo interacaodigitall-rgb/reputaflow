@@ -10,7 +10,16 @@ const NFC_STORAGE_KEY = 'reputaflow_nfc_plates_cache';
 
 export const INITIAL_NFC_PLATES: NfcPlate[] = [
   {
-    id: 'mrnavalha',
+    id: '001',
+    status: 'inactive',
+    merchant_id: null,
+    redirect_url: null,
+    scan_count: 0,
+    created_at: '2026-09-21T10:00:00.000Z',
+    updated_at: '2026-09-21T10:00:00.000Z'
+  },
+  {
+    id: '002',
     status: 'active',
     merchant_id: 'biz_mrnavalha',
     redirect_url: '/r/mrnavalha',
@@ -19,34 +28,50 @@ export const INITIAL_NFC_PLATES: NfcPlate[] = [
     merchant_slug: 'mrnavalha',
     created_at: '2026-09-21T10:00:00.000Z',
     updated_at: '2026-09-21T12:00:00.000Z'
+  },
+  {
+    id: '003',
+    status: 'inactive',
+    merchant_id: null,
+    redirect_url: null,
+    scan_count: 0,
+    created_at: '2026-09-21T10:00:00.000Z',
+    updated_at: '2026-09-21T10:00:00.000Z'
+  },
+  {
+    id: '004',
+    status: 'inactive',
+    merchant_id: null,
+    redirect_url: null,
+    scan_count: 0,
+    created_at: '2026-09-21T10:00:00.000Z',
+    updated_at: '2026-09-21T10:00:00.000Z'
+  },
+  {
+    id: '005',
+    status: 'inactive',
+    merchant_id: null,
+    redirect_url: null,
+    scan_count: 0,
+    created_at: '2026-09-21T10:00:00.000Z',
+    updated_at: '2026-09-21T10:00:00.000Z'
   }
 ];
 
 /**
- * Generates an autonomous active QR entry for each registered merchant based on its slug.
+ * Extracts numeric value from a plate ID (e.g. "QRC0005" -> 5, "#005" -> 5, "005" -> 5)
  */
-function buildAutoPlatesForBusinesses(businesses: Business[]): NfcPlate[] {
-  const allBiz = businesses.length > 0 ? businesses : getLocalBusinesses();
-  const now = new Date().toISOString();
-  return allBiz
-    .filter((b) => b && b.slug && b.name)
-    .map((b) => ({
-      id: b.slug,
-      status: 'active' as const,
-      merchant_id: b.id,
-      redirect_url: `/r/${encodeURIComponent(b.slug)}`,
-      scan_count: b.slug === 'mrnavalha' ? 3 : 0,
-      merchant_name: b.name,
-      merchant_slug: b.slug,
-      merchant_logo_url: b.logoUrl || undefined,
-      created_at: b.createdAt || now,
-      updated_at: b.updatedAt || now
-    }));
+export function extractPlateNumber(idOrCode: string): number {
+  if (!idOrCode) return 0;
+  const digits = String(idOrCode).replace(/\D/g, '');
+  if (!digits) return 0;
+  const num = parseInt(digits, 10);
+  return isNaN(num) || num > 100000 ? 0 : num;
 }
 
 /**
  * Cleans up legacy hardcoded seed assignments where 001, 003, 004, 005 were pre-populated with Mr. Navalha.
- * Also repairs any plate where merchant_id points to a custom merchant but redirect_url still has mrnavalha.
+ * Preserves any active plate that has a valid tenant_id / merchant_id.
  */
 function sanitizePlatesList(plates: NfcPlate[], businesses: Business[] = []): NfcPlate[] {
   const allBiz = businesses.length > 0 ? businesses : getLocalBusinesses();
@@ -57,7 +82,6 @@ function sanitizePlatesList(plates: NfcPlate[], businesses: Business[] = []): Nf
       p.updated_at === '2026-09-21T12:00:00.000Z' ||
       (p.created_at === '2026-09-21T10:00:00.000Z' && String(p.updated_at || '').startsWith('2026-09-21'));
 
-    // If not plate #002/mrnavalha and it still has the old pre-seeded Mr. Navalha assignment, reset to inactive
     if (!isPlate2 && p.merchant_id === 'biz_mrnavalha' && isLegacySeedTimestamp) {
       return {
         ...p,
@@ -75,8 +99,7 @@ function sanitizePlatesList(plates: NfcPlate[], businesses: Business[] = []): Nf
 }
 
 function getLocalNfcCache(): NfcPlate[] {
-  const autoPlates = buildAutoPlatesForBusinesses([]);
-  if (typeof window === 'undefined') return autoPlates;
+  if (typeof window === 'undefined') return INITIAL_NFC_PLATES;
   try {
     const raw = localStorage.getItem(NFC_STORAGE_KEY);
     if (raw) {
@@ -86,7 +109,7 @@ function getLocalNfcCache(): NfcPlate[] {
       }
     }
   } catch {}
-  return autoPlates;
+  return sanitizePlatesList(INITIAL_NFC_PLATES);
 }
 
 function saveLocalNfcCache(plates: NfcPlate[]): void {
@@ -104,7 +127,7 @@ export function findFastNfcPlate(idOrCode: string): NfcPlate | null {
   const clean = idOrCode.trim();
   const cleanLower = clean.toLowerCase();
 
-  // 1. Direct match against registered businesses by slug or id (Autonomous QR per merchant)
+  // 1. Direct match against registered businesses by slug or id
   const allBiz = getLocalBusinesses();
   const directBiz = allBiz.find(
     (b) =>
@@ -140,7 +163,14 @@ export function findFastNfcPlate(idOrCode: string): NfcPlate | null {
 export function mapNfcRow(row: any, businesses: Business[] = []): NfcPlate {
   const allBiz = businesses.length > 0 ? businesses : getLocalBusinesses();
   const rawId = String(row.id || row.qr_code_id || row.code || '').trim();
-  const mId = row.merchant_id || row.merchantId || row.tenant_id || row.tenantId || row.business_id || row.establishment_id || null;
+  const mId =
+    row.merchant_id ||
+    row.merchantId ||
+    row.tenant_id ||
+    row.tenantId ||
+    row.business_id ||
+    row.establishment_id ||
+    null;
   const redir = row.redirect_url || row.redirectUrl || null;
   const slugFromUrl = extractSlugFromUrl(redir);
   const slugFromJoin =
@@ -152,7 +182,6 @@ export function mapNfcRow(row: any, businesses: Business[] = []): NfcPlate {
     (Array.isArray(row.establishments) ? row.establishments[0]?.slug : null) ||
     null;
 
-  // Strict lookup: check merchant_id / tenant_id / ownerId and slug separately so businesses[0] (Mr. Navalha) never wins by accident
   const bizById = mId
     ? allBiz.find(
         (b) =>
@@ -177,7 +206,6 @@ export function mapNfcRow(row: any, businesses: Business[] = []): NfcPlate {
     matchedBiz = bizBySlug;
   }
 
-  // Fallback: if mId is set and not biz_mrnavalha, and no exact match was found yet, check if mId itself is a valid slug string
   const mIdLooksLikeSlug =
     mId &&
     typeof mId === 'string' &&
@@ -205,13 +233,13 @@ export function mapNfcRow(row: any, businesses: Business[] = []): NfcPlate {
     hasTarget;
 
   const finalRedirect = resolvedSlug
-    ? `/?b=${encodeURIComponent(resolvedSlug)}`
-    : redir || (mId ? `/?b=${encodeURIComponent(String(mId))}` : null);
+    ? `/r/${encodeURIComponent(resolvedSlug)}`
+    : redir || (mId ? `/r/${encodeURIComponent(String(mId))}` : null);
 
   return {
     id: rawId,
     status: isStatusActive ? 'active' : 'inactive',
-    merchant_id: matchedBiz?.id || mId,
+    merchant_id: isStatusActive ? matchedBiz?.id || mId : null,
     redirect_url: isStatusActive ? finalRedirect : null,
     scan_count: Number(row.scan_count ?? row.scanCount ?? 0),
     created_at: row.created_at || row.createdAt || new Date().toISOString(),
@@ -223,31 +251,51 @@ export function mapNfcRow(row: any, businesses: Business[] = []): NfcPlate {
 }
 
 /**
- * Merges multiple plate lists, ensuring active/updated plates update any normalized equivalents (e.g. QRC0004 <-> 004).
+ * Merges multiple plate lists, ensuring active/assigned plates NEVER get overwritten by inactive records.
  */
 function mergePlatesLists(businesses: Business[], ...lists: NfcPlate[][]): NfcPlate[] {
-  const byId = new Map<string, NfcPlate>();
+  const byCanonicalKey = new Map<string, NfcPlate>();
 
   for (const list of lists) {
     if (!Array.isArray(list)) continue;
     for (const rawItem of list) {
       if (!rawItem || !rawItem.id) continue;
       const item = mapNfcRow(rawItem, businesses);
-      const key = item.id.toUpperCase();
-      const existing = byId.get(key);
+      const num = extractPlateNumber(item.id);
+      // Group normalized numeric plates together (e.g. "004" and "QRC0004" -> canonical key "NUM_4")
+      const key = num > 0 ? `NUM_${num}` : item.id.toUpperCase();
+      const existing = byCanonicalKey.get(key);
 
       if (!existing) {
-        byId.set(key, item);
+        // Normalize display ID for numeric plates to 3-digit padded format ("001", "002", ...) unless it has a custom prefix
+        const normalizedId =
+          num > 0 && /^(?:QRC|0|#)/i.test(item.id)
+            ? String(num).padStart(3, '0')
+            : item.id;
+        byCanonicalKey.set(key, { ...item, id: normalizedId });
       } else {
-        const existingActive = existing.status === 'active' && Boolean(existing.merchant_slug || existing.redirect_url || existing.merchant_id);
-        const itemActive = item.status === 'active' && Boolean(item.merchant_slug || item.redirect_url || item.merchant_id);
+        const existingActive =
+          existing.status === 'active' &&
+          Boolean(existing.merchant_slug || existing.redirect_url || existing.merchant_id);
+        const itemActive =
+          item.status === 'active' &&
+          Boolean(item.merchant_slug || item.redirect_url || item.merchant_id);
         const existingTime = new Date(existing.updated_at || 0).getTime() || 0;
         const itemTime = new Date(item.updated_at || 0).getTime() || 0;
 
-        if ((itemActive && !existingActive) || (itemActive === existingActive && itemTime >= existingTime)) {
-          byId.set(key, {
+        // PROTECT ASSIGNED PLATES: Active plate ALWAYS wins over inactive plate
+        if (itemActive && !existingActive) {
+          byCanonicalKey.set(key, {
             ...existing,
             ...item,
+            id: existing.id,
+            scan_count: Math.max(existing.scan_count || 0, item.scan_count || 0)
+          });
+        } else if (itemActive && existingActive && itemTime >= existingTime) {
+          byCanonicalKey.set(key, {
+            ...existing,
+            ...item,
+            id: existing.id,
             scan_count: Math.max(existing.scan_count || 0, item.scan_count || 0)
           });
         }
@@ -255,33 +303,21 @@ function mergePlatesLists(businesses: Business[], ...lists: NfcPlate[][]): NfcPl
     }
   }
 
-  // Synchronize normalized duplicates (e.g. if QRC0004 is active and 004 is inactive seed, sync 004 or keep consistent)
-  const allPlates = Array.from(byId.values());
-  for (const p of allPlates) {
-    if (p.status === 'active' && (p.merchant_slug || p.redirect_url || p.merchant_id)) {
-      for (const other of allPlates) {
-        if (other.id !== p.id && isSamePlateCode(other.id, p.id)) {
-          const otherTime = new Date(other.updated_at || 0).getTime() || 0;
-          const pTime = new Date(p.updated_at || 0).getTime() || 0;
-          if (other.status !== 'active' || pTime > otherTime) {
-            other.status = 'active';
-            other.merchant_id = p.merchant_id;
-            other.redirect_url = p.redirect_url;
-            other.merchant_name = p.merchant_name;
-            other.merchant_slug = p.merchant_slug;
-            other.merchant_logo_url = p.merchant_logo_url;
-            other.updated_at = p.updated_at;
-          }
-        }
-      }
-    }
-  }
+  const result = sanitizePlatesList(Array.from(byCanonicalKey.values()), businesses);
 
-  return sanitizePlatesList(allPlates, businesses);
+  // Sort numerically (001, 002, 003...) then alphabetically
+  return result.sort((a, b) => {
+    const numA = extractPlateNumber(a.id);
+    const numB = extractPlateNumber(b.id);
+    if (numA > 0 && numB > 0) return numA - numB;
+    if (numA > 0) return -1;
+    if (numB > 0) return 1;
+    return a.id.localeCompare(b.id);
+  });
 }
 
 /**
- * Fetches all NFC plates from Local Cache, Cloud Sync, Server API & Supabase (nfc_plates + qr_plates)
+ * Fetches all NFC/QR plates (both active/assigned and inactive stock) from Local Cache, Cloud Sync, Server API & Supabase
  */
 export async function getNfcPlates(businesses: Business[] = []): Promise<NfcPlate[]> {
   const allBiz = businesses.length > 0 ? businesses : getLocalBusinesses();
@@ -291,7 +327,7 @@ export async function getNfcPlates(businesses: Business[] = []): Promise<NfcPlat
   let supabasePlates: NfcPlate[] = [];
   let supabaseQrPlates: NfcPlate[] = [];
 
-  // 1. Try Server REST API (verifying JSON content-type so static Vercel rewrite is ignored)
+  // 1. Try Server REST API
   const serverPromise = (async () => {
     try {
       const res = await fetch('/api/nfc', { cache: 'no-store' }).catch(() => null);
@@ -305,7 +341,7 @@ export async function getNfcPlates(businesses: Business[] = []): Promise<NfcPlat
     } catch {}
   })();
 
-  // 2. Try Global Cloud Sync (works on Vercel & mobile across all devices)
+  // 2. Try Global Cloud Sync
   const cloudPromise = (async () => {
     try {
       const cloudData = await fetchGlobalCloudData();
@@ -333,19 +369,78 @@ export async function getNfcPlates(businesses: Business[] = []): Promise<NfcPlat
 
   await Promise.all([serverPromise, cloudPromise, supabasePromise]);
 
-  const autoPlates = buildAutoPlatesForBusinesses(allBiz);
+  // Ensure default first custom merchant is linked to #001 if #001 is still unlinked and custom merchant exists
+  const customBiz = allBiz.filter((b) => b && b.slug && b.slug !== 'mrnavalha');
+  const defaultSeed = INITIAL_NFC_PLATES.map((p) => {
+    if (p.id === '001' && customBiz.length > 0) {
+      return {
+        ...p,
+        status: 'active' as const,
+        merchant_id: customBiz[0].id,
+        merchant_slug: customBiz[0].slug,
+        merchant_name: customBiz[0].name,
+        merchant_logo_url: customBiz[0].logoUrl,
+        redirect_url: `/r/${customBiz[0].slug}`,
+        updated_at: customBiz[0].updatedAt || new Date().toISOString()
+      };
+    }
+    return p;
+  });
+
   const merged = mergePlatesLists(
     allBiz,
-    autoPlates,
+    defaultSeed,
     localCache,
     serverPlates,
     cloudPlates,
     supabasePlates,
     supabaseQrPlates
-  ).filter((p) => p.status === 'active' && Boolean(p.merchant_slug || p.merchant_id || p.redirect_url));
-  saveLocalNfcCache(merged);
+  );
 
+  saveLocalNfcCache(merged);
   return merged;
+}
+
+/**
+ * Queries qr_plates, nfc_plates, CloudSync, and local cache to find the highest numeric plate ID in existence.
+ * E.g. if #005 exists, returns 5 so the next batch obligatorily starts at #006.
+ */
+export async function getHighestExistingPlateNumber(currentPlates: NfcPlate[] = []): Promise<number> {
+  let highest = 0;
+
+  const scanList = (list: any[]) => {
+    if (!Array.isArray(list)) return;
+    for (const item of list) {
+      const code = String(item?.id || item?.qr_code_id || item?.code || '');
+      const n = extractPlateNumber(code);
+      if (n > highest) highest = n;
+    }
+  };
+
+  scanList(currentPlates);
+  scanList(getLocalNfcCache());
+
+  try {
+    const { data: qrRows } = await supabase.from('qr_plates').select('qr_code_id');
+    if (Array.isArray(qrRows)) scanList(qrRows);
+  } catch {}
+
+  try {
+    const { data: nfcRows } = await supabase.from('nfc_plates').select('id');
+    if (Array.isArray(nfcRows)) scanList(nfcRows);
+  } catch {}
+
+  try {
+    const cloud = await fetchGlobalCloudData();
+    if (cloud?.maxPlateNumber && cloud.maxPlateNumber > highest) {
+      highest = cloud.maxPlateNumber;
+    }
+    if (Array.isArray(cloud?.nfcPlates)) {
+      scanList(cloud!.nfcPlates);
+    }
+  } catch {}
+
+  return Math.max(highest, 5);
 }
 
 /**
@@ -360,78 +455,129 @@ export async function getNfcPlateById(id: string): Promise<NfcPlate | null> {
 }
 
 /**
- * Generates a batch of NFC plates with sequential/padded IDs
+ * SAFE BATCH GENERATOR:
+ * 1. Queries qr_plates & nfc_plates first to find the highest existing plate number (e.g. #005 -> starts at #006).
+ * 2. NEVER overwrites, modifies, or unlinks plates that already have tenant_id / merchant_id assigned.
  */
 export async function createNfcPlatesBatch(
   options: CreateNfcBatchOptions
-): Promise<{ success: boolean; createdCount: number; error?: string }> {
-  const { quantity, prefix = '', startNumber = 1, padDigits = 3 } = options;
+): Promise<{
+  success: boolean;
+  createdCount: number;
+  startSerial?: string;
+  endSerial?: string;
+  error?: string;
+}> {
+  const { quantity, prefix = '', padDigits = 3 } = options;
 
-  if (quantity < 1) {
-    return { success: false, createdCount: 0, error: 'A quantidade deve ser de pelo menos 1 placa.' };
+  if (quantity < 1 || quantity > 500) {
+    return {
+      success: false,
+      createdCount: 0,
+      error: 'A quantidade deve situar-se entre 1 e 500 placas por lote.'
+    };
   }
+
+  // PASSO 2: Consultar a base de dados antes de inserir para encontrar o número mais alto já existente
+  const existingPlates = await getNfcPlates();
+  const highestExisting = await getHighestExistingPlateNumber(existingPlates);
+  const safeStartNumber = Math.max(highestExisting + 1, options.startNumber || 1);
+
+  const existingNumbers = new Set<number>(
+    existingPlates.map((p) => extractPlateNumber(p.id)).filter((n) => n > 0)
+  );
+  const existingIdsUpper = new Set<string>(existingPlates.map((p) => p.id.toUpperCase()));
 
   const now = new Date().toISOString();
   const newPlates: NfcPlate[] = [];
-  const rowsToInsert: any[] = [];
+  const nfcRowsToInsert: any[] = [];
+  const qrRowsToInsert: any[] = [];
 
-  for (let i = 0; i < quantity; i++) {
-    const currentNum = startNumber + i;
+  let currentNum = safeStartNumber;
+  while (newPlates.length < quantity) {
     const padded = String(currentNum).padStart(padDigits, '0');
     const id = prefix ? `${prefix}${padded}` : padded;
 
-    const plateObj: NfcPlate = {
-      id,
-      status: 'inactive',
-      merchant_id: null,
-      redirect_url: null,
-      scan_count: 0,
-      created_at: now,
-      updated_at: now
-    };
+    // Never touch or overwrite an existing plate number or ID
+    if (!existingNumbers.has(currentNum) && !existingIdsUpper.has(id.toUpperCase())) {
+      const plateObj: NfcPlate = {
+        id,
+        status: 'inactive',
+        merchant_id: null,
+        redirect_url: null,
+        scan_count: 0,
+        created_at: now,
+        updated_at: now
+      };
 
-    newPlates.push(plateObj);
-    rowsToInsert.push({
-      id,
-      status: 'inactive',
-      merchant_id: null,
-      redirect_url: null,
-      scan_count: 0,
-      created_at: now,
-      updated_at: now
-    });
+      newPlates.push(plateObj);
+      nfcRowsToInsert.push({
+        id,
+        status: 'inactive',
+        merchant_id: null,
+        redirect_url: null,
+        scan_count: 0,
+        created_at: now,
+        updated_at: now
+      });
+      qrRowsToInsert.push({
+        qr_code_id: `QRC${String(currentNum).padStart(4, '0')}`,
+        tenant_id: null,
+        status: 'inactive',
+        redirect_url: null
+      });
+    }
+    currentNum++;
   }
 
-  // 1. Immediately write to local cache
-  const localCache = getLocalNfcCache();
-  const map = new Map<string, NfcPlate>();
-  localCache.forEach((p) => map.set(p.id, p));
-  newPlates.forEach((p) => {
-    if (!map.has(p.id)) map.set(p.id, p);
-  });
-  const updatedLocal = Array.from(map.values());
+  const highestAfterBatch = currentNum - 1;
+
+  // 1. Merge into local cache preserving 100% of existing active/assigned plates
+  const updatedLocal = mergePlatesLists(getLocalBusinesses(), existingPlates, newPlates);
   saveLocalNfcCache(updatedLocal);
 
-  // 2. Push to Cloud Sync (for Vercel & multi-device)
-  pushGlobalCloudData({ nfcPlates: updatedLocal }).catch(() => {});
+  // 2. Push to Cloud Sync (preserving all businesses + active plate bindings + new maxPlateNumber)
+  await pushGlobalCloudData({
+    nfcPlates: updatedLocal,
+    maxPlateNumber: highestAfterBatch
+  }).catch(() => {});
 
   // 3. Persist to Server REST API
   try {
     await fetch('/api/nfc/batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(options)
+      body: JSON.stringify({
+        ...options,
+        startNumber: safeStartNumber
+      })
     });
-  } catch (e) {}
+  } catch {}
 
-  // 4. Persist to Supabase
+  // 4. Persist to Supabase (`nfc_plates` and `qr_plates` with ignoreDuplicates: true so assigned rows are never touched)
   try {
-    await supabase.from('nfc_plates').upsert(rowsToInsert, {
+    await supabase.from('nfc_plates').upsert(nfcRowsToInsert, {
       onConflict: 'id',
       ignoreDuplicates: true
     });
   } catch (err) {
-    console.warn('[Supabase createNfcPlatesBatch catch]:', err);
+    console.warn('[Supabase nfc_plates batch notice]:', err);
+  }
+
+  try {
+    const { error: qrErr } = await supabase.from('qr_plates').upsert(qrRowsToInsert, {
+      onConflict: 'qr_code_id',
+      ignoreDuplicates: true
+    });
+    if (qrErr) {
+      // Minimal column fallback if qr_plates only has qr_code_id and tenant_id
+      await supabase.from('qr_plates').upsert(
+        qrRowsToInsert.map((r) => ({ qr_code_id: r.qr_code_id, tenant_id: null })),
+        { onConflict: 'qr_code_id', ignoreDuplicates: true }
+      );
+    }
+  } catch (err) {
+    console.warn('[Supabase qr_plates batch notice]:', err);
   }
 
   if (typeof window !== 'undefined') {
@@ -440,7 +586,9 @@ export async function createNfcPlatesBatch(
 
   return {
     success: true,
-    createdCount: newPlates.length
+    createdCount: newPlates.length,
+    startSerial: newPlates[0]?.id,
+    endSerial: newPlates[newPlates.length - 1]?.id
   };
 }
 
@@ -450,7 +598,7 @@ export async function createNfcPlatesBatch(
 export async function linkNfcPlate(
   id: string,
   merchantId: string,
-  redirectUrl: string
+  redirectUrl?: string
 ): Promise<{ success: boolean; error?: string }> {
   const now = new Date().toISOString();
   const allBiz = getLocalBusinesses();
@@ -458,21 +606,20 @@ export async function linkNfcPlate(
     (b) => b.id === merchantId || b.slug.toLowerCase() === String(merchantId).toLowerCase()
   );
 
-  // Guarantee that if a valid business is selected, its slug is used for the redirect URL
   const slugFromBiz = selectedBiz?.slug;
   const slugFromInput = extractSlugFromUrl(redirectUrl);
   const resolvedSlug = slugFromBiz || slugFromInput || undefined;
-  const cleanRedirect = resolvedSlug ? `/?b=${encodeURIComponent(resolvedSlug)}` : redirectUrl.trim();
+  const cleanRedirect = resolvedSlug
+    ? `/r/${encodeURIComponent(resolvedSlug)}`
+    : (redirectUrl || '').trim() || `/r/${encodeURIComponent(String(merchantId))}`;
 
-  // 1. Update local cache (matching both exact ID and normalized numeric ID e.g. 004 <-> QRC0004)
-  const localCache = getLocalNfcCache();
+  // 1. Update local cache
+  const localCache = await getNfcPlates(allBiz);
   let matchedExact = false;
 
   for (let i = 0; i < localCache.length; i++) {
     if (isSamePlateCode(localCache[i].id, id)) {
-      if (localCache[i].id.toUpperCase() === id.trim().toUpperCase()) {
-        matchedExact = true;
-      }
+      matchedExact = true;
       localCache[i] = {
         ...localCache[i],
         status: 'active',
@@ -487,8 +634,10 @@ export async function linkNfcPlate(
   }
 
   if (!matchedExact) {
+    const num = extractPlateNumber(id);
+    const normalizedId = num > 0 ? String(num).padStart(3, '0') : id.trim();
     localCache.push({
-      id: id.trim(),
+      id: normalizedId,
       status: 'active',
       merchant_id: selectedBiz?.id || merchantId,
       redirect_url: cleanRedirect,
@@ -502,13 +651,13 @@ export async function linkNfcPlate(
   }
   saveLocalNfcCache(localCache);
 
-  // 2. Immediately push to Global Cloud Sync (so mobile QR scans on Vercel immediately see the linked merchant!)
+  // 2. Immediately push to Global Cloud Sync
   try {
     await pushGlobalCloudData({
       businesses: allBiz,
       nfcPlates: localCache
     });
-  } catch (e) {}
+  } catch {}
 
   // 3. Persist to Server API
   try {
@@ -521,9 +670,9 @@ export async function linkNfcPlate(
         redirectUrl: cleanRedirect
       })
     });
-  } catch (e) {}
+  } catch {}
 
-  // 4. Persist to Supabase (nfc_plates and qr_plates with adaptive column fallback)
+  // 4. Persist to Supabase (nfc_plates and qr_plates)
   const cleanId = id.trim();
   const digits = cleanId.replace(/\D/g, '').replace(/^0+/, '');
   const codeVariations = Array.from(
@@ -568,7 +717,6 @@ export async function linkNfcPlate(
         );
 
       if (qrErr) {
-        // Fallback if qr_plates only has qr_code_id and tenant_id columns
         const { error: minimalUpsertErr } = await supabase
           .from('qr_plates')
           .upsert(
@@ -597,12 +745,11 @@ export async function linkNfcPlate(
 }
 
 /**
- * Unlinks a plate and sets status to inactive
+ * Unlinks a single plate (only when explicitly requested by admin)
  */
 export async function unlinkNfcPlate(id: string): Promise<{ success: boolean; error?: string }> {
   const now = new Date().toISOString();
 
-  // 1. Update local cache for both exact and normalized matches
   const localCache = getLocalNfcCache();
   for (let i = 0; i < localCache.length; i++) {
     if (isSamePlateCode(localCache[i].id, id)) {
@@ -620,19 +767,16 @@ export async function unlinkNfcPlate(id: string): Promise<{ success: boolean; er
   }
   saveLocalNfcCache(localCache);
 
-  // 2. Push to Cloud Sync
   pushGlobalCloudData({ nfcPlates: localCache }).catch(() => {});
 
-  // 3. Persist to Server API
   try {
     await fetch('/api/nfc/unlink', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id })
     });
-  } catch (e) {}
+  } catch {}
 
-  // 4. Persist to Supabase
   try {
     await supabase
       .from('nfc_plates')
@@ -643,9 +787,7 @@ export async function unlinkNfcPlate(id: string): Promise<{ success: boolean; er
         updated_at: now
       })
       .eq('id', id);
-  } catch (err) {
-    console.warn('[unlinkNfcPlate catch]:', err);
-  }
+  } catch {}
 
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('reputaflow_nfc_sync'));
@@ -655,24 +797,19 @@ export async function unlinkNfcPlate(id: string): Promise<{ success: boolean; er
 }
 
 /**
- * Deletes an NFC plate
+ * Deletes an inactive NFC plate
  */
 export async function deleteNfcPlate(id: string): Promise<{ success: boolean; error?: string }> {
-  // 1. Delete from local cache
-  const localCache = getLocalNfcCache().filter((p) => p.id !== id);
+  const localCache = getLocalNfcCache().filter((p) => !isSamePlateCode(p.id, id));
   saveLocalNfcCache(localCache);
 
-  // 2. Persist to Server API
   try {
     await fetch(`/api/nfc/${encodeURIComponent(id)}`, { method: 'DELETE' });
-  } catch (e) {}
+  } catch {}
 
-  // 3. Delete from Supabase
   try {
     await supabase.from('nfc_plates').delete().eq('id', id);
-  } catch (err) {
-    console.warn('[deleteNfcPlate catch]:', err);
-  }
+  } catch {}
 
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('reputaflow_nfc_sync'));
@@ -688,20 +825,17 @@ export async function incrementNfcScan(id: string, currentCount: number = 0): Pr
   const cleanId = id.trim();
   if (!cleanId) return;
 
-  // 1. Update local cache
   const localCache = getLocalNfcCache();
-  const idx = localCache.findIndex((p) => p.id === cleanId);
+  const idx = localCache.findIndex((p) => isSamePlateCode(p.id, cleanId));
   if (idx >= 0) {
     localCache[idx].scan_count = (localCache[idx].scan_count || 0) + 1;
     saveLocalNfcCache(localCache);
   }
 
-  // 2. Call Server API
   try {
     await fetch(`/api/nfc/scan/${encodeURIComponent(cleanId)}`, { method: 'POST' });
-  } catch (e) {}
+  } catch {}
 
-  // 3. Call Supabase
   try {
     await supabase.rpc('increment_nfc_scan', { plate_id: cleanId });
   } catch {}

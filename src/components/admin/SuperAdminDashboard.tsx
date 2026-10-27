@@ -581,12 +581,12 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
           onClick={() => setActiveTab('nfc')}
           className={`py-2 px-4 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap min-h-[40px] ${
             activeTab === 'nfc'
-              ? 'bg-indigo-600 text-white shadow-xs'
-              : 'text-indigo-700 bg-indigo-50/70 hover:bg-indigo-100 border border-indigo-200/60'
+              ? 'bg-[#4285F4] text-white shadow-xs'
+              : 'text-[#1A73E8] bg-[#4285F4]/10 hover:bg-[#4285F4]/15 border border-[#4285F4]/25'
           }`}
         >
           <QrCode className="w-4 h-4" />
-          <span>QR Codes dos Comércios</span>
+          <span>Gestão de Placas NFC / QR Dinâmico</span>
         </button>
       </div>
 
