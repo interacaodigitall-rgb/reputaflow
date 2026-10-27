@@ -47,6 +47,7 @@ export const MerchantDashboard: React.FC<MerchantDashboardProps> = ({
       totalReviews > 0
         ? Number((reviews.reduce((acc, r) => acc + r.rating, 0) / totalReviews).toFixed(1))
         : 0;
+    const avgRatingFormatted = totalReviews > 0 ? avgRating.toFixed(1) : '0.0';
 
     const lowRatingReviews = reviews.filter((r) => r.rating <= 3).length;
     const pendingCases = recoveryCases.filter(
@@ -60,7 +61,9 @@ export const MerchantDashboard: React.FC<MerchantDashboardProps> = ({
     const recoveryRate =
       recoveryCases.length > 0
         ? Math.round((resolvedCases / recoveryCases.length) * 100)
-        : 100;
+        : totalReviews > 0
+        ? 100
+        : 0;
 
     const contactedClients = recoveryCases.filter(
       (c) => c.status !== 'novo'
@@ -77,6 +80,7 @@ export const MerchantDashboard: React.FC<MerchantDashboardProps> = ({
     return {
       totalReviews,
       avgRating,
+      avgRatingFormatted,
       lowRatingReviews,
       pendingCases,
       resolvedCases,
@@ -154,6 +158,41 @@ export const MerchantDashboard: React.FC<MerchantDashboardProps> = ({
         </div>
       </div>
 
+      {/* Empty State Banner for New Establishments with 0 Reviews */}
+      {stats.totalReviews === 0 && (
+        <div className="bg-indigo-50/70 border border-indigo-200/80 rounded-3xl p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+              <QrCode className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-extrabold text-slate-900">
+                Ainda sem avaliações. Partilhe o seu QR Code para começar!
+              </h3>
+              <p className="text-xs text-slate-600 mt-0.5">
+                O painel deste estabelecimento está limpo e pronto. Assim que os clientes lerem o QR Code ou placa NFC, as métricas serão atualizadas em tempo real.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+            <button
+              onClick={onOpenQrModal}
+              className="flex-1 sm:flex-initial py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-xs"
+            >
+              <QrCode className="w-3.5 h-3.5" />
+              <span>Ver QR Code</span>
+            </button>
+            <button
+              onClick={handleCopyLink}
+              className="flex-1 sm:flex-initial py-2.5 px-3.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-semibold rounded-xl text-xs transition flex items-center justify-center gap-1.5"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              <span>Copiar Link</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Primary KPI Metrics Grid (7 cards as specified in Section 6) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3 sm:gap-4">
         {/* 1. Total Reviews */}
@@ -177,7 +216,7 @@ export const MerchantDashboard: React.FC<MerchantDashboardProps> = ({
             <Star className="w-4 h-4 text-amber-500 fill-amber-400" />
           </div>
           <div className="flex items-baseline gap-1">
-            <span className="text-2xl font-black text-slate-900">{stats.avgRating}</span>
+            <span className="text-2xl font-black text-slate-900">{stats.avgRatingFormatted}</span>
             <span className="text-xs text-slate-400 font-medium">/ 5.0</span>
           </div>
           <div className="text-[11px] text-amber-600 font-medium mt-1">Satisfação geral</div>

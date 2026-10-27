@@ -38,7 +38,8 @@ import {
   deleteBusiness,
   savePlan,
   savePlatformSettings,
-  uploadImage
+  uploadImage,
+  isMatchingBusiness
 } from '../../lib/dbService';
 import { getPublicReviewUrl, slugify, normalizeGoogleReviewUrl, convertGoogleMapsToReviewUrl } from '../../lib/urlHelper';
 import { QrCodeModal } from '../common/QrCodeModal';
@@ -278,8 +279,8 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     ).length;
     const avgGlobalRating =
       totalReviews > 0
-        ? Number((allReviews.reduce((acc, r) => acc + r.rating, 0) / totalReviews).toFixed(1))
-        : 0;
+        ? (allReviews.reduce((acc, r) => acc + r.rating, 0) / totalReviews).toFixed(1)
+        : '0.0';
 
     return {
       totalBusinesses,
@@ -611,6 +612,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                   <tr>
                     <th className="py-3 px-4">Estabelecimento</th>
                     <th className="py-3 px-4">Segmento</th>
+                    <th className="py-3 px-4">Avaliações</th>
                     <th className="py-3 px-4">Contacto</th>
                     <th className="py-3 px-4">Plano</th>
                     <th className="py-3 px-4">Estado</th>
@@ -618,7 +620,19 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredBusinesses.map((b) => (
+                  {filteredBusinesses.map((b) => {
+                    const bizReviews = allReviews.filter(
+                      (r) => isMatchingBusiness(r.businessId, b.id) || isMatchingBusiness(r.businessId, b.slug)
+                    );
+                    const bizAvg =
+                      bizReviews.length > 0
+                        ? (bizReviews.reduce((acc, r) => acc + r.rating, 0) / bizReviews.length).toFixed(1)
+                        : '0.0';
+                    const bizCases = allRecoveryCases.filter(
+                      (c) => isMatchingBusiness(c.businessId, b.id) || isMatchingBusiness(c.businessId, b.slug)
+                    ).length;
+
+                    return (
                     <tr key={b.id} className="hover:bg-slate-50/70 transition">
                       <td className="py-3.5 px-4">
                         <div className="flex items-center gap-3">
@@ -636,6 +650,16 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                       </td>
                       <td className="py-3.5 px-4 text-slate-700">
                         {b.category || 'Não definido'}
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                          <span>{bizAvg}</span>
+                          <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                          <span className="text-[11px] font-normal text-slate-500">({bizReviews.length})</span>
+                        </div>
+                        <div className="text-[10px] text-slate-400">
+                          {bizReviews.length === 0 ? 'Sem avaliações (Zerado)' : `${bizCases} caso(s) recup.`}
+                        </div>
                       </td>
                       <td className="py-3.5 px-4">
                         <div className="text-slate-800 font-medium">{b.phone}</div>
@@ -744,11 +768,12 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  );
+                  })}
 
                   {filteredBusinesses.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="py-12 px-4 text-center">
+                      <td colSpan={7} className="py-12 px-4 text-center">
                         <div className="max-w-sm mx-auto space-y-3">
                           <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto">
                             <Store className="w-6 h-6" />

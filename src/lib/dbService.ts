@@ -508,7 +508,21 @@ export async function addBusiness(data: Omit<Business, 'id' | 'createdAt' | 'upd
     updatedAt: now
   };
 
-  // 4. IMMEDIATELY persist to localStorage and update runtime state BEFORE async calls
+  // 4. Garantir explicitamente que o novo estabelecimento inicia ZERADO (0 avaliações, 0 casos de recuperação, 0 clientes)
+  runtimeReviews = runtimeReviews.filter(
+    (r) => !isMatchingBusiness(r.businessId, id) && !isMatchingBusiness(r.businessId, uniqueSlug)
+  );
+  runtimeRecoveryCases = runtimeRecoveryCases.filter(
+    (c) => !isMatchingBusiness(c.businessId, id) && !isMatchingBusiness(c.businessId, uniqueSlug)
+  );
+  runtimeFeedback = runtimeFeedback.filter(
+    (f) => !isMatchingBusiness(f.businessId, id) && !isMatchingBusiness(f.businessId, uniqueSlug)
+  );
+  runtimeCustomers = runtimeCustomers.filter(
+    (c) => !isMatchingBusiness(c.businessId, id) && !isMatchingBusiness(c.businessId, uniqueSlug)
+  );
+
+  // IMMEDIATELY persist to localStorage and update runtime state BEFORE async calls
   // so even if the user refreshes immediately, the business NEVER disappears!
   unmarkBusinessKeyDeleted(id, uniqueSlug);
   runtimeBusinesses = [newBiz, ...currentAll.filter((b) => b.id !== id)];
@@ -757,10 +771,20 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
       const contentType = apiRes?.headers?.get('content-type') || '';
       if (apiRes && apiRes.ok && contentType.includes('application/json')) {
         const apiData = await apiRes.json();
-        if (Array.isArray(apiData) && apiData.length > 0) {
+        if (Array.isArray(apiData)) {
           const mapped = apiData.map(mapReviewRow);
-          runtimeReviews = mapped;
-          if (isSubscribed) callback(mapped);
+          if (!businessId) {
+            runtimeReviews = mapped;
+          } else {
+            const others = runtimeReviews.filter((r) => !isMatchingBusiness(r.businessId, businessId));
+            runtimeReviews = [...mapped, ...others];
+          }
+          if (isSubscribed) {
+            const filtered = businessId
+              ? mapped.filter((r) => isMatchingBusiness(r.businessId, businessId))
+              : runtimeReviews;
+            callback(filtered);
+          }
           return;
         }
       }
@@ -771,10 +795,18 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
         query = query.eq('business_id', businessId);
       }
       const { data, error } = await query;
-      if (!error && data && data.length > 0) {
+      if (!error && Array.isArray(data)) {
         const mapped = data.map(mapReviewRow);
-        runtimeReviews = mapped;
-        if (isSubscribed) callback(mapped);
+        if (mapped.length > 0) {
+          const existingIds = new Set(mapped.map((r) => r.id));
+          runtimeReviews = [...mapped, ...runtimeReviews.filter((r) => !existingIds.has(r.id))];
+        }
+        if (isSubscribed) {
+          const filtered = businessId
+            ? runtimeReviews.filter((r) => isMatchingBusiness(r.businessId, businessId))
+            : runtimeReviews;
+          callback(filtered);
+        }
         return;
       }
     } catch (err) {
@@ -782,8 +814,10 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
     }
 
     if (isSubscribed) {
-      const filtered = businessId ? runtimeReviews.filter((r) => isMatchingBusiness(r.businessId, businessId)) : runtimeReviews;
-      callback(filtered.length > 0 ? filtered : INITIAL_REVIEWS);
+      const filtered = businessId
+        ? runtimeReviews.filter((r) => isMatchingBusiness(r.businessId, businessId))
+        : runtimeReviews;
+      callback(filtered);
     }
   };
 
@@ -914,10 +948,18 @@ export function subscribeFeedback(businessId: string | null, callback: (feedback
         query = query.eq('business_id', businessId);
       }
       const { data, error } = await query;
-      if (!error && data) {
+      if (!error && Array.isArray(data)) {
         const mapped = data.map(mapFeedbackRow);
-        runtimeFeedback = mapped;
-        if (isSubscribed) callback(mapped);
+        if (mapped.length > 0) {
+          const existingIds = new Set(mapped.map((f) => f.id));
+          runtimeFeedback = [...mapped, ...runtimeFeedback.filter((f) => !existingIds.has(f.id))];
+        }
+        if (isSubscribed) {
+          const filtered = businessId
+            ? runtimeFeedback.filter((f) => isMatchingBusiness(f.businessId, businessId))
+            : runtimeFeedback;
+          callback(filtered);
+        }
         return;
       }
     } catch (err) {
@@ -925,7 +967,9 @@ export function subscribeFeedback(businessId: string | null, callback: (feedback
     }
 
     if (isSubscribed) {
-      const filtered = businessId ? runtimeFeedback.filter((f) => isMatchingBusiness(f.businessId, businessId)) : runtimeFeedback;
+      const filtered = businessId
+        ? runtimeFeedback.filter((f) => isMatchingBusiness(f.businessId, businessId))
+        : runtimeFeedback;
       callback(filtered);
     }
   };
@@ -973,10 +1017,20 @@ export function subscribeRecoveryCases(businessId: string | null, callback: (cas
       const contentType = apiRes?.headers?.get('content-type') || '';
       if (apiRes && apiRes.ok && contentType.includes('application/json')) {
         const apiData = await apiRes.json();
-        if (Array.isArray(apiData) && apiData.length > 0) {
+        if (Array.isArray(apiData)) {
           const mapped = apiData.map(mapRecoveryRow);
-          runtimeRecoveryCases = mapped;
-          if (isSubscribed) callback(mapped);
+          if (!businessId) {
+            runtimeRecoveryCases = mapped;
+          } else {
+            const others = runtimeRecoveryCases.filter((c) => !isMatchingBusiness(c.businessId, businessId));
+            runtimeRecoveryCases = [...mapped, ...others];
+          }
+          if (isSubscribed) {
+            const filtered = businessId
+              ? mapped.filter((c) => isMatchingBusiness(c.businessId, businessId))
+              : runtimeRecoveryCases;
+            callback(filtered);
+          }
           return;
         }
       }
@@ -987,10 +1041,18 @@ export function subscribeRecoveryCases(businessId: string | null, callback: (cas
         query = query.eq('business_id', businessId);
       }
       const { data, error } = await query;
-      if (!error && data && data.length > 0) {
+      if (!error && Array.isArray(data)) {
         const mapped = data.map(mapRecoveryRow);
-        runtimeRecoveryCases = mapped;
-        if (isSubscribed) callback(mapped);
+        if (mapped.length > 0) {
+          const existingIds = new Set(mapped.map((c) => c.id));
+          runtimeRecoveryCases = [...mapped, ...runtimeRecoveryCases.filter((c) => !existingIds.has(c.id))];
+        }
+        if (isSubscribed) {
+          const filtered = businessId
+            ? runtimeRecoveryCases.filter((c) => isMatchingBusiness(c.businessId, businessId))
+            : runtimeRecoveryCases;
+          callback(filtered);
+        }
         return;
       }
     } catch (err) {
@@ -998,8 +1060,10 @@ export function subscribeRecoveryCases(businessId: string | null, callback: (cas
     }
 
     if (isSubscribed) {
-      const filtered = businessId ? runtimeRecoveryCases.filter((c) => isMatchingBusiness(c.businessId, businessId)) : runtimeRecoveryCases;
-      callback(filtered.length > 0 ? filtered : INITIAL_RECOVERY_CASES);
+      const filtered = businessId
+        ? runtimeRecoveryCases.filter((c) => isMatchingBusiness(c.businessId, businessId))
+        : runtimeRecoveryCases;
+      callback(filtered);
     }
   };
 
@@ -1212,10 +1276,20 @@ export function subscribeCustomers(businessId: string | null, callback: (custome
       const contentType = apiRes?.headers?.get('content-type') || '';
       if (apiRes && apiRes.ok && contentType.includes('application/json')) {
         const apiData = await apiRes.json();
-        if (Array.isArray(apiData) && apiData.length > 0) {
+        if (Array.isArray(apiData)) {
           const mapped = apiData.map(mapCustomerRow);
-          runtimeCustomers = mapped;
-          if (isSubscribed) callback(mapped);
+          if (!businessId) {
+            runtimeCustomers = mapped;
+          } else {
+            const others = runtimeCustomers.filter((c) => !isMatchingBusiness(c.businessId, businessId));
+            runtimeCustomers = [...mapped, ...others];
+          }
+          if (isSubscribed) {
+            const filtered = businessId
+              ? mapped.filter((c) => isMatchingBusiness(c.businessId, businessId))
+              : runtimeCustomers;
+            callback(filtered);
+          }
           return;
         }
       }
@@ -1226,10 +1300,18 @@ export function subscribeCustomers(businessId: string | null, callback: (custome
         query = query.eq('business_id', businessId);
       }
       const { data, error } = await query;
-      if (!error && data && data.length > 0) {
+      if (!error && Array.isArray(data)) {
         const mapped = data.map(mapCustomerRow);
-        runtimeCustomers = mapped;
-        if (isSubscribed) callback(mapped);
+        if (mapped.length > 0) {
+          const existingIds = new Set(mapped.map((c) => c.id));
+          runtimeCustomers = [...mapped, ...runtimeCustomers.filter((c) => !existingIds.has(c.id))];
+        }
+        if (isSubscribed) {
+          const filtered = businessId
+            ? runtimeCustomers.filter((c) => isMatchingBusiness(c.businessId, businessId))
+            : runtimeCustomers;
+          callback(filtered);
+        }
         return;
       }
     } catch (err) {
@@ -1237,8 +1319,10 @@ export function subscribeCustomers(businessId: string | null, callback: (custome
     }
 
     if (isSubscribed) {
-      const filtered = businessId ? runtimeCustomers.filter((c) => isMatchingBusiness(c.businessId, businessId)) : runtimeCustomers;
-      callback(filtered.length > 0 ? filtered : INITIAL_CUSTOMERS);
+      const filtered = businessId
+        ? runtimeCustomers.filter((c) => isMatchingBusiness(c.businessId, businessId))
+        : runtimeCustomers;
+      callback(filtered);
     }
   };
 

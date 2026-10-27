@@ -110,9 +110,23 @@ function MainAppContent() {
     };
   }, []);
 
-  // Subscribe to Business-specific data from Firestore
+  // Subscribe to Business-specific data
   useEffect(() => {
-    if (!selectedBusiness) return;
+    if (!selectedBusiness) {
+      setReviews([]);
+      setFeedbackList([]);
+      setCustomers([]);
+      setRecoveryCases([]);
+      setInteractions([]);
+      return;
+    }
+
+    // Limpa imediatamente o estado ao trocar de estabelecimento para evitar herdar dados visuais
+    setReviews([]);
+    setFeedbackList([]);
+    setCustomers([]);
+    setRecoveryCases([]);
+    setInteractions([]);
 
     const unReviews = subscribeReviews(selectedBusiness.id, setReviews);
     const unFeedback = subscribeFeedback(selectedBusiness.id, setFeedbackList);
