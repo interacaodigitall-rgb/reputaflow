@@ -4,21 +4,17 @@ import {
   Menu,
   X,
   ShieldAlert,
-  Building,
   QrCode,
   ExternalLink,
-  User,
   LogOut,
-  ChevronDown,
   LayoutDashboard,
   Users,
   AlertTriangle,
   Star,
-  Settings,
-  Sparkles
+  Settings
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { BrandLogo } from './BrandLogo';
+import { BrandLogo, BrandWordmark, BRAND_ICON_URL } from './BrandLogo';
 import { BusinessLogo } from './BusinessLogo';
 import { PWAInstallButton } from './PWAInstallButton';
 
@@ -40,8 +36,6 @@ export const Header: React.FC<HeaderProps> = ({
   onNavigateToSuperAdmin
 }) => {
   const {
-    currentRole,
-    setCurrentRole,
     businesses,
     selectedBusiness,
     setSelectedBusiness,
@@ -76,7 +70,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <>
-      <header className="bg-white border-b border-slate-200/80 sticky top-0 z-30 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between">
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-30 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between shadow-2xs">
         {/* Left: Mobile Hamburger & Brand & Business Selector */}
         <div className="flex items-center gap-2 sm:gap-3">
           {/* Mobile Hamburger Button */}
@@ -84,16 +78,14 @@ export const Header: React.FC<HeaderProps> = ({
             type="button"
             onClick={() => setMobileMenuOpen(true)}
             aria-label="Abrir Menu de Navegação"
-            className="lg:hidden p-2 text-slate-700 hover:text-slate-950 hover:bg-slate-100 rounded-xl transition min-w-[44px] min-h-[44px] flex items-center justify-center -ml-1"
+            className="lg:hidden p-2 text-gray-700 hover:text-gray-950 hover:bg-gray-100 rounded-lg transition min-w-[44px] min-h-[44px] flex items-center justify-center -ml-1"
           >
             <Menu className="w-5 h-5" />
           </button>
 
           <div className="flex lg:hidden items-center gap-1.5">
             <BrandLogo size="sm" variant="light" />
-            <span className="font-extrabold text-slate-900 text-sm tracking-tight font-heading">
-              Reputa<span className="text-indigo-600">Flow</span>
-            </span>
+            <BrandWordmark className="text-sm" />
           </div>
 
           {/* Business Selector (or Merchant Business Badge) */}
@@ -107,7 +99,7 @@ export const Header: React.FC<HeaderProps> = ({
                       const b = businesses.find((item) => item.id === e.target.value);
                       if (b) setSelectedBusiness(b);
                     }}
-                    className="text-xs font-bold py-2 px-3 bg-slate-50 hover:bg-slate-100 text-slate-800 rounded-xl border border-slate-200 outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer max-w-[150px] sm:max-w-[200px] truncate min-h-[38px]"
+                    className="text-xs font-semibold py-2 px-3 bg-white hover:bg-gray-50 text-gray-800 rounded-lg border border-gray-300 outline-none focus:border-[#4285F4] focus:ring-2 focus:ring-[#4285F4]/20 cursor-pointer max-w-[150px] sm:max-w-[200px] truncate min-h-[38px] transition"
                   >
                     {businesses.map((biz) => (
                       <option key={biz.id} value={biz.id}>
@@ -117,12 +109,12 @@ export const Header: React.FC<HeaderProps> = ({
                   </select>
                 </div>
               ) : (
-                <div className="py-1.5 px-3 bg-slate-50 text-slate-500 rounded-xl border border-slate-200 text-xs font-semibold">
+                <div className="py-1.5 px-3 bg-gray-50 text-gray-500 rounded-lg border border-gray-200 text-xs font-semibold">
                   Sem comércios
                 </div>
               )
             ) : (
-              <div className="py-1.5 px-2.5 sm:px-3 bg-slate-100 text-slate-900 rounded-xl border border-slate-200 text-xs font-bold truncate max-w-[140px] sm:max-w-[200px] flex items-center gap-1.5 min-h-[38px]">
+              <div className="py-1.5 px-2.5 sm:px-3 bg-gray-50 text-gray-900 rounded-lg border border-gray-200 text-xs font-bold truncate max-w-[140px] sm:max-w-[200px] flex items-center gap-1.5 min-h-[38px]">
                 <BusinessLogo
                   url={selectedBusiness?.logoUrl}
                   name={selectedBusiness?.name || 'Comércio'}
@@ -134,8 +126,8 @@ export const Header: React.FC<HeaderProps> = ({
             )}
 
             {selectedBusiness?.googleReviewUrl && (
-              <span className="hidden md:inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+              <span className="hidden md:inline-flex items-center gap-1 text-[11px] font-semibold text-[#137333] bg-[#34A853]/10 px-2.5 py-0.5 rounded-full border border-[#34A853]/25">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#34A853]"></span>
                 Google Conectado
               </span>
             )}
@@ -143,14 +135,14 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Right Controls */}
-        <div className="flex items-center gap-1.5 sm:gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-2.5">
           {/* PWA Install on Top Bar */}
           <PWAInstallButton />
 
           {/* Quick Review Test Button */}
           <button
             onClick={onOpenReviewPreview}
-            className="flex items-center justify-center gap-1.5 py-2 px-2.5 sm:px-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-bold transition min-h-[40px]"
+            className="flex items-center justify-center gap-1.5 py-2 px-2.5 sm:px-3.5 bg-[#4285F4]/10 hover:bg-[#4285F4]/15 text-[#1A73E8] border border-[#4285F4]/20 rounded-lg text-xs font-semibold transition min-h-[38px] cursor-pointer"
             title="Ver como cliente"
           >
             <ExternalLink className="w-3.5 h-3.5" />
@@ -161,10 +153,10 @@ export const Header: React.FC<HeaderProps> = ({
           {/* QR Code Quick Button */}
           <button
             onClick={onOpenQrModal}
-            className="p-2 sm:py-2 sm:px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 min-h-[40px] min-w-[40px]"
+            className="p-2 sm:py-2 sm:px-3 bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 rounded-lg text-xs font-semibold transition flex items-center justify-center gap-1.5 min-h-[38px] min-w-[38px] shadow-2xs cursor-pointer"
             title="Ver QR Code"
           >
-            <QrCode className="w-4 h-4 text-indigo-600" />
+            <QrCode className="w-4 h-4 text-[#4285F4]" />
             <span className="hidden sm:inline">QR Code</span>
           </button>
 
@@ -172,18 +164,18 @@ export const Header: React.FC<HeaderProps> = ({
           {isSuperAdmin && (
             <button
               onClick={onNavigateToSuperAdmin}
-              className="hidden sm:flex items-center gap-1.5 py-2 px-3 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl text-xs font-bold border border-rose-200/60 transition min-h-[40px]"
+              className="hidden sm:flex items-center gap-1.5 py-2 px-3 bg-[#EA4335]/10 hover:bg-[#EA4335]/15 text-[#C5221F] rounded-lg text-xs font-semibold border border-[#EA4335]/25 transition min-h-[38px] cursor-pointer"
               title="Super Admin"
             >
-              <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />
+              <ShieldAlert className="w-3.5 h-3.5 text-[#EA4335]" />
               <span>Super Admin</span>
             </button>
           )}
 
           {/* Auth status */}
           {currentUser ? (
-            <div className="flex items-center gap-1.5 sm:gap-2 pl-1.5 sm:pl-2 border-l border-slate-200">
-              <div className="w-8 h-8 rounded-full overflow-hidden bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
+            <div className="flex items-center gap-1.5 sm:gap-2 pl-1.5 sm:pl-2 border-l border-gray-200">
+              <div className="w-8 h-8 rounded-full overflow-hidden bg-white border border-gray-200 flex items-center justify-center shrink-0">
                 {currentUser?.photoURL && !avatarError ? (
                   <img
                     src={currentUser.photoURL}
@@ -194,17 +186,16 @@ export const Header: React.FC<HeaderProps> = ({
                   />
                 ) : (
                   <img
-                    src="https://i.postimg.cc/2ScRmDwy/logo-02-png.png"
-                    alt="ReputaFlow Avatar"
-                    className="w-full h-full object-cover p-0.5"
-                    referrerPolicy="no-referrer"
+                    src={BRAND_ICON_URL}
+                    alt="GlowfyHub Avatar"
+                    className="w-full h-full object-contain p-0.5"
                   />
                 )}
               </div>
               <button
                 onClick={signOut}
                 title="Sair"
-                className="p-2 text-slate-400 hover:text-slate-600 rounded-lg min-w-[36px] min-h-[36px] flex items-center justify-center"
+                className="p-2 text-gray-400 hover:text-gray-700 rounded-lg min-w-[36px] min-h-[36px] flex items-center justify-center cursor-pointer transition"
               >
                 <LogOut className="w-4 h-4" />
               </button>
@@ -212,7 +203,7 @@ export const Header: React.FC<HeaderProps> = ({
           ) : (
             <button
               onClick={signInWithGoogle}
-              className="py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition shadow-xs min-h-[40px]"
+              className="py-2 px-3.5 bg-[#4285F4] hover:bg-[#3367D6] text-white text-xs font-semibold rounded-lg transition shadow-xs min-h-[38px] cursor-pointer"
             >
               Entrar
             </button>
@@ -230,7 +221,7 @@ export const Header: React.FC<HeaderProps> = ({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setMobileMenuOpen(false)}
-              className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs"
+              className="fixed inset-0 bg-gray-900/50 backdrop-blur-xs"
             />
 
             {/* Drawer Sheet */}
@@ -239,151 +230,152 @@ export const Header: React.FC<HeaderProps> = ({
               animate={{ x: 0 }}
               exit={{ x: '-100%' }}
               transition={{ type: 'spring', damping: 26, stiffness: 220 }}
-              className="relative w-4/5 max-w-xs bg-slate-900 text-slate-200 h-full shadow-2xl flex flex-col justify-between z-10 overflow-y-auto pb-6"
+              className="relative w-4/5 max-w-xs bg-white text-gray-800 h-full shadow-2xl flex flex-col justify-between z-10 overflow-y-auto pb-6"
             >
-              <div className="p-5 space-y-5">
-                {/* Header with Close Button */}
-                <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-                  <div className="flex items-center gap-3">
-                    <BrandLogo size="md" variant="dark" />
-                    <div>
-                      <span className="font-extrabold text-white text-base tracking-tight font-heading block">
-                        Reputa<span className="text-indigo-400">Flow</span>
-                      </span>
-                      <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">
-                        Gestão Multiempresa
-                      </span>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => setMobileMenuOpen(false)}
-                    className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition min-h-[44px] min-w-[44px] flex items-center justify-center"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-
-                {/* Establishment Selection in Drawer */}
-                <div className="space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-                    {isSuperAdmin ? 'Estabelecimento Ativo' : 'O Seu Estabelecimento'}
-                  </label>
-                  {isSuperAdmin ? (
-                    <select
-                      value={selectedBusiness?.id || ''}
-                      onChange={(e) => {
-                        const b = businesses.find((item) => item.id === e.target.value);
-                        if (b) setSelectedBusiness(b);
-                      }}
-                      className="w-full text-xs font-semibold py-2.5 px-3 bg-slate-800 text-white rounded-xl border border-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer min-h-[44px]"
-                    >
-                      {businesses.map((biz) => (
-                        <option key={biz.id} value={biz.id}>
-                          {biz.name}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <div className="py-2.5 px-3 bg-slate-800 text-white rounded-xl border border-slate-700 text-xs font-bold flex items-center justify-between gap-2 min-h-[44px]">
-                      <div className="flex items-center gap-2 truncate">
-                        <BusinessLogo
-                          url={selectedBusiness?.logoUrl}
-                          name={selectedBusiness?.name}
-                          size="xs"
-                          rounded="rounded-md"
-                        />
-                        <span className="truncate">{selectedBusiness?.name || 'Comércio'}</span>
+              <div>
+                <div className="h-1.5 w-full google-color-bar" />
+                <div className="p-5 space-y-5">
+                  {/* Header with Close Button */}
+                  <div className="flex items-center justify-between border-b border-gray-200 pb-4">
+                    <div className="flex items-center gap-3">
+                      <BrandLogo size="md" variant="light" />
+                      <div>
+                        <BrandWordmark className="text-base block" />
+                        <span className="text-[9px] uppercase tracking-wider text-gray-400 font-bold">
+                          Gestão Multiempresa
+                        </span>
                       </div>
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0"></span>
                     </div>
-                  )}
-                </div>
+                    <button
+                      onClick={() => setMobileMenuOpen(false)}
+                      className="p-2 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-100 transition min-h-[44px] min-w-[44px] flex items-center justify-center"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
 
-                {/* Main Navigation Links */}
-                <div className="space-y-1">
-                  <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block px-1 mb-1">
-                    Navegação Principal
-                  </label>
-                  {navItems.map((item) => {
-                    const Icon = item.icon;
-                    const isActive = activeTab === item.id;
-                    return (
+                  {/* Establishment Selection in Drawer */}
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] uppercase font-bold text-gray-500 tracking-wider">
+                      {isSuperAdmin ? 'Estabelecimento Ativo' : 'O Seu Estabelecimento'}
+                    </label>
+                    {isSuperAdmin ? (
+                      <select
+                        value={selectedBusiness?.id || ''}
+                        onChange={(e) => {
+                          const b = businesses.find((item) => item.id === e.target.value);
+                          if (b) setSelectedBusiness(b);
+                        }}
+                        className="w-full text-xs font-semibold py-2.5 px-3 bg-gray-50 text-gray-900 rounded-lg border border-gray-300 outline-none focus:border-[#4285F4] focus:ring-2 focus:ring-[#4285F4]/20 cursor-pointer min-h-[44px]"
+                      >
+                        {businesses.map((biz) => (
+                          <option key={biz.id} value={biz.id}>
+                            {biz.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="py-2.5 px-3 bg-gray-50 text-gray-900 rounded-lg border border-gray-200 text-xs font-bold flex items-center justify-between gap-2 min-h-[44px]">
+                        <div className="flex items-center gap-2 truncate">
+                          <BusinessLogo
+                            url={selectedBusiness?.logoUrl}
+                            name={selectedBusiness?.name}
+                            size="xs"
+                            rounded="rounded-md"
+                          />
+                          <span className="truncate">{selectedBusiness?.name || 'Comércio'}</span>
+                        </div>
+                        <span className="w-2 h-2 rounded-full bg-[#34A853] shrink-0"></span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Main Navigation Links */}
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-gray-400 tracking-wider block px-1 mb-1">
+                      Navegação Principal
+                    </label>
+                    {navItems.map((item) => {
+                      const Icon = item.icon;
+                      const isActive = activeTab === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          onClick={() => handleMobileNavClick(item.id)}
+                          className={`w-full flex items-center justify-between px-3.5 py-3 rounded-lg text-xs font-semibold transition min-h-[44px] ${
+                            isActive
+                              ? 'bg-[#4285F4]/10 text-[#1A73E8] font-bold border border-[#4285F4]/20'
+                              : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <Icon className={`w-4 h-4 ${isActive ? 'text-[#4285F4]' : 'text-gray-400'}`} />
+                            <span>{item.label}</span>
+                          </div>
+                          {item.badge && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#FBBC05] text-gray-900">
+                              {item.badge}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+
+                    {isSuperAdmin && (
                       <button
-                        key={item.id}
-                        onClick={() => handleMobileNavClick(item.id)}
-                        className={`w-full flex items-center justify-between px-3.5 py-3 rounded-2xl text-xs font-semibold transition min-h-[44px] ${
-                          isActive
-                            ? 'bg-indigo-600 text-white font-bold shadow-md shadow-indigo-950'
-                            : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                        onClick={() => {
+                          onNavigateToSuperAdmin();
+                          setMobileMenuOpen(false);
+                        }}
+                        className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-lg text-xs font-bold transition min-h-[44px] mt-2 ${
+                          activeTab === 'super_admin'
+                            ? 'bg-[#EA4335] text-white shadow-xs'
+                            : 'text-[#EA4335] hover:bg-[#EA4335]/10 border border-[#EA4335]/25'
                         }`}
                       >
-                        <div className="flex items-center gap-3">
-                          <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-400'}`} />
-                          <span>{item.label}</span>
-                        </div>
-                        {item.badge && (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-slate-950">
-                            {item.badge}
-                          </span>
-                        )}
+                        <ShieldAlert className={`w-4 h-4 ${activeTab === 'super_admin' ? 'text-white' : 'text-[#EA4335]'}`} />
+                        <span>Painel Super Admin</span>
                       </button>
-                    );
-                  })}
+                    )}
+                  </div>
 
-                  {isSuperAdmin && (
-                    <button
-                      onClick={() => {
-                        onNavigateToSuperAdmin();
-                        setMobileMenuOpen(false);
-                      }}
-                      className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-2xl text-xs font-bold transition min-h-[44px] mt-2 ${
-                        activeTab === 'super_admin'
-                          ? 'bg-rose-600 text-white shadow-md'
-                          : 'text-rose-300 hover:text-white hover:bg-rose-950/60 border border-rose-500/30'
-                      }`}
-                    >
-                      <ShieldAlert className="w-4 h-4 text-rose-400" />
-                      <span>Painel Super Admin</span>
-                    </button>
-                  )}
-                </div>
+                  {/* Quick Actions */}
+                  <div className="space-y-2 pt-2 border-t border-gray-200">
+                    <label className="text-[10px] uppercase font-bold text-gray-400 tracking-wider block px-1">
+                      Ações Rápidas
+                    </label>
+                    <div className="grid grid-cols-1 gap-2">
+                      <button
+                        onClick={() => {
+                          setMobileMenuOpen(false);
+                          onOpenQrModal();
+                        }}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 px-3 bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 text-xs font-semibold rounded-lg transition min-h-[44px]"
+                      >
+                        <QrCode className="w-4 h-4 text-[#4285F4]" />
+                        <span>Ver QR Code de Avaliação</span>
+                      </button>
 
-                {/* Quick Actions */}
-                <div className="space-y-2 pt-2 border-t border-slate-800">
-                  <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block px-1">
-                    Ações Rápidas
-                  </label>
-                  <div className="grid grid-cols-1 gap-2">
-                    <button
-                      onClick={() => {
-                        setMobileMenuOpen(false);
-                        onOpenQrModal();
-                      }}
-                      className="w-full flex items-center justify-center gap-2 py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition min-h-[44px]"
-                    >
-                      <QrCode className="w-4 h-4 text-indigo-400" />
-                      <span>Ver QR Code de Avaliação</span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setMobileMenuOpen(false);
-                        onOpenReviewPreview();
-                      }}
-                      className="w-full flex items-center justify-center gap-2 py-2.5 px-3 bg-indigo-950 hover:bg-indigo-900 text-indigo-200 text-xs font-semibold rounded-xl border border-indigo-800/80 transition min-h-[44px]"
-                    >
-                      <ExternalLink className="w-4 h-4" />
-                      <span>Testar Página do Cliente</span>
-                    </button>
+                      <button
+                        onClick={() => {
+                          setMobileMenuOpen(false);
+                          onOpenReviewPreview();
+                        }}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 px-3 bg-[#4285F4] hover:bg-[#3367D6] text-white text-xs font-semibold rounded-lg shadow-xs transition min-h-[44px]"
+                      >
+                        <ExternalLink className="w-4 h-4" />
+                        <span>Testar Página do Cliente</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
 
               {/* Bottom User Area */}
-              <div className="px-5 pt-3 border-t border-slate-800">
+              <div className="px-5 pt-3 border-t border-gray-200">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="w-8 h-8 rounded-full overflow-hidden bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0">
+                    <div className="w-8 h-8 rounded-full overflow-hidden bg-white border border-gray-200 flex items-center justify-center shrink-0">
                       {currentUser?.photoURL && !avatarError ? (
                         <img
                           src={currentUser.photoURL}
@@ -394,19 +386,18 @@ export const Header: React.FC<HeaderProps> = ({
                         />
                       ) : (
                         <img
-                          src="https://i.postimg.cc/2ScRmDwy/logo-02-png.png"
-                          alt="ReputaFlow Avatar"
-                          className="w-full h-full object-cover p-0.5"
-                          referrerPolicy="no-referrer"
+                          src={BRAND_ICON_URL}
+                          alt="GlowfyHub Avatar"
+                          className="w-full h-full object-contain p-0.5"
                         />
                       )}
                     </div>
                     <div className="min-w-0">
-                      <p className="text-xs font-bold text-white truncate">
+                      <p className="text-xs font-bold text-gray-900 truncate">
                         {currentUser?.displayName || (isSuperAdmin ? 'Super Admin' : 'Comerciante')}
                       </p>
-                      <p className="text-[10px] text-slate-400 truncate">
-                        {currentUser?.email || (isSuperAdmin ? 'interacaodigitall@gmail.com' : 'comerciante@reputaflow.com')}
+                      <p className="text-[10px] text-gray-500 truncate">
+                        {currentUser?.email || (isSuperAdmin ? 'interacaodigitall@gmail.com' : 'comerciante@glowfyhub.com')}
                       </p>
                     </div>
                   </div>
@@ -414,7 +405,7 @@ export const Header: React.FC<HeaderProps> = ({
                   {currentUser ? (
                     <button
                       onClick={signOut}
-                      className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition min-h-[44px] min-w-[44px] flex items-center justify-center"
+                      className="p-2 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-100 transition min-h-[44px] min-w-[44px] flex items-center justify-center"
                       title="Sair"
                     >
                       <LogOut className="w-4 h-4" />
@@ -422,7 +413,7 @@ export const Header: React.FC<HeaderProps> = ({
                   ) : (
                     <button
                       onClick={signInWithGoogle}
-                      className="text-xs font-bold text-indigo-400 hover:underline py-2 px-3"
+                      className="text-xs font-bold text-[#4285F4] hover:underline py-2 px-3"
                     >
                       Entrar
                     </button>
@@ -436,4 +427,3 @@ export const Header: React.FC<HeaderProps> = ({
     </>
   );
 };
-

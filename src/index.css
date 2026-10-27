@@ -1,8 +1,36 @@
 @import "tailwindcss";
 
+@theme {
+  /* Google Official Brand Palette & Primary Accents */
+  --color-google-blue: #4285F4;
+  --color-google-red: #EA4335;
+  --color-google-yellow: #FBBC05;
+  --color-google-green: #34A853;
+
+  /* Harmonize primary indigo scale across all platform panels to Google Blue (#4285F4) */
+  --color-indigo-50: #E8F0FE;
+  --color-indigo-100: #D2E3FC;
+  --color-indigo-200: #AECBFA;
+  --color-indigo-300: #8AB4F8;
+  --color-indigo-400: #669DF6;
+  --color-indigo-500: #4285F4;
+  --color-indigo-600: #4285F4;
+  --color-indigo-700: #1A73E8;
+  --color-indigo-800: #174EA6;
+  --color-indigo-900: #174EA6;
+  --color-indigo-950: #0D2E63;
+}
+
 @layer base {
   *, ::before, ::after {
     box-sizing: border-box;
+  }
+
+  :root {
+    --google-blue: #4285F4;
+    --google-red: #EA4335;
+    --google-yellow: #FBBC05;
+    --google-green: #34A853;
   }
 
   html, body {
@@ -11,7 +39,9 @@
     width: 100%;
     margin: 0;
     padding: 0;
-    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    font-family: 'Inter', 'Roboto', 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    color: #202124;
+    background-color: #F8FAFC;
   }
 
   #root {
@@ -21,8 +51,24 @@
   }
 
   h1, h2, h3, h4, .font-heading {
-    font-family: 'Outfit', 'Plus Jakarta Sans', sans-serif;
+    font-family: 'Inter', 'Plus Jakarta Sans', 'Roboto', sans-serif;
+    letter-spacing: -0.015em;
   }
+
+  input:focus, select:focus, textarea:focus {
+    border-color: #4285F4;
+  }
+}
+
+/* Google 4-color bar utility */
+.google-color-bar {
+  background: linear-gradient(
+    90deg,
+    #4285F4 0%, #4285F4 25%,
+    #EA4335 25%, #EA4335 50%,
+    #FBBC05 50%, #FBBC05 75%,
+    #34A853 75%, #34A853 100%
+  );
 }
 
 /* Cross-browser scrollbar utilities for Chrome and Firefox */

@@ -1,14 +1,16 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Store } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import {
   extractNfcPlateId,
   extractSlugFromUrl,
   findBestMatchingPlate,
-  isPlateAssignedAndActive
+  isPlateAssignedAndActive,
+  isSamePlateCode
 } from '../../lib/urlHelper';
 import { incrementNfcScan, findFastNfcPlate, mapNfcRow } from '../../lib/nfcService';
 import { fetchGlobalCloudData } from '../../lib/cloudSync';
-import { getLocalBusinesses } from '../../lib/dbService';
+import { getBusinessBySlug, getLocalBusinesses, normalizeKey } from '../../lib/dbService';
 
 interface NfcRedirectPageProps {
   plateId?: string;
@@ -20,34 +22,58 @@ export const NfcRedirectPage: React.FC<NfcRedirectPageProps> = ({
   onPlateResolved
 }) => {
   const redirectedRef = useRef(false);
+  const [notFoundCode, setNotFoundCode] = useState<string | null>(null);
 
   useEffect(() => {
     let isCancelled = false;
 
     const executeInstantRedirect = async () => {
-      // Limpeza preventiva de sessão anterior (preservando cache de placas e estabelecimentos)
+      // PASSO 1: LIMPEZA DE SESSÃO ANTERIOR ANTES DO REDIRECIONAMENTO
       try {
         localStorage.removeItem('active_tenant_slug');
         localStorage.removeItem('current_establishment_id');
         sessionStorage.clear();
       } catch {}
 
-      // PASSO 1: BUSCA FLEXÍVEL DE PLACAS (NORMALIZAÇÃO DE CÓDIGO)
-      const rawCode = (propPlateId || extractNfcPlateId() || '').trim(); // ex: "QRC0004", "004", "#004"
+      const rawCode = (propPlateId || extractNfcPlateId() || '').trim();
       if (!rawCode) {
-        if (!isCancelled) {
-          window.location.replace('/?error=qr_nao_atribuido');
-        }
+        if (!isCancelled) setNotFoundCode('vazio');
         return;
       }
 
+      const redirectToSlug = (slug: string, scanId?: string) => {
+        if (isCancelled || redirectedRef.current) return;
+        const cleanSlug = String(slug || '').trim();
+        if (!cleanSlug) return;
+        try {
+          localStorage.removeItem('active_tenant_slug');
+          localStorage.removeItem('current_establishment_id');
+          sessionStorage.clear();
+        } catch {}
+        redirectedRef.current = true;
+        incrementNfcScan(scanId || cleanSlug).catch(() => {});
+        window.location.replace(`/r/${encodeURIComponent(cleanSlug)}`);
+      };
+
       const cleanCode = rawCode.toUpperCase().replace(/^#+/, '');
-      const cleanNumber = rawCode.replace(/\D/g, ''); // Extrai apenas os números (ex: "4", "004", "0004")
-      const shortNumber = cleanNumber.replace(/^0+/, '') || cleanNumber; // ex: "4"
-      const pad3 = shortNumber ? shortNumber.padStart(3, '0') : ''; // ex: "004"
+      const cleanNumber = rawCode.replace(/\D/g, '');
+      const shortNumber = cleanNumber.replace(/^0+/, '') || cleanNumber;
+      const pad3 = shortNumber ? shortNumber.padStart(3, '0') : '';
+      const normRaw = normalizeKey(rawCode);
 
       try {
-        // Constrói filtro .or() flexível com todas as variações do código
+        // 1. RESOLUÇÃO DIRETA E AUTÓNOMA POR SLUG OU ID DO COMÉRCIO (/qr/[slug] -> /r/[slug])
+        // Se o código não for apenas numérico (ex: /qr/barbearia-vip), procura diretamente o lojista
+        const isPureNumericOrLegacyPlate = /^(?:QRC|NFC|PLACA|PLATE)?[-_#]?\d+$/i.test(rawCode);
+        if (!isPureNumericOrLegacyPlate) {
+          const directBiz = await getBusinessBySlug(rawCode);
+          if (directBiz && directBiz.slug) {
+            redirectToSlug(directBiz.slug, directBiz.slug);
+            return;
+          }
+        }
+
+        // 2. BUSCA FLEXÍVEL EM SUPABASE, CLOUD SYNC E API (Suporta links diretos e códigos legados)
         const orClauses = Array.from(
           new Set(
             [
@@ -58,31 +84,21 @@ export const NfcRedirectPage: React.FC<NfcRedirectPageProps> = ({
           )
         ).join(',');
 
-        // Tentativa direta na tabela `qr_plates` com relação `tenants(slug)` conforme especificação
         const { data: plate, error } = await supabase
           .from('qr_plates')
           .select('tenant_id, qr_code_id, tenants(slug)')
           .or(orClauses)
           .maybeSingle();
 
-        // PASSO 2: VALIDAÇÃO SEGURA DO LOJISTA VINCULADO
         const joinedTenantSlug =
           (plate as any)?.tenants?.slug ||
           (Array.isArray((plate as any)?.tenants) ? (plate as any).tenants[0]?.slug : null);
 
         if (!error && plate && joinedTenantSlug) {
-          const tenantSlug = String(joinedTenantSlug).trim();
-          try {
-            localStorage.removeItem('active_tenant_slug');
-          } catch {}
-          redirectedRef.current = true;
-          incrementNfcScan(plate.qr_code_id || cleanCode).catch(() => {});
-          window.location.replace(`/r/${encodeURIComponent(tenantSlug)}`);
+          redirectToSlug(String(joinedTenantSlug).trim(), plate.qr_code_id || cleanCode);
           return;
         }
 
-        // Caso a relação `tenants(slug)` não esteja definida no schema ou haja múltiplos registos,
-        // resolvemos o `tenant_id` / `merchant_id` de forma resiliente em todas as tabelas e fontes:
         const localBusinesses = getLocalBusinesses();
 
         // A. Consulta ao Backend Server API
@@ -98,75 +114,61 @@ export const NfcRedirectPage: React.FC<NfcRedirectPageProps> = ({
           })
           .catch(() => null);
 
-        // B. Consulta ao Global Cloud Sync
-        const cloudPromise = fetchGlobalCloudData(true)
-          .then((cloudData) => {
-            if (!cloudData) return null;
-            const cloudBiz =
-              Array.isArray(cloudData.businesses) && cloudData.businesses.length > 0
-                ? cloudData.businesses
-                : localBusinesses;
-            if (Array.isArray(cloudData.nfcPlates) && cloudData.nfcPlates.length > 0) {
-              const matched = findBestMatchingPlate(cloudData.nfcPlates, cleanCode);
-              if (matched && isPlateAssignedAndActive(matched)) {
-                return mapNfcRow(matched, cloudBiz);
-              }
-            }
-            return null;
-          })
-          .catch(() => null);
+        // B. Consulta ao Global Cloud Sync (Funciona em aba anónima / mobile no Vercel)
+        const cloudPromise = fetchGlobalCloudData(true).catch(() => null);
 
-        // C. Consulta resiliente às tabelas do Supabase (`qr_plates`, `nfc_plates`, `businesses`, `tenants`, `establishments`)
+        // C. Consulta às tabelas do Supabase (`businesses`, `tenants`, `establishments`, `qr_plates`, `nfc_plates`)
         const supabaseFallbackPromise = (async () => {
-          const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000));
+          const timeout = new Promise<{ bizList: any[]; plateMatch: any }>((resolve) =>
+            setTimeout(() => resolve({ bizList: [], plateMatch: null }), 2200)
+          );
           const lookup = (async () => {
-            let supaBizList = [...localBusinesses];
+            let supaBizList: any[] = [];
             for (const bizTable of ['businesses', 'tenants', 'establishments']) {
               try {
                 const { data: bRows } = await supabase.from(bizTable).select('*');
                 if (Array.isArray(bRows) && bRows.length > 0) {
-                  supaBizList = [...bRows, ...supaBizList] as any;
+                  supaBizList = [...bRows, ...supaBizList];
                 }
               } catch {}
             }
 
-            // Se a query do Passo 1 já retornou `plate` com `tenant_id` preenchido, mapeia diretamente
+            const combinedBiz = [...supaBizList, ...localBusinesses];
+
             if (plate && plate.tenant_id) {
-              const mappedDirect = mapNfcRow(plate, supaBizList);
+              const mappedDirect = mapNfcRow(plate, combinedBiz);
               if (isPlateAssignedAndActive(mappedDirect)) {
-                return mappedDirect;
+                return { bizList: supaBizList, plateMatch: mappedDirect };
               }
             }
 
-            // 1. Procura em `qr_plates` com select('*')
             try {
               const { data: qrRows } = await supabase.from('qr_plates').select('*');
               if (Array.isArray(qrRows) && qrRows.length > 0) {
                 const matchedQr = findBestMatchingPlate(qrRows, cleanCode);
                 if (matchedQr && isPlateAssignedAndActive(matchedQr)) {
-                  return mapNfcRow(matchedQr, supaBizList);
+                  return { bizList: supaBizList, plateMatch: mapNfcRow(matchedQr, combinedBiz) };
                 }
               }
             } catch {}
 
-            // 2. Procura em `nfc_plates` com select('*')
             try {
               const { data: nfcRows } = await supabase.from('nfc_plates').select('*');
               if (Array.isArray(nfcRows) && nfcRows.length > 0) {
                 const matchedNfc = findBestMatchingPlate(nfcRows, cleanCode);
                 if (matchedNfc && isPlateAssignedAndActive(matchedNfc)) {
-                  return mapNfcRow(matchedNfc, supaBizList);
+                  return { bizList: supaBizList, plateMatch: mapNfcRow(matchedNfc, combinedBiz) };
                 }
               }
             } catch {}
 
-            return null;
+            return { bizList: supaBizList, plateMatch: null };
           })();
 
           return Promise.race([lookup, timeout]);
         })();
 
-        const [serverPlate, cloudPlate, supabasePlate] = await Promise.all([
+        const [serverPlate, cloudData, supaResult] = await Promise.all([
           serverPromise,
           cloudPromise,
           supabaseFallbackPromise
@@ -174,14 +176,41 @@ export const NfcRedirectPage: React.FC<NfcRedirectPageProps> = ({
 
         if (isCancelled || redirectedRef.current) return;
 
-        // D. Leitura da cache local sanitizada
+        // Reúne todos os comércios conhecidos (CloudSync + Supabase + Local)
+        const allKnownBusinesses = [
+          ...(Array.isArray(cloudData?.businesses) ? cloudData!.businesses : []),
+          ...(Array.isArray(supaResult?.bizList) ? supaResult.bizList : []),
+          ...localBusinesses
+        ];
+
+        // Verifica se o código na URL corresponde diretamente ao slug, id ou nome de algum comércio
+        const directMatchedBiz = allKnownBusinesses.find(
+          (b: any) =>
+            b &&
+            (normalizeKey(b.slug || '') === normRaw ||
+              normalizeKey(b.id || '') === normRaw ||
+              normalizeKey(b.ownerId || b.owner_id || '') === normRaw)
+        );
+        if (directMatchedBiz && directMatchedBiz.slug) {
+          redirectToSlug(directMatchedBiz.slug, directMatchedBiz.slug);
+          return;
+        }
+
+        // Verifica placas em CloudSync, Supabase, Server e Cache Local
+        let cloudPlate = null;
+        if (cloudData && Array.isArray(cloudData.nfcPlates) && cloudData.nfcPlates.length > 0) {
+          const matched = findBestMatchingPlate(cloudData.nfcPlates, cleanCode);
+          if (matched && isPlateAssignedAndActive(matched)) {
+            cloudPlate = mapNfcRow(matched, allKnownBusinesses);
+          }
+        }
+
         const localPlate = findFastNfcPlate(cleanCode);
 
-        // E. Seleciona o melhor registo vinculado entre todas as fontes
         const allCandidates = [
-          supabasePlate,
+          supaResult?.plateMatch || null,
           cloudPlate,
-          serverPlate ? mapNfcRow(serverPlate, localBusinesses) : null,
+          serverPlate ? mapNfcRow(serverPlate, allKnownBusinesses) : null,
           localPlate
         ].filter((p): p is NonNullable<typeof p> => Boolean(p && isPlateAssignedAndActive(p)));
 
@@ -193,41 +222,39 @@ export const NfcRedirectPage: React.FC<NfcRedirectPageProps> = ({
             extractSlugFromUrl(winningPlate.redirect_url) ||
             winningPlate.merchant_id ||
             null;
-          const redirectUrl = winningPlate.redirect_url || null;
-          const resolvedPlateId = winningPlate.id || cleanCode;
-
-          if (tenantSlug || redirectUrl) {
-            try {
-              localStorage.removeItem('active_tenant_slug');
-            } catch {}
-            redirectedRef.current = true;
-            incrementNfcScan(resolvedPlateId).catch(() => {});
-
-            if (tenantSlug) {
-              window.location.replace(`/r/${encodeURIComponent(String(tenantSlug).trim())}`);
-              return;
-            }
-
-            let fullTarget = String(redirectUrl).trim();
-            if (fullTarget.startsWith('/')) {
-              fullTarget = window.location.origin + fullTarget;
-            } else if (!/^https?:\/\//i.test(fullTarget)) {
-              fullTarget = 'https://' + fullTarget;
-            }
-            window.location.replace(fullTarget);
+          if (tenantSlug) {
+            redirectToSlug(String(tenantSlug).trim(), winningPlate.id || cleanCode);
             return;
           }
         }
 
-        // PASSO 3: FALLBACK DE PLACA NÃO ATRIBUÍDA REAL
-        // Só redireciona para erro se a placa realmente não existir ou se tenant_id/merchant_id for nulo
+        // Resolução automática para códigos numéricos legados (ex: /qr/001 -> 1º comércio cadastrado, /qr/002 -> mrnavalha)
+        if (isPureNumericOrLegacyPlate) {
+          if (isSamePlateCode(cleanCode, '002')) {
+            redirectToSlug('mrnavalha', 'mrnavalha');
+            return;
+          }
+          if (isSamePlateCode(cleanCode, '001')) {
+            const customMerchant = allKnownBusinesses.find(
+              (b: any) => b && b.slug && String(b.slug).toLowerCase() !== 'mrnavalha'
+            );
+            const fallbackFirst = customMerchant || allKnownBusinesses.find((b: any) => b && b.slug);
+            if (fallbackFirst && fallbackFirst.slug) {
+              redirectToSlug(fallbackFirst.slug, fallbackFirst.slug);
+              return;
+            }
+          }
+        }
+
+        // PASSO 3: Se o slug/código não existir em nenhuma fonte, exibe página 404 limpa
+        // NUNCA faz fallback para Mr. Navalha nem redireciona para a tela de login
         if (!isCancelled) {
-          window.location.replace('/?error=qr_nao_atribuido');
+          setNotFoundCode(rawCode);
         }
       } catch (err) {
         console.warn('[NfcRedirectPage resolution notice]:', err);
         if (!isCancelled) {
-          window.location.replace('/?error=qr_nao_atribuido');
+          setNotFoundCode(rawCode);
         }
       }
     };
@@ -239,8 +266,33 @@ export const NfcRedirectPage: React.FC<NfcRedirectPageProps> = ({
     };
   }, [propPlateId, onPlateResolved]);
 
-  // Retorna null imediatamente para que NENHUM HTML de loading seja pintado na tela
+  // Exibe erro 404 limpo apenas se o código/slug realmente não existir
+  if (notFoundCode) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col justify-center items-center py-8 px-4 sm:px-6 font-sans">
+        <div className="max-w-md w-full bg-white rounded-3xl shadow-xl border border-slate-200/80 p-8 text-center space-y-5">
+          <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center mx-auto border border-rose-100">
+            <Store className="w-8 h-8" />
+          </div>
+          <div className="space-y-2">
+            <span className="inline-block px-3 py-1 bg-rose-50 text-rose-700 text-[11px] font-extrabold rounded-full uppercase tracking-wider">
+              Erro 404
+            </span>
+            <h1 className="text-xl font-extrabold text-slate-900">
+              Estabelecimento não encontrado
+            </h1>
+            <p className="text-xs text-slate-500 leading-relaxed">
+              Não encontrámos nenhum estabelecimento registado para o identificador{' '}
+              <code className="px-1.5 py-0.5 bg-slate-100 text-slate-800 rounded font-mono font-bold">
+                {notFoundCode}
+              </code>
+              . Verifique se o QR Code ou link está correto.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return null;
 };
-
-

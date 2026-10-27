@@ -29,7 +29,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
     <nav
       id="merchant-mobile-bottom-nav"
       aria-label="Navegação Mobile"
-      className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-lg border-t border-slate-200/80 shadow-[0_-4px_25px_rgba(15,23,42,0.08)] px-2 pt-1.5 pb-[calc(env(safe-area-inset-bottom,0px)+6px)] transition-all"
+      className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-lg border-t border-gray-200 shadow-[0_-4px_20px_rgba(15,23,42,0.06)] px-2 pt-1.5 pb-[calc(env(safe-area-inset-bottom,0px)+6px)] transition-all"
     >
       <div className="max-w-md mx-auto grid grid-cols-5 gap-1 items-center">
         {items.map((item) => {
@@ -40,10 +40,10 @@ export const BottomNav: React.FC<BottomNavProps> = ({
               key={item.id}
               type="button"
               onClick={() => onSelectTab(item.id)}
-              className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl transition-all duration-200 relative min-h-[48px] ${
+              className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-xl transition-all duration-200 relative min-h-[48px] cursor-pointer ${
                 isActive
-                  ? 'text-indigo-600 bg-indigo-50/80 font-bold'
-                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 font-medium active:scale-95'
+                  ? 'text-[#4285F4] bg-[#4285F4]/10 font-bold'
+                  : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50 font-medium active:scale-95'
               }`}
             >
               <div className="relative flex items-center justify-center">
@@ -53,7 +53,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
                   }`}
                 />
                 {item.badge && (
-                  <span className="absolute -top-1.5 -right-2.5 px-1.5 py-0.2 rounded-full text-[9px] font-black bg-rose-500 text-white min-w-[16px] text-center shadow-xs animate-pulse">
+                  <span className="absolute -top-1.5 -right-2.5 px-1.5 py-0.2 rounded-full text-[9px] font-black bg-[#EA4335] text-white min-w-[16px] text-center shadow-xs animate-pulse">
                     {item.badge}
                   </span>
                 )}
@@ -68,4 +68,3 @@ export const BottomNav: React.FC<BottomNavProps> = ({
     </nav>
   );
 };
-

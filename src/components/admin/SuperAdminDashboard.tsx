@@ -357,7 +357,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
 
       const createdName = newBizName.trim();
       console.log('[SuperAdmin] Criando novo estabelecimento com dados:', businessData);
-      await createBusiness(businessData);
+      const createdBiz = await createBusiness(businessData);
 
       setShowCreateModal(false);
       setNewBizName('');
@@ -373,8 +373,9 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
       setModalLogoPreview('');
       setNewBizCurrency('EUR');
       setCreateError(null);
-      showToast(`Estabelecimento "${createdName}" criado com sucesso!`, 'success');
-      setSuccessBanner(`Estabelecimento "${createdName}" cadastrado com sucesso! Já pode aceder ao CRM ou partilhar o link de avaliação.`);
+      setQrModalBiz(createdBiz);
+      showToast(`Estabelecimento "${createdName}" e QR Code (/qr/${createdBiz.slug}) criados automaticamente!`, 'success');
+      setSuccessBanner(`Estabelecimento "${createdName}" cadastrado com sucesso! O QR Code exclusivo (/qr/${createdBiz.slug}) já está ativo.`);
       setTimeout(() => setSuccessBanner(null), 8000);
     } catch (err: any) {
       console.error('Error creating business in SuperAdmin:', err);
@@ -584,8 +585,8 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
               : 'text-indigo-700 bg-indigo-50/70 hover:bg-indigo-100 border border-indigo-200/60'
           }`}
         >
-          <Radio className="w-4 h-4" />
-          <span>Placas NFC & QR Dinâmico</span>
+          <QrCode className="w-4 h-4" />
+          <span>QR Codes dos Comércios</span>
         </button>
       </div>
 

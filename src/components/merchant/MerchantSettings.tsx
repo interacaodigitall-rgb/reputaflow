@@ -200,9 +200,10 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
     };
   }, [business.id, business.slug]);
 
-  const publicReviewUrl = getPublicReviewUrl(slug || business.slug);
-  const plateQrUrl = linkedPlate ? getNfcRedirectUrl(linkedPlate.id) : '';
-  const currentQrUrl = (linkedPlate && qrMode === 'plate') ? plateQrUrl : publicReviewUrl;
+  const activeMerchantSlug = slug || business.slug || business.id;
+  const publicReviewUrl = getPublicReviewUrl(activeMerchantSlug);
+  const plateQrUrl = getNfcRedirectUrl(activeMerchantSlug);
+  const currentQrUrl = qrMode === 'plate' ? plateQrUrl : publicReviewUrl;
 
   const handleLogoFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -892,62 +893,45 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
               </p>
             </div>
 
-            {/* Linked Physical Plate Badge & Switcher */}
-            {loadingPlate ? (
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl flex items-center justify-center gap-2 text-xs text-slate-500">
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />
-                <span>A verificar placas NFC vinculadas...</span>
-              </div>
-            ) : linkedPlate ? (
-              <div className="bg-indigo-50/80 border border-indigo-200/80 rounded-2xl p-3.5 text-left space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-indigo-600 text-white rounded-xl text-xs font-bold">
-                    <Radio className="w-3.5 h-3.5" />
-                    <span>Placa Vinculada #{linkedPlate.id}</span>
-                  </div>
-                  <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100/90 px-2 py-0.5 rounded-full">
-                    Ativa • {linkedPlate.scan_count || 0} leituras
-                  </span>
+            {/* Autonomous Merchant QR Badge & Switcher */}
+            <div className="bg-indigo-50/80 border border-indigo-200/80 rounded-2xl p-3.5 text-left space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-indigo-600 text-white rounded-xl text-xs font-bold">
+                  <QrCode className="w-3.5 h-3.5" />
+                  <span>QR Oficial • /{activeMerchantSlug}</span>
                 </div>
-                <p className="text-[11px] text-slate-600 leading-relaxed">
-                  Este estabelecimento está associado à placa física do lote. O QR Code abaixo é gerado com o URL exclusivo do seu dispositivo.
-                </p>
-                <div className="flex gap-1.5 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setQrMode('plate')}
-                    className={`flex-1 py-1.5 px-2.5 rounded-xl text-[11px] font-bold transition cursor-pointer ${
-                      qrMode === 'plate'
-                        ? 'bg-indigo-600 text-white shadow-xs'
-                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    Placa #{linkedPlate.id} (Recomendado)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setQrMode('direct')}
-                    className={`flex-1 py-1.5 px-2.5 rounded-xl text-[11px] font-bold transition cursor-pointer ${
-                      qrMode === 'direct'
-                        ? 'bg-indigo-600 text-white shadow-xs'
-                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    Link Direto (?b={slug})
-                  </button>
-                </div>
+                <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100/90 px-2 py-0.5 rounded-full">
+                  Ativo
+                </span>
               </div>
-            ) : (
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 text-left space-y-1">
-                <div className="flex items-center gap-1.5 font-bold text-slate-800 text-[11px]">
-                  <QrCode className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>QR Code Padrão do Estabelecimento</span>
-                </div>
-                <p className="text-[11px] text-slate-500">
-                  Nenhuma placa física de lote atribuída ainda. Pode solicitar ou associar uma placa no menu Super Admin.
-                </p>
+              <p className="text-[11px] text-slate-600 leading-relaxed">
+                O seu estabelecimento possui um QR Code único e autónomo gerado automaticamente com base no seu slug.
+              </p>
+              <div className="flex gap-1.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setQrMode('plate')}
+                  className={`flex-1 py-1.5 px-2.5 rounded-xl text-[11px] font-bold transition cursor-pointer ${
+                    qrMode === 'plate'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  Rota QR (/qr/{activeMerchantSlug})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setQrMode('direct')}
+                  className={`flex-1 py-1.5 px-2.5 rounded-xl text-[11px] font-bold transition cursor-pointer ${
+                    qrMode === 'direct'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  Rota Direta (/r/{activeMerchantSlug})
+                </button>
               </div>
-            )}
+            </div>
 
             {/* QR Code Canvas */}
             <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 inline-block shadow-inner">
@@ -972,11 +956,7 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
                 className="w-full py-2.5 px-4 bg-slate-900 hover:bg-black text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
               >
                 <Download className="w-4 h-4" />
-                <span>
-                  {linkedPlate && qrMode === 'plate'
-                    ? `Descarregar Placa PNG #${linkedPlate.id}`
-                    : 'Descarregar Placa PNG'}
-                </span>
+                <span>Descarregar QR Code PNG</span>
               </button>
 
               <button
@@ -996,7 +976,7 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
                 ) : (
                   <>
                     <Copy className="w-3.5 h-3.5" />
-                    <span>Copiar Link ({qrMode === 'plate' && linkedPlate ? `Placa #${linkedPlate.id}` : 'URL'})</span>
+                    <span>Copiar Link Oficial</span>
                   </>
                 )}
               </button>

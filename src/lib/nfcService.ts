@@ -9,27 +9,40 @@ export type { NfcPlate, CreateNfcBatchOptions } from '../types/nfc';
 const NFC_STORAGE_KEY = 'reputaflow_nfc_plates_cache';
 
 export const INITIAL_NFC_PLATES: NfcPlate[] = [
-  { id: '001', status: 'inactive', merchant_id: null, redirect_url: null, scan_count: 0, created_at: '2026-09-21T10:00:00.000Z', updated_at: '2026-09-21T10:00:00.000Z' },
   {
-    id: '002',
+    id: 'mrnavalha',
     status: 'active',
     merchant_id: 'biz_mrnavalha',
-    redirect_url: '/?b=mrnavalha',
+    redirect_url: '/r/mrnavalha',
     scan_count: 3,
     merchant_name: 'Mr. Navalha',
     merchant_slug: 'mrnavalha',
     created_at: '2026-09-21T10:00:00.000Z',
     updated_at: '2026-09-21T12:00:00.000Z'
-  },
-  { id: '003', status: 'inactive', merchant_id: null, redirect_url: null, scan_count: 0, created_at: '2026-09-21T10:00:00.000Z', updated_at: '2026-09-21T10:00:00.000Z' },
-  { id: '004', status: 'inactive', merchant_id: null, redirect_url: null, scan_count: 0, created_at: '2026-09-21T10:00:00.000Z', updated_at: '2026-09-21T10:00:00.000Z' },
-  { id: '005', status: 'inactive', merchant_id: null, redirect_url: null, scan_count: 0, created_at: '2026-09-21T10:00:00.000Z', updated_at: '2026-09-21T10:00:00.000Z' },
-  { id: '006', status: 'inactive', merchant_id: null, redirect_url: null, scan_count: 0, created_at: '2026-09-21T10:00:00.000Z', updated_at: '2026-09-21T10:00:00.000Z' },
-  { id: '007', status: 'inactive', merchant_id: null, redirect_url: null, scan_count: 0, created_at: '2026-09-21T10:00:00.000Z', updated_at: '2026-09-21T10:00:00.000Z' },
-  { id: '008', status: 'inactive', merchant_id: null, redirect_url: null, scan_count: 0, created_at: '2026-09-21T10:00:00.000Z', updated_at: '2026-09-21T10:00:00.000Z' },
-  { id: '009', status: 'inactive', merchant_id: null, redirect_url: null, scan_count: 0, created_at: '2026-09-21T10:00:00.000Z', updated_at: '2026-09-21T10:00:00.000Z' },
-  { id: '010', status: 'inactive', merchant_id: null, redirect_url: null, scan_count: 0, created_at: '2026-09-21T10:00:00.000Z', updated_at: '2026-09-21T10:00:00.000Z' }
+  }
 ];
+
+/**
+ * Generates an autonomous active QR entry for each registered merchant based on its slug.
+ */
+function buildAutoPlatesForBusinesses(businesses: Business[]): NfcPlate[] {
+  const allBiz = businesses.length > 0 ? businesses : getLocalBusinesses();
+  const now = new Date().toISOString();
+  return allBiz
+    .filter((b) => b && b.slug && b.name)
+    .map((b) => ({
+      id: b.slug,
+      status: 'active' as const,
+      merchant_id: b.id,
+      redirect_url: `/r/${encodeURIComponent(b.slug)}`,
+      scan_count: b.slug === 'mrnavalha' ? 3 : 0,
+      merchant_name: b.name,
+      merchant_slug: b.slug,
+      merchant_logo_url: b.logoUrl || undefined,
+      created_at: b.createdAt || now,
+      updated_at: b.updatedAt || now
+    }));
+}
 
 /**
  * Cleans up legacy hardcoded seed assignments where 001, 003, 004, 005 were pre-populated with Mr. Navalha.
@@ -39,12 +52,12 @@ function sanitizePlatesList(plates: NfcPlate[], businesses: Business[] = []): Nf
   const allBiz = businesses.length > 0 ? businesses : getLocalBusinesses();
   return plates.map((p) => {
     if (!p || !p.id) return p;
-    const isPlate2 = isSamePlateCode(p.id, 'QRC0002');
+    const isPlate2 = isSamePlateCode(p.id, 'QRC0002') || p.id.toLowerCase() === 'mrnavalha';
     const isLegacySeedTimestamp =
       p.updated_at === '2026-09-21T12:00:00.000Z' ||
       (p.created_at === '2026-09-21T10:00:00.000Z' && String(p.updated_at || '').startsWith('2026-09-21'));
 
-    // If not plate #002 and it still has the old pre-seeded Mr. Navalha assignment, reset to inactive
+    // If not plate #002/mrnavalha and it still has the old pre-seeded Mr. Navalha assignment, reset to inactive
     if (!isPlate2 && p.merchant_id === 'biz_mrnavalha' && isLegacySeedTimestamp) {
       return {
         ...p,
@@ -62,7 +75,8 @@ function sanitizePlatesList(plates: NfcPlate[], businesses: Business[] = []): Nf
 }
 
 function getLocalNfcCache(): NfcPlate[] {
-  if (typeof window === 'undefined') return [...INITIAL_NFC_PLATES];
+  const autoPlates = buildAutoPlatesForBusinesses([]);
+  if (typeof window === 'undefined') return autoPlates;
   try {
     const raw = localStorage.getItem(NFC_STORAGE_KEY);
     if (raw) {
@@ -72,7 +86,7 @@ function getLocalNfcCache(): NfcPlate[] {
       }
     }
   } catch {}
-  return [...INITIAL_NFC_PLATES];
+  return autoPlates;
 }
 
 function saveLocalNfcCache(plates: NfcPlate[]): void {
@@ -83,23 +97,44 @@ function saveLocalNfcCache(plates: NfcPlate[]): void {
 }
 
 /**
- * Synchronous fast-lookup for a plate by ID or QR code from local cache or pre-configured batch.
- * Strictly prioritizes active custom plates and exact code matches over seed plates.
+ * Synchronous fast-lookup for a QR code by merchant slug, business ID, or plate code.
  */
 export function findFastNfcPlate(idOrCode: string): NfcPlate | null {
   if (!idOrCode) return null;
   const clean = idOrCode.trim();
+  const cleanLower = clean.toLowerCase();
 
-  // 1. Check sanitized local storage cache first
+  // 1. Direct match against registered businesses by slug or id (Autonomous QR per merchant)
+  const allBiz = getLocalBusinesses();
+  const directBiz = allBiz.find(
+    (b) =>
+      b.slug.toLowerCase() === cleanLower ||
+      b.id.toLowerCase() === cleanLower ||
+      (b.ownerId && b.ownerId.toLowerCase() === cleanLower)
+  );
+  if (directBiz) {
+    return {
+      id: directBiz.slug,
+      status: 'active',
+      merchant_id: directBiz.id,
+      redirect_url: `/r/${encodeURIComponent(directBiz.slug)}`,
+      scan_count: 0,
+      merchant_name: directBiz.name,
+      merchant_slug: directBiz.slug,
+      merchant_logo_url: directBiz.logoUrl || undefined,
+      created_at: directBiz.createdAt || new Date().toISOString(),
+      updated_at: directBiz.updatedAt || new Date().toISOString()
+    };
+  }
+
+  // 2. Check sanitized local storage cache
   const localList = getLocalNfcCache();
   const fromLocal = findBestMatchingPlate(localList, clean);
   if (fromLocal && fromLocal.status === 'active') {
     return fromLocal;
   }
 
-  // 2. Check INITIAL_NFC_PLATES fallback
-  const fromInit = findBestMatchingPlate(INITIAL_NFC_PLATES, clean);
-  return fromLocal || fromInit || null;
+  return null;
 }
 
 export function mapNfcRow(row: any, businesses: Business[] = []): NfcPlate {
@@ -298,24 +333,17 @@ export async function getNfcPlates(businesses: Business[] = []): Promise<NfcPlat
 
   await Promise.all([serverPromise, cloudPromise, supabasePromise]);
 
+  const autoPlates = buildAutoPlatesForBusinesses(allBiz);
   const merged = mergePlatesLists(
     allBiz,
-    INITIAL_NFC_PLATES,
+    autoPlates,
     localCache,
     serverPlates,
     cloudPlates,
     supabasePlates,
     supabaseQrPlates
-  );
+  ).filter((p) => p.status === 'active' && Boolean(p.merchant_slug || p.merchant_id || p.redirect_url));
   saveLocalNfcCache(merged);
-
-  // Sync active plates to Cloud Sync if any active custom plates exist locally
-  const hasActiveCustom = merged.some(
-    (p) => p.status === 'active' && p.merchant_slug && !isSamePlateCode(p.id, 'QRC0002')
-  );
-  if (hasActiveCustom) {
-    pushGlobalCloudData({ nfcPlates: merged }).catch(() => {});
-  }
 
   return merged;
 }

@@ -127,6 +127,7 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
     try {
       localStorage.removeItem('active_tenant_slug');
       localStorage.removeItem('current_establishment_id');
+      sessionStorage.clear();
     } catch {}
 
     fetchBusiness();
@@ -285,16 +286,19 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
     );
   }
 
-  // Error state if business not found
+  // Error 404 state if business not found
   if (loadError && !business) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-slate-100/70 via-white to-slate-50 flex flex-col justify-center items-center py-8 px-4 sm:px-6">
+      <div className="min-h-screen bg-gradient-to-b from-slate-100/70 via-white to-slate-50 flex flex-col justify-center items-center py-8 px-4 sm:px-6 font-sans">
         <div className="max-w-md w-full bg-white rounded-3xl shadow-xl shadow-slate-200/60 border border-slate-100 p-8 text-center space-y-5">
-          <div className="w-14 h-14 bg-rose-50 text-rose-500 rounded-2xl flex items-center justify-center mx-auto border border-rose-100">
-            <Store className="w-7 h-7" />
+          <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center mx-auto border border-rose-100">
+            <Store className="w-8 h-8" />
           </div>
           <div className="space-y-2">
-            <h2 className="text-lg font-bold text-slate-900">Estabelecimento não encontrado</h2>
+            <span className="inline-block px-3 py-1 bg-rose-50 text-rose-700 text-[11px] font-extrabold rounded-full uppercase tracking-wider">
+              Erro 404
+            </span>
+            <h2 className="text-xl font-extrabold text-slate-900">Estabelecimento não encontrado</h2>
             <p className="text-xs text-slate-500 leading-relaxed">{loadError}</p>
           </div>
         </div>

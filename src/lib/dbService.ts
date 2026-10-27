@@ -596,7 +596,32 @@ export async function addBusiness(data: Omit<Business, 'id' | 'createdAt' | 'upd
     window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated'));
   }
 
-  // 5. Primary persistence: Backend Server REST API (writes to PostgreSQL Cloud SQL & data/db.json)
+  // 5. GERAÇÃO AUTOMÁTICA DO QR CODE EXCLUSIVO DO COMÉRCIO (/qr/[slug] -> /r/[slug])
+  const directRedirectUrl = `/r/${encodeURIComponent(uniqueSlug)}`;
+  try {
+    if (typeof window !== 'undefined') {
+      const rawPlates = localStorage.getItem('reputaflow_nfc_plates_cache');
+      const localPlates = rawPlates ? JSON.parse(rawPlates) : [];
+      if (Array.isArray(localPlates)) {
+        const autoPlate = {
+          id: uniqueSlug,
+          status: 'active',
+          merchant_id: id,
+          redirect_url: directRedirectUrl,
+          merchant_name: newBiz.name,
+          merchant_slug: uniqueSlug,
+          merchant_logo_url: newBiz.logoUrl || undefined,
+          scan_count: 0,
+          created_at: now,
+          updated_at: now
+        };
+        const filtered = localPlates.filter((p: any) => p && p.id !== uniqueSlug);
+        localStorage.setItem('reputaflow_nfc_plates_cache', JSON.stringify([autoPlate, ...filtered]));
+      }
+    }
+  } catch {}
+
+  // 6. Primary persistence: Backend Server REST API (writes to PostgreSQL Cloud SQL & data/db.json)
   try {
     const apiRes = await fetch('/api/businesses', {
       method: 'POST',
@@ -616,7 +641,7 @@ export async function addBusiness(data: Omit<Business, 'id' | 'createdAt' | 'upd
     console.warn('[Server API /api/businesses network warning]:', apiErr);
   }
 
-  // 6. Secondary persistence: Adaptive Supabase insert across 'businesses', 'tenants', and 'establishments'
+  // 7. Secondary persistence: Adaptive Supabase insert across 'businesses', 'tenants', 'establishments', and direct QR record
   const payload: Record<string, any> = {
     id,
     name: newBiz.name,
@@ -641,6 +666,30 @@ export async function addBusiness(data: Omit<Business, 'id' | 'createdAt' | 'upd
       await insertBusinessToSupabaseAdaptive('tenants', payload);
       await insertBusinessToSupabaseAdaptive('establishments', payload);
     }
+    // Regista também o código QR direto do comércio no Supabase (se as tabelas existirem)
+    try {
+      await supabase.from('qr_plates').upsert(
+        {
+          qr_code_id: uniqueSlug,
+          tenant_id: id,
+          status: 'active',
+          redirect_url: directRedirectUrl
+        },
+        { onConflict: 'qr_code_id' }
+      );
+    } catch {}
+    try {
+      await supabase.from('nfc_plates').upsert(
+        {
+          id: uniqueSlug,
+          status: 'active',
+          merchant_id: id,
+          redirect_url: directRedirectUrl,
+          updated_at: now
+        },
+        { onConflict: 'id' }
+      );
+    } catch {}
   } catch (err: any) {
     console.warn('[Supabase addBusiness caught]:', err);
   }
@@ -648,6 +697,7 @@ export async function addBusiness(data: Omit<Business, 'id' | 'createdAt' | 'upd
   notifyDataChanged();
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated'));
+    window.dispatchEvent(new CustomEvent('reputaflow_nfc_sync'));
   }
 
   return newBiz;

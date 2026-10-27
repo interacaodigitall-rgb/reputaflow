@@ -7,13 +7,10 @@ export function getPublicReviewUrl(slugOrId: string): string {
   if (!slugOrId) return typeof window !== 'undefined' ? window.location.origin : '';
 
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  const pathname = typeof window !== 'undefined' ? window.location.pathname : '/';
-  
-  // Clean pathname so we never get double slashes like 'https://site.com//?b=slug'
-  const cleanPath = pathname === '/' ? '' : pathname.replace(/\/+$/, '');
+  const cleanOrigin = origin ? origin.replace(/\/+$/, '') : '';
   const clean = slugOrId.trim();
 
-  return `${origin}${cleanPath}/?b=${encodeURIComponent(clean)}`;
+  return `${cleanOrigin}/r/${encodeURIComponent(clean)}`;
 }
 
 export function getNfcRedirectUrl(plateId: string): string {
