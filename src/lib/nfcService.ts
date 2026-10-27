@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { NfcPlate, CreateNfcBatchOptions } from '../types/nfc';
 import { Business } from '../types';
+export type { NfcPlate, CreateNfcBatchOptions } from '../types/nfc';
 
 const NFC_STORAGE_KEY = 'reputaflow_nfc_plates_cache';
 

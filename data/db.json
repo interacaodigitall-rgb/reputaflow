@@ -16,7 +16,7 @@
       "currency": "EUR",
       "password": "reputa123",
       "createdAt": "2026-08-22T10:40:37.506Z",
-      "updatedAt": "2026-09-21T13:01:24.346Z"
+      "updatedAt": "2026-10-27T17:05:06.971Z"
     }
   ],
   "customers": [
@@ -110,6 +110,30 @@
   ],
   "recoveryCases": [
     {
+      "id": "rec_mvqxflaf_2za2",
+      "businessId": "biz_mrnavalha",
+      "business_id": "biz_mrnavalha",
+      "customerId": null,
+      "customer_id": null,
+      "feedbackId": null,
+      "feedback_id": null,
+      "customerName": "Cliente Teste",
+      "customer_name": "Cliente Teste",
+      "customerPhone": "+351912345678",
+      "customer_phone": "+351912345678",
+      "customerEmail": null,
+      "customer_email": null,
+      "rating": 2,
+      "status": "pending",
+      "notes": "Corte demorou muito",
+      "assignedTo": null,
+      "assigned_to": null,
+      "createdAt": "2026-10-27T16:55:37.863Z",
+      "created_at": "2026-10-27T16:55:37.863Z",
+      "updatedAt": "2026-10-27T16:55:37.863Z",
+      "updated_at": "2026-10-27T16:55:37.863Z"
+    },
+    {
       "id": "rec_1",
       "businessId": "biz_mrnavalha",
       "reviewId": "rev_2",
@@ -133,12 +157,12 @@
       "merchantId": "biz_mrnavalha",
       "redirect_url": "/?b=mrnavalha",
       "redirectUrl": "/?b=mrnavalha",
-      "scan_count": 14,
-      "scanCount": 14,
+      "scan_count": 15,
+      "scanCount": 15,
       "merchant_name": "Mr. Navalha",
       "merchant_slug": "mrnavalha",
       "createdAt": "2026-09-21T10:00:00.000Z",
-      "updatedAt": "2026-09-21T12:00:00.000Z"
+      "updatedAt": "2026-10-27T16:55:35.748Z"
     },
     {
       "id": "002",

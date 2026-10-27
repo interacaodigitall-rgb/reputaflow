@@ -2,26 +2,75 @@ import { db } from './index.ts';
 import { businesses } from './schema.ts';
 import { eq, desc } from 'drizzle-orm';
 import { REGISTERED_BUSINESSES } from '../lib/initialData.ts';
+import fs from 'fs';
+import path from 'path';
 
-// In-memory store initialized with registered businesses so the server never fails
-const inMemoryBusinesses: any[] = [...REGISTERED_BUSINESSES.map(b => ({
-  id: b.id,
-  name: b.name,
-  slug: b.slug,
-  category: b.category || 'Barbearia & Estética',
-  logoUrl: b.logoUrl || null,
-  phone: b.phone || '',
-  email: b.email || '',
-  address: b.address || '',
-  googleReviewUrl: b.googleReviewUrl || null,
-  status: b.status || 'active',
-  planId: b.planId || 'plan_pro',
-  ownerId: b.ownerId || 'owner_mrnavalha',
-  currency: b.currency || 'EUR',
-  password: b.password || 'reputa123',
-  createdAt: b.createdAt ? new Date(b.createdAt) : new Date(),
-  updatedAt: b.updatedAt ? new Date(b.updatedAt) : new Date()
-}))];
+const DB_FILE = path.join(process.cwd(), 'data', 'db.json');
+
+export function readDbJson(): any {
+  try {
+    if (fs.existsSync(DB_FILE)) {
+      const raw = fs.readFileSync(DB_FILE, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (parsed) return parsed;
+    }
+  } catch (e) {
+    console.warn('[readDbJson notice in businesses.ts]:', e);
+  }
+  return { businesses: [], customers: [], reviews: [], feedback: [], recoveryCases: [], nfcPlates: [] };
+}
+
+export function writeDbJson(data: any): void {
+  try {
+    const dir = path.dirname(DB_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf-8');
+  } catch (e) {
+    console.warn('[writeDbJson notice in businesses.ts]:', e);
+  }
+}
+
+function getInitialBusinesses(): any[] {
+  const map = new Map<string, any>();
+  REGISTERED_BUSINESSES.forEach(b => {
+    map.set(b.id, {
+      id: b.id,
+      name: b.name,
+      slug: b.slug,
+      category: b.category || 'Comércio & Serviços',
+      logoUrl: b.logoUrl || null,
+      phone: b.phone || '',
+      email: b.email || '',
+      address: b.address || '',
+      googleReviewUrl: b.googleReviewUrl || null,
+      status: b.status || 'active',
+      planId: b.planId || 'plan_pro',
+      ownerId: b.ownerId || 'owner_mrnavalha',
+      currency: b.currency || 'EUR',
+      password: b.password || 'reputa123',
+      createdAt: b.createdAt ? new Date(b.createdAt) : new Date(),
+      updatedAt: b.updatedAt ? new Date(b.updatedAt) : new Date()
+    });
+  });
+
+  try {
+    const jsonDb = readDbJson();
+    if (Array.isArray(jsonDb.businesses)) {
+      jsonDb.businesses.forEach((b: any) => {
+        map.set(b.id, {
+          ...b,
+          createdAt: b.createdAt ? new Date(b.createdAt) : new Date(),
+          updatedAt: b.updatedAt ? new Date(b.updatedAt) : new Date()
+        });
+      });
+    }
+  } catch {}
+
+  return Array.from(map.values());
+}
+
+// In-memory store initialized with registered businesses and db.json
+const inMemoryBusinesses: any[] = getInitialBusinesses();
 
 function normalizeSlug(str: string = ''): string {
   return str
@@ -111,6 +160,17 @@ export async function upsertBusinessSql(data: any) {
   }
 
   try {
+    const jsonDb = readDbJson();
+    if (!Array.isArray(jsonDb.businesses)) jsonDb.businesses = [];
+    const idx = jsonDb.businesses.findIndex((b: any) => b.id === id || normalizeSlug(b.slug) === cleanSlug);
+    if (idx !== -1) jsonDb.businesses[idx] = memoryRecord;
+    else jsonDb.businesses.unshift(memoryRecord);
+    writeDbJson(jsonDb);
+  } catch (e) {
+    console.warn('[db.json write notice]:', e);
+  }
+
+  try {
     const result = await db
       .insert(businesses)
       .values(memoryRecord)
@@ -155,6 +215,18 @@ export async function updateBusinessSql(id: string, updates: any) {
   }
 
   try {
+    const jsonDb = readDbJson();
+    if (Array.isArray(jsonDb.businesses)) {
+      const idx = jsonDb.businesses.findIndex((b: any) => b.id === id);
+      if (idx !== -1) {
+        jsonDb.businesses[idx] = { ...jsonDb.businesses[idx], ...updates, updatedAt: new Date() };
+        if (updates.slug) jsonDb.businesses[idx].slug = normalizeSlug(updates.slug);
+        writeDbJson(jsonDb);
+      }
+    }
+  } catch {}
+
+  try {
     const fieldsToUpdate: Record<string, any> = {
       updatedAt: new Date()
     };
@@ -189,6 +261,14 @@ export async function deleteBusinessSql(id: string) {
   if (existingIdx !== -1) {
     inMemoryBusinesses.splice(existingIdx, 1);
   }
+
+  try {
+    const jsonDb = readDbJson();
+    if (Array.isArray(jsonDb.businesses)) {
+      jsonDb.businesses = jsonDb.businesses.filter((b: any) => b.id !== id);
+      writeDbJson(jsonDb);
+    }
+  } catch {}
 
   try {
     await db.delete(businesses).where(eq(businesses.id, id));

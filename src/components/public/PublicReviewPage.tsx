@@ -125,8 +125,10 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
   const handleConfirmRating = async () => {
     if (!business || selectedRating < 1) return;
 
-    // Regra: 4 e 5 estrelas vão para o Google Reviews
-    if (selectedRating >= 4) {
+    const minRating = Number(business.minRatingForGoogle || 4);
+
+    // Regra: se atingir o limiar (ex: 4 e 5 estrelas), vai para o Google Reviews
+    if (selectedRating >= minRating) {
       setSubmitting(true);
 
       let targetUrl = business.googleReviewUrl ? business.googleReviewUrl.trim() : '';
@@ -134,7 +136,7 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
         targetUrl = 'https://' + targetUrl;
       }
 
-      // Regista a avaliação no banco de dados
+      // Regista a avaliação positiva no banco de dados
       try {
         await submitReview({
           businessId: business.id,
@@ -163,45 +165,52 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
         }, 1200);
       }
     } else {
-      // 1, 2 ou 3 estrelas abrem o formulário interno de recuperação privada
+      // Classificação <= 3 estrelas desvia obrigatoriamente para o fluxo de recuperação privada
       setIsRecoveryOpen(true);
     }
   };
 
-  const handleRecoverySubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!business || selectedRating < 1 || selectedRating > 3) return;
+  const processNegativeFeedback = async (isAnonymous: boolean = false) => {
+    if (!business || selectedRating < 1) return;
 
-    if (!customerName.trim() || !customerPhone.trim()) {
-      setFormError('Por favor, informe pelo menos o seu nome e telefone/WhatsApp.');
-      return;
-    }
+    const finalName = isAnonymous
+      ? 'Cliente Anónimo'
+      : (customerName.trim() || 'Cliente (QR Code)');
+    const finalPhone = isAnonymous ? '' : customerPhone.trim();
+    const finalEmail = isAnonymous ? '' : customerEmail.trim();
 
     setSubmitting(true);
     setFormError(null);
 
     try {
+      // 1. Grava a avaliação na tabela de reviews com status adequado de feedback interno
       const rev = await submitReview({
         businessId: business.id,
-        customerName: customerName.trim(),
-        customerPhone: customerPhone.trim(),
-        customerEmail: customerEmail.trim(),
+        customerName: finalName,
+        customerPhone: finalPhone,
+        customerEmail: finalEmail,
         rating: selectedRating,
         channel: 'qr',
         source: 'recovery',
         isInternalFeedback: true
       });
 
+      // 2. Dispara obrigatoriamente o registo na tabela de Casos de Recuperação (recovery_cases)
+      const complaintComment = [
+        question1 ? `Motivo: ${question1.trim()}` : '',
+        question2 ? `Detalhes: ${question2.trim()}` : ''
+      ].filter(Boolean).join(' | ') || `Avaliação negativa (${selectedRating} estrelas) submetida via QR Code.`;
+
       await submitFeedbackAndRecovery({
         businessId: business.id,
         reviewId: rev.reviewId,
-        customerName: customerName.trim(),
-        customerPhone: customerPhone.trim(),
-        customerEmail: customerEmail.trim(),
+        customerName: finalName,
+        customerPhone: finalPhone,
+        customerEmail: finalEmail,
         rating: selectedRating,
         question1: question1.trim() || 'Experiência insatisfatória',
-        question2: question2.trim(),
-        question3WantsContact: wantsContact
+        question2: complaintComment,
+        question3WantsContact: isAnonymous ? false : wantsContact
       });
 
       setIsCompleted(true);
@@ -211,6 +220,11 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleRecoverySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await processNegativeFeedback(false);
   };
 
   const ratingDescriptions: Record<number, string> = {
@@ -482,13 +496,22 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
                     </label>
                   </div>
 
-                  <div className="pt-3 flex gap-2">
+                  <div className="pt-3 flex flex-col sm:flex-row gap-2">
                     <button
                       type="button"
                       onClick={() => setIsRecoveryOpen(false)}
-                      className="py-2.5 px-4 rounded-xl border border-slate-200 text-slate-600 text-xs font-semibold hover:bg-slate-50 transition"
+                      className="py-2.5 px-4 rounded-xl border border-slate-200 text-slate-600 text-xs font-semibold hover:bg-slate-50 transition text-center"
                     >
                       Voltar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={submitting}
+                      onClick={() => processNegativeFeedback(true)}
+                      className="py-2.5 px-3 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold transition text-center disabled:opacity-50"
+                      title="Enviar sem registrar nome e telefone"
+                    >
+                      Enviar Anonimamente
                     </button>
                     <button
                       type="submit"

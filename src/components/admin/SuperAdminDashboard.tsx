@@ -25,7 +25,10 @@ import {
   Upload,
   Image as ImageIcon,
   X,
-  Radio
+  Radio,
+  Wand2,
+  Loader2,
+  Globe
 } from 'lucide-react';
 import { Business, Customer, Review, RecoveryCase, Plan, PlatformSettings } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -37,7 +40,7 @@ import {
   savePlatformSettings,
   uploadImage
 } from '../../lib/dbService';
-import { getPublicReviewUrl } from '../../lib/urlHelper';
+import { getPublicReviewUrl, slugify, normalizeGoogleReviewUrl, convertGoogleMapsToReviewUrl } from '../../lib/urlHelper';
 import { QrCodeModal } from '../common/QrCodeModal';
 import { BusinessLogo } from '../common/BusinessLogo';
 import { NfcPlatesManagement } from './NfcPlatesManagement';
@@ -98,6 +101,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newBizName, setNewBizName] = useState('');
   const [newBizSlug, setNewBizSlug] = useState('');
+  const [isSlugManuallyEdited, setIsSlugManuallyEdited] = useState(false);
   const [newBizCategory, setNewBizCategory] = useState('');
   const [newBizPhone, setNewBizPhone] = useState('');
   const [newBizEmail, setNewBizEmail] = useState('');
@@ -111,7 +115,25 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   const [newBizCurrency, setNewBizCurrency] = useState<'EUR' | 'BRL'>('EUR');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [convertingAdminGoogleUrl, setConvertingAdminGoogleUrl] = useState(false);
 
+  const handleConvertAdminGoogleUrl = async () => {
+    if (!newBizGoogleUrl.trim()) return;
+    setConvertingAdminGoogleUrl(true);
+    try {
+      const res = await convertGoogleMapsToReviewUrl(newBizGoogleUrl);
+      if (res.success && res.reviewUrl) {
+        setNewBizGoogleUrl(res.reviewUrl);
+        showToast('Link do Google Reviews configurado e otimizado com sucesso!', 'success');
+      } else {
+        showToast(res.message || 'Não foi possível converter o link do Maps.', 'error');
+      }
+    } catch (err: any) {
+      showToast('Erro ao converter link: ' + (err.message || 'Tente novamente.'), 'error');
+    } finally {
+      setConvertingAdminGoogleUrl(false);
+    }
+  };
   const handleModalLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -143,7 +165,12 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   // Business Deletion Modal State
   const [businessToDelete, setBusinessToDelete] = useState<{ id: string; name: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const showToast = (text: string, type: 'success' | 'error' = 'success') => {
+    setToast({ text, type });
+    setTimeout(() => setToast(null), 5000);
+  };
 
   // Settings State
   const [platformName, setPlatformName] = useState(settings?.platformName || 'ReputaFlow');
@@ -197,6 +224,13 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     e.preventDefault();
     if (!newBizName.trim()) {
       setCreateError('Por favor, informe o nome do estabelecimento.');
+      showToast('Por favor, informe o nome do estabelecimento.', 'error');
+      return;
+    }
+
+    if (!newBizPhone.trim()) {
+      setCreateError('Por favor, informe o telefone/WhatsApp de contacto do estabelecimento.');
+      showToast('Por favor, informe o telefone ou WhatsApp do estabelecimento.', 'error');
       return;
     }
 
@@ -204,24 +238,32 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     setCreateError(null);
 
     try {
-      const slugClean = (newBizSlug || newBizName)
-        .toLowerCase()
-        .trim()
-        .replace(/[^a-z0-9-]/g, '-')
-        .replace(/-+/g, '-');
+      let slugClean = slugify(newBizSlug || newBizName);
+      if (!slugClean) {
+        slugClean = `loja-${Date.now().toString(36)}`;
+      }
 
-      const finalEmail = (newBizEmail.trim() || `${slugClean}@reputaflow.com`).toLowerCase();
+      // Validação e garantia de slug único na lista de comércios
+      let finalSlug = slugClean;
+      let counter = 2;
+      while (businesses.some((b) => b.slug.toLowerCase() === finalSlug.toLowerCase())) {
+        finalSlug = `${slugClean}-${counter}`;
+        counter++;
+      }
+
+      const finalEmail = (newBizEmail.trim() || `${finalSlug}@reputaflow.com`).toLowerCase();
+      const ownerId = currentUser?.uid || `owner_${finalSlug}_${Date.now().toString(36).slice(-4)}`;
 
       const businessData: Omit<Business, 'id'> = {
         name: newBizName.trim(),
-        slug: slugClean,
+        slug: finalSlug,
         category: newBizCategory.trim() || 'Comércio & Serviços',
         phone: newBizPhone.trim(),
         email: finalEmail,
         address: newBizAddress.trim(),
         status: 'active',
         planId: newBizPlan,
-        ownerId: currentUser?.uid || 'admin-created',
+        ownerId,
         currency: newBizCurrency,
         createdAt: new Date().toISOString(),
         password: newBizPassword.trim() || 'reputa123'
@@ -231,19 +273,18 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
         businessData.logoUrl = newBizLogoUrl.trim();
       }
       if (newBizGoogleUrl.trim()) {
-        let cleanGoogleUrl = newBizGoogleUrl.trim();
-        if (!/^https?:\/\//i.test(cleanGoogleUrl)) {
-          cleanGoogleUrl = 'https://' + cleanGoogleUrl;
-        }
-        businessData.googleReviewUrl = cleanGoogleUrl;
+        const norm = normalizeGoogleReviewUrl(newBizGoogleUrl.trim());
+        businessData.googleReviewUrl = norm.url || newBizGoogleUrl.trim();
       }
 
       const createdName = newBizName.trim();
+      console.log('[SuperAdmin] Criando novo estabelecimento com dados:', businessData);
       await createBusiness(businessData);
 
       setShowCreateModal(false);
       setNewBizName('');
       setNewBizSlug('');
+      setIsSlugManuallyEdited(false);
       setNewBizCategory('');
       setNewBizPhone('');
       setNewBizEmail('');
@@ -254,15 +295,14 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
       setModalLogoPreview('');
       setNewBizCurrency('EUR');
       setCreateError(null);
+      showToast(`Estabelecimento "${createdName}" criado com sucesso!`, 'success');
       setSuccessBanner(`Estabelecimento "${createdName}" cadastrado com sucesso! Já pode aceder ao CRM ou partilhar o link de avaliação.`);
       setTimeout(() => setSuccessBanner(null), 8000);
     } catch (err: any) {
-      console.error('Error creating business:', err);
-      setCreateError(
-        err?.message?.includes('permission')
-          ? 'Erro de permissão. Verifique se está autenticado como administrador.'
-          : 'Ocorreu um erro ao salvar o estabelecimento. Verifique os dados e tente novamente.'
-      );
+      console.error('Error creating business in SuperAdmin:', err);
+      const errMsg = err?.message || 'Ocorreu um erro ao salvar o estabelecimento. Verifique os dados.';
+      setCreateError(errMsg);
+      showToast(errMsg, 'error');
     } finally {
       setCreating(false);
     }
@@ -272,8 +312,10 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     const nextStatus = biz.status === 'active' ? 'suspended' : 'active';
     try {
       await updateBusiness(biz.id, { status: nextStatus });
+      showToast(`Estado de "${biz.name}" alterado para ${nextStatus === 'active' ? 'Ativo' : 'Suspenso'}.`, 'success');
     } catch (err) {
       console.error('Error toggling status:', err);
+      showToast('Erro ao alterar estado do estabelecimento.', 'error');
     }
   };
 
@@ -282,12 +324,10 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     setDeleting(true);
     try {
       await deleteBusiness(businessToDelete.id);
-      setToastMessage(`Estabelecimento "${businessToDelete.name}" excluído com sucesso!`);
-      setTimeout(() => setToastMessage(null), 4000);
+      showToast(`Estabelecimento "${businessToDelete.name}" excluído com sucesso!`, 'success');
     } catch (err) {
       console.error('Error deleting business:', err);
-      setToastMessage('Erro ao excluir estabelecimento.');
-      setTimeout(() => setToastMessage(null), 4000);
+      showToast('Erro ao excluir estabelecimento.', 'error');
     } finally {
       setDeleting(false);
       setBusinessToDelete(null);
@@ -839,9 +879,10 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                   placeholder="Ex: Picanha na Brasa"
                   value={newBizName}
                   onChange={(e) => {
-                    setNewBizName(e.target.value);
-                    if (!newBizSlug) {
-                      setNewBizSlug(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, '-'));
+                    const val = e.target.value;
+                    setNewBizName(val);
+                    if (!isSlugManuallyEdited) {
+                      setNewBizSlug(slugify(val));
                     }
                   }}
                   className="w-full text-xs p-2.5 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
@@ -856,9 +897,12 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                   <input
                     type="text"
                     required
-                    placeholder="picanha-brasa"
+                    placeholder="picanha-na-brasa"
                     value={newBizSlug}
-                    onChange={(e) => setNewBizSlug(e.target.value)}
+                    onChange={(e) => {
+                      setIsSlugManuallyEdited(true);
+                      setNewBizSlug(slugify(e.target.value));
+                    }}
                     className="w-full text-xs p-2.5 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
                   />
                 </div>
@@ -1026,17 +1070,58 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Link Oficial do Google Review (opcional)
-                </label>
-                <input
-                  type="url"
-                  placeholder="https://g.page/r/.../review"
-                  value={newBizGoogleUrl}
-                  onChange={(e) => setNewBizGoogleUrl(e.target.value)}
-                  className="w-full text-xs p-2.5 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
-                />
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-slate-700">
+                    Link Oficial do Google Review (opcional)
+                  </label>
+                  <span className="text-[10px] text-slate-400">Maps, g.page ou Place ID</span>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    placeholder="Cole link do Maps (maps.app.goo.gl/...), g.page ou Place ID"
+                    value={newBizGoogleUrl}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setNewBizGoogleUrl(val);
+                      if (val.trim()) {
+                        const norm = normalizeGoogleReviewUrl(val.trim());
+                        if (norm.isOptimized && norm.url !== val.trim() && norm.detectedType !== 'maps_generic') {
+                          setNewBizGoogleUrl(norm.url);
+                          showToast('Link do Google Reviews otimizado com sucesso!', 'success');
+                        }
+                      }
+                    }}
+                    onBlur={() => {
+                      if (newBizGoogleUrl.trim()) {
+                        const norm = normalizeGoogleReviewUrl(newBizGoogleUrl.trim());
+                        if (norm.isOptimized && norm.url !== newBizGoogleUrl.trim() && norm.detectedType !== 'maps_generic') {
+                          setNewBizGoogleUrl(norm.url);
+                          showToast('Link do Google Reviews otimizado com sucesso!', 'success');
+                        }
+                      }
+                    }}
+                    className="flex-1 text-xs p-2.5 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+                  />
+                  <button
+                    type="button"
+                    disabled={convertingAdminGoogleUrl || !newBizGoogleUrl.trim()}
+                    onClick={handleConvertAdminGoogleUrl}
+                    className="py-2.5 px-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs transition flex items-center gap-1.5 shrink-0 border border-indigo-200 disabled:opacity-50"
+                    title="Converter link do Maps para formato oficial"
+                  >
+                    {convertingAdminGoogleUrl ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Wand2 className="w-3.5 h-3.5" />
+                    )}
+                    <span>Converter</span>
+                  </button>
+                </div>
+                <span className="block text-[10px] text-slate-400">
+                  Converte automaticamente para o formato oficial: <code className="text-indigo-600 font-mono">search.google.com/local/writereview?placeid=...</code>
+                </span>
               </div>
 
               <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
@@ -1061,10 +1146,26 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
       )}
 
       {/* Toast Notification */}
-      {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border border-slate-700 animate-fade-in">
-          <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
-          <span className="text-sm font-medium">{toastMessage}</span>
+      {toast && (
+        <div
+          className={`fixed bottom-6 right-6 z-50 px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-3 border animate-fade-in ${
+            toast.type === 'success'
+              ? 'bg-slate-900 text-white border-emerald-500/40'
+              : 'bg-rose-950 text-white border-rose-500/50'
+          }`}
+        >
+          {toast.type === 'success' ? (
+            <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
+          ) : (
+            <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />
+          )}
+          <span className="text-xs sm:text-sm font-medium">{toast.text}</span>
+          <button
+            onClick={() => setToast(null)}
+            className="text-slate-400 hover:text-white ml-2 p-1 rounded-lg cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
 

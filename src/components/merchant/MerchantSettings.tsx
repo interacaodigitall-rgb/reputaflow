@@ -19,12 +19,28 @@ import {
   Loader2,
   Trash2,
   AlertTriangle,
-  Check
+  Check,
+  Radio,
+  Sparkles,
+  Globe,
+  Wand2,
+  RefreshCw,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
 import { Business } from '../../types';
+import { NfcPlate } from '../../types/nfc';
 import { updateBusiness, uploadImage } from '../../lib/dbService';
 import { uploadBusinessLogo } from '../../lib/supabase';
-import { getPublicReviewUrl } from '../../lib/urlHelper';
+import {
+  getPublicReviewUrl,
+  getNfcRedirectUrl,
+  normalizeGoogleReviewUrl,
+  convertGoogleMapsToReviewUrl,
+  extractGooglePlaceId,
+  GoogleReviewUrlNormalization
+} from '../../lib/urlHelper';
+import { getNfcPlates } from '../../lib/nfcService';
 import { BusinessLogo } from '../common/BusinessLogo';
 
 interface MerchantSettingsProps {
@@ -78,7 +94,115 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
   // Copy status
   const [copiedLink, setCopiedLink] = useState(false);
 
+  // Dynamic linked NFC / QR Plate state
+  const [linkedPlate, setLinkedPlate] = useState<NfcPlate | null>(null);
+  const [loadingPlate, setLoadingPlate] = useState(true);
+  const [qrMode, setQrMode] = useState<'plate' | 'direct'>('plate');
+
+  // Smart Google Link Converter states & handlers (Passo 1)
+  const [convertingGoogleLink, setConvertingGoogleLink] = useState(false);
+  const [googleToast, setGoogleToast] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+  const [googleLinkStatus, setGoogleLinkStatus] = useState<GoogleReviewUrlNormalization | null>(() => {
+    return business.googleReviewUrl ? normalizeGoogleReviewUrl(business.googleReviewUrl) : null;
+  });
+
+  const handleGoogleLinkInput = (rawInput: string) => {
+    setGoogleReviewUrl(rawInput);
+    if (!rawInput.trim()) {
+      setGoogleLinkStatus(null);
+      return;
+    }
+
+    const norm = normalizeGoogleReviewUrl(rawInput.trim());
+    setGoogleLinkStatus(norm);
+
+    // If user pastes an exact Place ID or embedded Place ID directly into the input, auto-convert smoothly
+    if (norm.isOptimized && norm.url !== rawInput.trim() && norm.detectedType !== 'maps_generic') {
+      setGoogleReviewUrl(norm.url);
+      setGoogleToast({
+        type: 'success',
+        text: 'Link do Google Reviews configurado e otimizado com sucesso!'
+      });
+      setTimeout(() => setGoogleToast(null), 4000);
+    }
+  };
+
+  const handleConvertGoogleLink = async () => {
+    if (!googleReviewUrl.trim()) {
+      setGoogleToast({
+        type: 'error',
+        text: 'Por favor, cole um link do Google Maps ou Place ID para converter.'
+      });
+      setTimeout(() => setGoogleToast(null), 3500);
+      return;
+    }
+
+    setConvertingGoogleLink(true);
+    setGoogleToast(null);
+
+    try {
+      const result = await convertGoogleMapsToReviewUrl(googleReviewUrl);
+      if (result.success && result.reviewUrl) {
+        setGoogleReviewUrl(result.reviewUrl);
+        const norm = normalizeGoogleReviewUrl(result.reviewUrl);
+        setGoogleLinkStatus(norm);
+        setGoogleToast({
+          type: 'success',
+          text: 'Link do Google Reviews configurado e otimizado com sucesso!'
+        });
+        setTimeout(() => setGoogleToast(null), 4500);
+      } else {
+        setGoogleToast({
+          type: 'error',
+          text: result.message || 'Não foi possível extrair o link oficial do Google. Verifique a URL.'
+        });
+        setTimeout(() => setGoogleToast(null), 4000);
+      }
+    } catch (err: any) {
+      setGoogleToast({
+        type: 'error',
+        text: 'Erro ao converter link: ' + (err.message || 'Tente novamente.')
+      });
+      setTimeout(() => setGoogleToast(null), 4000);
+    } finally {
+      setConvertingGoogleLink(false);
+    }
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchLinkedPlate = async () => {
+      setLoadingPlate(true);
+      try {
+        const plates = await getNfcPlates([business]);
+        const found = plates.find((p) => {
+          if (p.merchant_id && (p.merchant_id === business.id || p.merchant_id === business.slug)) {
+            return true;
+          }
+          if (p.redirect_url && business.slug && p.redirect_url.includes(business.slug)) {
+            return true;
+          }
+          return false;
+        });
+        if (isMounted) {
+          setLinkedPlate(found || null);
+          setLoadingPlate(false);
+        }
+      } catch (err) {
+        console.warn('Error fetching linked NFC plate:', err);
+        if (isMounted) setLoadingPlate(false);
+      }
+    };
+
+    fetchLinkedPlate();
+    return () => {
+      isMounted = false;
+    };
+  }, [business.id, business.slug]);
+
   const publicReviewUrl = getPublicReviewUrl(slug || business.slug);
+  const plateQrUrl = linkedPlate ? getNfcRedirectUrl(linkedPlate.id) : '';
+  const currentQrUrl = (linkedPlate && qrMode === 'plate') ? plateQrUrl : publicReviewUrl;
 
   const handleLogoFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -137,6 +261,20 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
 
     try {
       const cleanSlug = slug.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-');
+
+      // Passo 2: Normalização do Link do Google Reviews antes de salvar
+      let normalizedGoogleUrl = (googleReviewUrl || '').trim();
+      let wasGoogleUrlOptimized = false;
+      if (normalizedGoogleUrl) {
+        const norm = normalizeGoogleReviewUrl(normalizedGoogleUrl);
+        if (norm.url) {
+          normalizedGoogleUrl = norm.url;
+          if (norm.isOptimized) {
+            wasGoogleUrlOptimized = true;
+          }
+        }
+      }
+
       const updatedData: Partial<Business> = {
         name: (name || '').trim(),
         slug: cleanSlug,
@@ -145,12 +283,20 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
         email: (email || '').trim(),
         address: (address || '').trim(),
         logoUrl: (logoUrl || '').trim() || undefined,
-        googleReviewUrl: (googleReviewUrl || '').trim() || undefined,
+        googleReviewUrl: normalizedGoogleUrl || undefined,
         currency
       };
 
       await updateBusiness(business.id, updatedData);
+      setGoogleReviewUrl(normalizedGoogleUrl);
       setSavedSuccess(true);
+      if (wasGoogleUrlOptimized) {
+        setGoogleToast({
+          type: 'success',
+          text: 'Link do Google Reviews configurado e otimizado com sucesso!'
+        });
+        setTimeout(() => setGoogleToast(null), 4500);
+      }
       if (onBusinessUpdated) {
         onBusinessUpdated({ ...business, ...updatedData });
       }
@@ -186,7 +332,7 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
 
   const handleCopyLink = () => {
     try {
-      navigator.clipboard.writeText(publicReviewUrl);
+      navigator.clipboard.writeText(currentQrUrl);
       setCopiedLink(true);
       setTimeout(() => setCopiedLink(false), 3000);
     } catch {
@@ -205,31 +351,64 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
     const img = new Image();
 
     img.onload = () => {
-      canvas.width = img.width + 80;
-      canvas.height = img.height + 120;
+      canvas.width = 460;
+      canvas.height = 560;
       if (ctx) {
-        // Draw white card background
+        // Draw white card background with rounded aesthetics
         ctx.fillStyle = '#FFFFFF';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        // Draw title
+        // Header brand bar
+        ctx.fillStyle = '#4F46E5';
+        ctx.fillRect(0, 0, canvas.width, 12);
+
+        // Title: Business Name
         ctx.fillStyle = '#0F172A';
         ctx.font = 'bold 22px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(business.name, canvas.width / 2, 45);
+        ctx.fillText(business.name, canvas.width / 2, 55);
 
-        // Draw subtitle
-        ctx.fillStyle = '#64748B';
-        ctx.font = '14px sans-serif';
-        ctx.fillText('Avalie a sua experiência', canvas.width / 2, 72);
+        // Subtitle or Plate Badge
+        if (linkedPlate && qrMode === 'plate') {
+          ctx.fillStyle = '#4F46E5';
+          ctx.font = 'bold 13px sans-serif';
+          ctx.fillText(`PLACA FÍSICA OFICIAL #${linkedPlate.id}`, canvas.width / 2, 82);
 
-        // Draw QR
-        ctx.drawImage(img, 40, 95);
+          ctx.fillStyle = '#64748B';
+          ctx.font = '13px sans-serif';
+          ctx.fillText('Aponte a câmara do telemóvel para avaliar', canvas.width / 2, 105);
+        } else {
+          ctx.fillStyle = '#64748B';
+          ctx.font = '14px sans-serif';
+          ctx.fillText('Avalie a sua experiência no Google', canvas.width / 2, 85);
+        }
 
-        // Download
+        // Draw QR Matrix centered (240x240)
+        ctx.drawImage(img, (canvas.width - 240) / 2, 125, 240, 240);
+
+        // URL display box
+        ctx.fillStyle = '#F8FAFC';
+        ctx.fillRect(40, 395, canvas.width - 80, 50);
+        ctx.strokeStyle = '#E2E8F0';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(40, 395, canvas.width - 80, 50);
+
+        ctx.fillStyle = '#4F46E5';
+        ctx.font = 'bold 12px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(currentQrUrl, canvas.width / 2, 425);
+
+        // Footer note
+        ctx.fillStyle = '#94A3B8';
+        ctx.font = '11px sans-serif';
+        ctx.fillText('ReputaFlow • Hardware NFC & QR Dinâmico', canvas.width / 2, 490);
+
+        // Download PNG
         const pngFile = canvas.toDataURL('image/png');
         const downloadLink = document.createElement('a');
-        downloadLink.download = `qrcode-avaliacao-${business.slug}.png`;
+        downloadLink.download = linkedPlate && qrMode === 'plate'
+          ? `placa-oficial-${business.slug}-${linkedPlate.id}.png`
+          : `qrcode-avaliacao-${business.slug}.png`;
         downloadLink.href = pngFile;
         downloadLink.click();
       }
@@ -459,28 +638,142 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
               </div>
 
               {/* Google Review Integration (Section 4) */}
-              <div className="space-y-3 pt-4 border-t border-slate-100">
-                <div className="flex items-center gap-2">
-                  <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-                    Link Oficial do Google Reviews
-                  </h2>
-                  <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-bold rounded-full">
-                    Secção 4
-                  </span>
+              <div className="space-y-3.5 pt-4 border-t border-slate-100">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                      <Globe className="w-3.5 h-3.5" />
+                    </div>
+                    <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                      Gerador & Link Oficial do Google Reviews
+                    </h2>
+                    <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-bold rounded-full">
+                      Secção 4
+                    </span>
+                  </div>
+
+                  {googleLinkStatus?.isOptimized && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-[11px] font-bold">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Formato Oficial de 5 Estrelas</span>
+                    </span>
+                  )}
                 </div>
 
                 <p className="text-xs text-slate-500 leading-relaxed">
-                  Insira o link oficial "Pedir avaliações" do seu perfil de empresa no Google (ex: https://g.page/r/.../review). O sistema disponibiliza o link de forma neutra aos clientes.
+                  Cole o link do Google Maps (ex: <span className="font-mono text-slate-700 font-semibold">maps.app.goo.gl/...</span> ou <span className="font-mono text-slate-700 font-semibold">google.com/maps</span>), link do perfil (<span className="font-mono text-slate-700 font-semibold">g.page/.../review</span>) ou Place ID direto. O conversor nativo do ReputaFlow converterá para o formato oficial que abre diretamente a caixa de 5 estrelas no telemóvel do cliente.
                 </p>
 
-                <div>
-                  <input
-                    type="url"
-                    value={googleReviewUrl}
-                    onChange={(e) => setGoogleReviewUrl(e.target.value)}
-                    placeholder="https://g.page/r/exemplo-perfil/review"
-                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-mono"
-                  />
+                {/* Toast de Conversão / Otimização */}
+                {googleToast && (
+                  <div
+                    className={`p-3 rounded-xl border text-xs font-semibold flex items-center justify-between gap-2 animate-fade-in ${
+                      googleToast.type === 'success'
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                        : googleToast.type === 'error'
+                        ? 'bg-rose-50 border-rose-200 text-rose-900'
+                        : 'bg-indigo-50 border-indigo-200 text-indigo-900'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      {googleToast.type === 'success' ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      ) : (
+                        <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                      )}
+                      <span>{googleToast.text}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setGoogleToast(null)}
+                      className="text-slate-400 hover:text-slate-600 text-xs px-1"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
+
+                {/* Input & Converter Action */}
+                <div className="space-y-2">
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        type="url"
+                        value={googleReviewUrl}
+                        onChange={(e) => handleGoogleLinkInput(e.target.value)}
+                        onBlur={() => {
+                          if (googleReviewUrl.trim()) {
+                            const norm = normalizeGoogleReviewUrl(googleReviewUrl.trim());
+                            if (norm.isOptimized && norm.url !== googleReviewUrl.trim() && norm.detectedType !== 'maps_generic') {
+                              setGoogleReviewUrl(norm.url);
+                              setGoogleLinkStatus(norm);
+                              setGoogleToast({
+                                type: 'success',
+                                text: 'Link do Google Reviews configurado e otimizado com sucesso!'
+                              });
+                              setTimeout(() => setGoogleToast(null), 4000);
+                            }
+                          }
+                        }}
+                        placeholder="Cole aqui o link do Maps (maps.app.goo.gl/...), perfil ou Place ID"
+                        className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-mono pr-8"
+                      />
+                      {googleReviewUrl && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setGoogleReviewUrl('');
+                            setGoogleLinkStatus(null);
+                          }}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
+                          title="Limpar campo"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={convertingGoogleLink || !googleReviewUrl.trim()}
+                      onClick={handleConvertGoogleLink}
+                      className="py-2.5 px-3.5 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-xs disabled:opacity-50 shrink-0 min-h-[38px] cursor-pointer"
+                    >
+                      {convertingGoogleLink ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>A converter...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Wand2 className="w-3.5 h-3.5" />
+                          <span>Converter Link do Maps</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Contextual Status / Converter Hint */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                    <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                      <span>
+                        Formato oficial recomendado: <code className="bg-slate-100 px-1 py-0.5 rounded text-indigo-700 font-mono text-[10px]">search.google.com/local/writereview?placeid=...</code>
+                      </span>
+                    </div>
+
+                    {googleReviewUrl.trim() && (
+                      <a
+                        href={googleReviewUrl.startsWith('http') ? googleReviewUrl : `https://${googleReviewUrl}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 hover:underline shrink-0"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        <span>Testar Link do Google</span>
+                      </a>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -545,23 +838,87 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
         {/* Right Col: QR Code Card & Direct Test (Section 1 & 2) */}
         <div className="space-y-6">
           <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs text-center space-y-4">
-            <h2 className="text-sm font-bold text-slate-900 flex items-center justify-center gap-2">
-              <QrCode className="w-4 h-4 text-indigo-600" />
-              <span>QR Code para Mesas & Balcão</span>
-            </h2>
-            <p className="text-xs text-slate-500">
-              Posicione este QR Code impresso no balcão ou nas mesas para o cliente avaliar sem precisar de instalar nada.
-            </p>
+            <div className="space-y-1">
+              <h2 className="text-sm font-bold text-slate-900 flex items-center justify-center gap-2">
+                <QrCode className="w-4 h-4 text-indigo-600" />
+                <span>QR Code para Mesas & Balcão</span>
+              </h2>
+              <p className="text-xs text-slate-500">
+                Posicione este QR Code impresso no balcão ou nas mesas para o cliente avaliar instantaneamente.
+              </p>
+            </div>
+
+            {/* Linked Physical Plate Badge & Switcher */}
+            {loadingPlate ? (
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl flex items-center justify-center gap-2 text-xs text-slate-500">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />
+                <span>A verificar placas NFC vinculadas...</span>
+              </div>
+            ) : linkedPlate ? (
+              <div className="bg-indigo-50/80 border border-indigo-200/80 rounded-2xl p-3.5 text-left space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-indigo-600 text-white rounded-xl text-xs font-bold">
+                    <Radio className="w-3.5 h-3.5" />
+                    <span>Placa Vinculada #{linkedPlate.id}</span>
+                  </div>
+                  <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100/90 px-2 py-0.5 rounded-full">
+                    Ativa • {linkedPlate.scan_count || 0} leituras
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-600 leading-relaxed">
+                  Este estabelecimento está associado à placa física do lote. O QR Code abaixo é gerado com o URL exclusivo do seu dispositivo.
+                </p>
+                <div className="flex gap-1.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setQrMode('plate')}
+                    className={`flex-1 py-1.5 px-2.5 rounded-xl text-[11px] font-bold transition cursor-pointer ${
+                      qrMode === 'plate'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    Placa #{linkedPlate.id} (Recomendado)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setQrMode('direct')}
+                    className={`flex-1 py-1.5 px-2.5 rounded-xl text-[11px] font-bold transition cursor-pointer ${
+                      qrMode === 'direct'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    Link Direto (?b={slug})
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 text-left space-y-1">
+                <div className="flex items-center gap-1.5 font-bold text-slate-800 text-[11px]">
+                  <QrCode className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>QR Code Padrão do Estabelecimento</span>
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Nenhuma placa física de lote atribuída ainda. Pode solicitar ou associar uma placa no menu Super Admin.
+                </p>
+              </div>
+            )}
 
             {/* QR Code Canvas */}
             <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 inline-block shadow-inner">
               <QRCodeSVG
                 id="establishment-qr-svg"
-                value={publicReviewUrl}
+                value={currentQrUrl}
                 size={180}
                 level="H"
                 includeMargin={true}
               />
+            </div>
+
+            {/* URL string debug / verification badge */}
+            <div className="text-[10px] font-mono text-indigo-700 bg-indigo-50/70 border border-indigo-100 rounded-xl py-1.5 px-3 truncate max-w-full font-semibold select-all" title={currentQrUrl}>
+              {currentQrUrl}
             </div>
 
             <div className="space-y-2">
@@ -571,7 +928,11 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
                 className="w-full py-2.5 px-4 bg-slate-900 hover:bg-black text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
               >
                 <Download className="w-4 h-4" />
-                <span>Descarregar Placa PNG</span>
+                <span>
+                  {linkedPlate && qrMode === 'plate'
+                    ? `Descarregar Placa PNG #${linkedPlate.id}`
+                    : 'Descarregar Placa PNG'}
+                </span>
               </button>
 
               <button
@@ -591,7 +952,7 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
                 ) : (
                   <>
                     <Copy className="w-3.5 h-3.5" />
-                    <span>Copiar Link de Avaliação</span>
+                    <span>Copiar Link ({qrMode === 'plate' && linkedPlate ? `Placa #${linkedPlate.id}` : 'URL'})</span>
                   </>
                 )}
               </button>

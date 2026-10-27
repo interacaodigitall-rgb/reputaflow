@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { X, Download, Copy, ExternalLink, QrCode, Check } from 'lucide-react';
+import { X, Download, Copy, ExternalLink, QrCode, Check, Smartphone, CheckCircle } from 'lucide-react';
 import { Business } from '../../types';
-import { getPublicReviewUrl } from '../../lib/urlHelper';
+import { getPublicReviewUrl, getNfcRedirectUrl } from '../../lib/urlHelper';
+import { getNfcPlates, NfcPlate } from '../../lib/nfcService';
 
 interface QrCodeModalProps {
   business: Business | null;
@@ -16,13 +17,37 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({
   onOpenReviewPreview
 }) => {
   const [copied, setCopied] = useState(false);
+  const [linkedPlate, setLinkedPlate] = useState<NfcPlate | null>(null);
+  const [usePlateUrl, setUsePlateUrl] = useState(true);
+
+  useEffect(() => {
+    if (!business) return;
+    const fetchLinkedPlate = async () => {
+      try {
+        const plates = await getNfcPlates([business]);
+        const found = plates.find(p => p.merchant_id === business.id || (p.redirect_url && p.redirect_url.includes(business.slug)));
+        if (found) {
+          setLinkedPlate(found);
+          setUsePlateUrl(true);
+        } else {
+          setLinkedPlate(null);
+          setUsePlateUrl(false);
+        }
+      } catch (err) {
+        console.warn('Erro ao carregar placa vinculada no modal:', err);
+      }
+    };
+    fetchLinkedPlate();
+  }, [business]);
 
   if (!business) return null;
 
-  const publicReviewUrl = getPublicReviewUrl(business.slug || business.id);
+  const directReviewUrl = getPublicReviewUrl(business.slug || business.id);
+  const plateQrUrl = linkedPlate ? getNfcRedirectUrl(linkedPlate.id) : directReviewUrl;
+  const currentQrUrl = linkedPlate && usePlateUrl ? plateQrUrl : directReviewUrl;
 
   const handleCopyLink = () => {
-    navigator.clipboard.writeText(publicReviewUrl);
+    navigator.clipboard.writeText(currentQrUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 2500);
   };
@@ -38,7 +63,7 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({
 
     img.onload = () => {
       canvas.width = 400;
-      canvas.height = 500;
+      canvas.height = 540;
       if (ctx) {
         // Background card
         ctx.fillStyle = '#FFFFFF';
@@ -48,28 +73,48 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({
         ctx.fillStyle = '#4F46E5';
         ctx.fillRect(0, 0, canvas.width, 10);
 
+        // Plate badge if present
+        if (linkedPlate && usePlateUrl) {
+          ctx.fillStyle = '#EEF2FF';
+          ctx.beginPath();
+          ctx.roundRect(110, 22, 180, 26, 13);
+          ctx.fill();
+          ctx.fillStyle = '#4338CA';
+          ctx.font = 'bold 12px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(`PLACA OFICIAL #${linkedPlate.id}`, canvas.width / 2, 40);
+        }
+
         // Business Name
         ctx.fillStyle = '#0F172A';
         ctx.font = 'bold 22px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(business.name, canvas.width / 2, 55);
+        ctx.fillText(business.name, canvas.width / 2, linkedPlate && usePlateUrl ? 80 : 55);
 
         // Subtitle
         ctx.fillStyle = '#64748B';
         ctx.font = '14px sans-serif';
-        ctx.fillText('Aponte a câmara e avalie a sua experiência', canvas.width / 2, 85);
+        ctx.fillText('Aponte a câmara ou aproxime por NFC', canvas.width / 2, linkedPlate && usePlateUrl ? 108 : 85);
 
         // Draw QR code centered
-        ctx.drawImage(img, 75, 120, 250, 250);
+        ctx.drawImage(img, 75, linkedPlate && usePlateUrl ? 130 : 120, 250, 250);
 
         // Footer note
         ctx.fillStyle = '#94A3B8';
         ctx.font = '12px sans-serif';
         ctx.fillText('Avaliação rápida e segura • ReputaFlow', canvas.width / 2, 430);
 
+        if (linkedPlate && usePlateUrl) {
+          ctx.fillStyle = '#64748B';
+          ctx.font = '10px monospace';
+          ctx.fillText(plateQrUrl, canvas.width / 2, 460);
+        }
+
         const pngFile = canvas.toDataURL('image/png');
         const downloadLink = document.createElement('a');
-        downloadLink.download = `qrcode-${business.slug}.png`;
+        downloadLink.download = linkedPlate && usePlateUrl
+          ? `placa-oficial-${business.slug}-${linkedPlate.id}.png`
+          : `qrcode-${business.slug}.png`;
         downloadLink.href = pngFile;
         downloadLink.click();
       }
@@ -94,16 +139,47 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({
             <QrCode className="w-6 h-6" />
           </div>
           <h3 className="text-base sm:text-lg font-bold text-slate-900 leading-tight">{business.name}</h3>
-          <p className="text-xs text-slate-500">
-            Aponte a câmara do telemóvel para abrir a página de avaliação instantânea.
-          </p>
+
+          {linkedPlate ? (
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-bold mt-1">
+              <CheckCircle className="w-3.5 h-3.5" />
+              <span>Placa Vinculada #{linkedPlate.id}</span>
+            </div>
+          ) : (
+            <p className="text-xs text-slate-500">
+              Aponte a câmara do telemóvel para abrir a página de avaliação instantânea.
+            </p>
+          )}
         </div>
+
+        {linkedPlate && (
+          <div className="flex items-center justify-center gap-2 bg-slate-100 p-1.5 rounded-xl text-xs font-semibold">
+            <button
+              onClick={() => setUsePlateUrl(true)}
+              className={`flex-1 py-1.5 px-2 rounded-lg transition flex items-center justify-center gap-1.5 ${
+                usePlateUrl ? 'bg-white text-indigo-600 shadow-xs font-bold' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Smartphone className="w-3.5 h-3.5" />
+              <span>Placa #{linkedPlate.id}</span>
+            </button>
+            <button
+              onClick={() => setUsePlateUrl(false)}
+              className={`flex-1 py-1.5 px-2 rounded-lg transition flex items-center justify-center gap-1.5 ${
+                !usePlateUrl ? 'bg-white text-indigo-600 shadow-xs font-bold' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>Link Direto</span>
+            </button>
+          </div>
+        )}
 
         {/* QR Code Container */}
         <div className="p-3 sm:p-4 bg-slate-50 rounded-2xl border border-slate-200 inline-block shadow-inner">
           <QRCodeSVG
             id="modal-qr-svg"
-            value={publicReviewUrl}
+            value={currentQrUrl}
             size={190}
             level="H"
             includeMargin={true}
@@ -112,8 +188,8 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({
 
         {/* URL Box */}
         <div className="bg-slate-50 border border-slate-200 rounded-xl p-2 flex items-center justify-between gap-2 text-left">
-          <div className="font-mono text-[11px] text-slate-600 truncate flex-1 select-all px-1.5">
-            {publicReviewUrl}
+          <div className="font-mono text-[11px] text-slate-600 truncate flex-1 select-all px-1.5" title={currentQrUrl}>
+            {currentQrUrl}
           </div>
           <button
             onClick={handleCopyLink}
@@ -143,11 +219,11 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({
             className="w-full py-3 px-4 bg-slate-900 hover:bg-black text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-sm min-h-[44px]"
           >
             <Download className="w-4 h-4" />
-            <span>Descarregar Placa em Imagem</span>
+            <span>{linkedPlate && usePlateUrl ? `Descarregar Placa Oficial #${linkedPlate.id}` : 'Descarregar Placa em Imagem'}</span>
           </button>
 
           <a
-            href={publicReviewUrl}
+            href={currentQrUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition flex items-center justify-center gap-2 min-h-[44px]"

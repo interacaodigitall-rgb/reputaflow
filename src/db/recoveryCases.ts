@@ -2,6 +2,7 @@ import { db } from './index.ts';
 import { recoveryCases } from './schema.ts';
 import { eq, desc } from 'drizzle-orm';
 import { INITIAL_RECOVERY_CASES } from '../lib/initialData.ts';
+import { readDbJson, writeDbJson } from './businesses.ts';
 import fs from 'fs';
 import path from 'path';
 
@@ -41,22 +42,30 @@ function getInitialRecoveryCases() {
 const inMemoryRecoveryCases: any[] = getInitialRecoveryCases();
 
 export async function getRecoveryCasesSql(businessId?: string) {
+  let list: any[] = [];
   try {
     if (businessId) {
-      return await db
+      list = await db
         .select()
         .from(recoveryCases)
         .where(eq(recoveryCases.businessId, businessId))
         .orderBy(desc(recoveryCases.createdAt));
+    } else {
+      list = await db.select().from(recoveryCases).orderBy(desc(recoveryCases.createdAt));
     }
-    return await db.select().from(recoveryCases).orderBy(desc(recoveryCases.createdAt));
   } catch (error) {
     console.warn('Database query failed in getRecoveryCasesSql, using in-memory store:', error);
-    if (businessId) {
-      return inMemoryRecoveryCases.filter((c) => c.businessId === businessId || c.business_id === businessId);
-    }
-    return inMemoryRecoveryCases;
   }
+
+  const map = new Map<string, any>();
+  inMemoryRecoveryCases.forEach((c) => map.set(c.id, c));
+  list.forEach((c) => map.set(c.id, c));
+
+  const all = Array.from(map.values());
+  if (businessId) {
+    return all.filter((c) => c.businessId === businessId || c.business_id === businessId);
+  }
+  return all;
 }
 
 export async function createRecoveryCaseSql(data: any) {
@@ -102,6 +111,8 @@ export async function createRecoveryCaseSql(data: any) {
     updated_at: updatedAt
   };
 
+  let savedRecord: any = record;
+
   try {
     const result = await db
       .insert(recoveryCases)
@@ -123,14 +134,25 @@ export async function createRecoveryCaseSql(data: any) {
       })
       .returning();
 
-    const saved = result[0] || record;
-    inMemoryRecoveryCases.unshift(saved);
-    return saved;
+    savedRecord = result[0] || record;
   } catch (error) {
     console.warn('Database insert failed in createRecoveryCaseSql, using in-memory store:', error);
-    inMemoryRecoveryCases.unshift(record);
-    return record;
   }
+
+  inMemoryRecoveryCases.unshift(savedRecord);
+
+  try {
+    const jsonDb = readDbJson();
+    if (!Array.isArray(jsonDb.recoveryCases)) jsonDb.recoveryCases = [];
+    const idx = jsonDb.recoveryCases.findIndex((c: any) => c.id === savedRecord.id);
+    if (idx !== -1) jsonDb.recoveryCases[idx] = savedRecord;
+    else jsonDb.recoveryCases.unshift(savedRecord);
+    writeDbJson(jsonDb);
+  } catch (e) {
+    console.warn('[db.json recoveryCases write notice]:', e);
+  }
+
+  return savedRecord;
 }
 
 export async function updateRecoveryCaseSql(id: string, updates: any) {

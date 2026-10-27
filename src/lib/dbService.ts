@@ -10,6 +10,7 @@ import {
   PlatformSettings
 } from '../types/index.ts';
 import { supabase, uploadBusinessLogo } from './supabase.ts';
+import { slugify } from './urlHelper.ts';
 import {
   REGISTERED_BUSINESSES as INITIAL_BIZ,
   INITIAL_CUSTOMERS,
@@ -225,15 +226,33 @@ export function getLocalBusinesses(): Business[] {
 export async function addBusiness(data: Omit<Business, 'id' | 'createdAt' | 'updatedAt'>): Promise<Business> {
   const id = `biz_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
   const now = new Date().toISOString();
-  const slug = data.slug ? data.slug.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-') : normalizeKey(data.name);
+
+  // 1. Generate clean, valid slug using slugify
+  let baseSlug = slugify(data.slug || data.name);
+  if (!baseSlug) {
+    baseSlug = `comercio-${Date.now().toString(36)}`;
+  }
+
+  // 2. Ensure unique slug against registered/runtime businesses
+  let uniqueSlug = baseSlug;
+  let counter = 2;
+  while (runtimeBusinesses.some((b) => b.slug.toLowerCase() === uniqueSlug.toLowerCase() && b.id !== id)) {
+    uniqueSlug = `${baseSlug}-${counter}`;
+    counter++;
+  }
+
+  // 3. Set valid ownerId / tenant_id
+  const ownerId = data.ownerId && data.ownerId.trim()
+    ? data.ownerId.trim()
+    : `owner_${uniqueSlug}_${Date.now().toString(36).slice(-4)}`;
 
   const newBiz: Business = {
     ...data,
     id,
-    slug,
+    slug: uniqueSlug,
     category: data.category || 'Comércio & Serviços',
     phone: data.phone || '',
-    email: data.email || '',
+    email: data.email || `${uniqueSlug}@reputaflow.com`,
     address: data.address || '',
     googleReviewUrl: data.googleReviewUrl || '',
     logoUrl: data.logoUrl || '',
@@ -242,7 +261,7 @@ export async function addBusiness(data: Omit<Business, 'id' | 'createdAt' | 'upd
     qrThemeColor: data.qrThemeColor || '#4f46e5',
     activePlan: data.activePlan || 'pro',
     planId: data.planId || 'plan_pro',
-    ownerId: data.ownerId || 'admin-created',
+    ownerId,
     currency: data.currency || 'EUR',
     status: data.status || 'active',
     password: data.password || 'reputa123',
@@ -250,6 +269,21 @@ export async function addBusiness(data: Omit<Business, 'id' | 'createdAt' | 'upd
     updatedAt: now
   };
 
+  // 4. Primary persistence: Backend Server REST API (writes to PostgreSQL Cloud SQL & data/db.json)
+  try {
+    const apiRes = await fetch('/api/businesses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newBiz)
+    });
+    if (!apiRes.ok) {
+      console.warn('[Server API /api/businesses notice]: HTTP status', apiRes.status);
+    }
+  } catch (apiErr) {
+    console.warn('[Server API /api/businesses network warning]:', apiErr);
+  }
+
+  // 5. Secondary persistence: Supabase (with fallback table names and non-crashing catch)
   const payload = {
     id,
     name: newBiz.name,
@@ -271,16 +305,24 @@ export async function addBusiness(data: Omit<Business, 'id' | 'createdAt' | 'upd
   try {
     const { error } = await supabase.from('businesses').insert([payload]);
     if (error) {
-      console.error('[Supabase addBusiness error]:', error);
-      throw new Error(`Erro ao cadastrar comércio no Supabase: ${error.message}`);
+      console.warn('[Supabase addBusiness warning]:', error.message);
+      // Fallback in case table is named 'establishments' or 'tenants'
+      if (error.message?.includes('does not exist') || error.code === '42P01') {
+        try { await supabase.from('establishments').insert([payload]); } catch (_) {}
+        try { await supabase.from('tenants').insert([payload]); } catch (_) {}
+      }
     }
   } catch (err: any) {
-    console.error('[Supabase addBusiness catch]:', err);
-    throw err;
+    console.warn('[Supabase addBusiness caught]:', err);
   }
 
+  // 6. Update in-memory state and notify listeners immediately
   runtimeBusinesses = [newBiz, ...runtimeBusinesses.filter((b) => b.id !== id)];
   notifyDataChanged();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated'));
+  }
+
   return newBiz;
 }
 
@@ -403,6 +445,18 @@ export async function addReview(data: Omit<Review, 'id' | 'createdAt'>): Promise
     createdAt: now
   };
 
+  // 1. Primary persistence: Server API (/api/reviews) -> Cloud SQL & data/db.json
+  try {
+    await fetch('/api/reviews', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newReview)
+    });
+  } catch (apiErr) {
+    console.warn('[Server API /api/reviews catch]:', apiErr);
+  }
+
+  // 2. Secondary persistence: Supabase
   try {
     const { error } = await supabase.from('reviews').insert([
       {
@@ -417,11 +471,10 @@ export async function addReview(data: Omit<Review, 'id' | 'createdAt'>): Promise
       }
     ]);
     if (error) {
-      console.error('[Supabase addReview error]:', error);
-      throw error;
+      console.warn('[Supabase addReview warning]:', error.message);
     }
   } catch (err) {
-    console.error('[Supabase addReview catch]:', err);
+    console.warn('[Supabase addReview catch]:', err);
   }
 
   // Auto upsert customer in CRM
@@ -431,7 +484,7 @@ export async function addReview(data: Omit<Review, 'id' | 'createdAt'>): Promise
     } catch {}
   }
 
-  runtimeReviews = [newReview, ...runtimeReviews];
+  runtimeReviews = [newReview, ...runtimeReviews.filter((r) => r.id !== id)];
   notifyDataChanged();
   return newReview;
 }
@@ -602,7 +655,7 @@ export async function addFeedbackAndCreateRecoveryCase(
   reviewId: string
 ): Promise<{ feedback: Feedback; recoveryCase: RecoveryCase }> {
   const fbId = `fb_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
-  const caseId = `case_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+  const caseId = `rec_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
   const now = new Date().toISOString();
 
   const feedback: Feedback = {
@@ -618,16 +671,37 @@ export async function addFeedbackAndCreateRecoveryCase(
     customerId: feedbackData.customerId,
     reviewId,
     feedbackId: fbId,
-    customerName: feedbackData.customerName,
-    customerPhone: feedbackData.customerPhone,
-    customerEmail: feedbackData.customerEmail,
+    customerName: feedbackData.customerName || 'Cliente Anónimo',
+    customerPhone: feedbackData.customerPhone || '',
+    customerEmail: feedbackData.customerEmail || '',
     rating: feedbackData.rating,
     status: 'novo',
-    notes: `Motivo: ${feedbackData.question1 || 'Não informado'}. Melhorias: ${feedbackData.question2 || 'Não informado'}`,
+    notes: feedbackData.question1 || feedbackData.question2
+      ? `Motivo: ${feedbackData.question1 || 'Não informado'}. Melhorias: ${feedbackData.question2 || 'Não informado'}`
+      : 'Avaliação insatisfatória (1-3 estrelas) recebida via QR Code.',
     createdAt: now,
     updatedAt: now
   };
 
+  // 1. Primary persistence: Backend Server REST API (/api/recovery-cases and /api/feedback)
+  try {
+    await Promise.all([
+      fetch('/api/recovery-cases', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(recoveryCase)
+      }).catch((e) => console.warn('[Server API /api/recovery-cases error]:', e)),
+      fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(feedback)
+      }).catch((e) => console.warn('[Server API /api/feedback error]:', e))
+    ]);
+  } catch (apiErr) {
+    console.warn('[Server API recovery/feedback warning]:', apiErr);
+  }
+
+  // 2. Secondary persistence: Supabase
   try {
     await Promise.all([
       supabase.from('feedback').insert([
@@ -663,7 +737,20 @@ export async function addFeedbackAndCreateRecoveryCase(
       ])
     ]);
   } catch (err) {
-    console.error('[Supabase addFeedbackAndCreateRecoveryCase error]:', err);
+    console.warn('[Supabase addFeedbackAndCreateRecoveryCase warning]:', err);
+    // Also try alternate table names if Supabase schema has differences
+    try {
+      await supabase.from('feedback_cases').insert([{
+        id: caseId,
+        business_id: recoveryCase.businessId,
+        customer_name: recoveryCase.customerName,
+        customer_phone: recoveryCase.customerPhone,
+        rating: recoveryCase.rating,
+        status: recoveryCase.status,
+        notes: recoveryCase.notes,
+        created_at: now
+      }]);
+    } catch {}
   }
 
   // Auto upsert customer
@@ -680,9 +767,13 @@ export async function addFeedbackAndCreateRecoveryCase(
     });
   } catch {}
 
-  runtimeFeedback = [feedback, ...runtimeFeedback];
-  runtimeRecoveryCases = [recoveryCase, ...runtimeRecoveryCases];
+  runtimeFeedback = [feedback, ...runtimeFeedback.filter((f) => f.id !== fbId)];
+  runtimeRecoveryCases = [recoveryCase, ...runtimeRecoveryCases.filter((c) => c.id !== caseId)];
   notifyDataChanged();
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('reputaflow_recovery_case_created', { detail: recoveryCase }));
+  }
 
   return { feedback, recoveryCase };
 }

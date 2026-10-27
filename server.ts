@@ -535,6 +535,147 @@ app.post('/api/nfc/scan/:id', async (req, res) => {
   }
 });
 
+// POST /api/convert-google-review-url - Smart Resolver for Google Maps & Reviews Links
+app.post('/api/convert-google-review-url', async (req, res) => {
+  try {
+    const rawUrl = (req.body?.url || '').trim();
+    if (!rawUrl) {
+      return res.status(400).json({ error: 'URL do Google Maps ou Place ID não fornecido.' });
+    }
+
+    // 1. Check if rawUrl is already a Place ID (ChIJ...)
+    const directPlaceIdMatch = rawUrl.match(/^(?:place_id:)?(ChIJ[a-zA-Z0-9_-]{20,50})$/i);
+    if (directPlaceIdMatch) {
+      const placeId = directPlaceIdMatch[1];
+      return res.json({
+        success: true,
+        placeId,
+        reviewUrl: `https://search.google.com/local/writereview?placeid=${placeId}`,
+        originalUrl: rawUrl,
+        message: 'Place ID convertido com sucesso para o link oficial de avaliação do Google!'
+      });
+    }
+
+    // 2. Check if already official writereview
+    if (rawUrl.includes('search.google.com/local/writereview')) {
+      const pIdMatch = rawUrl.match(/(?:placeid|place_id)[=:](ChIJ[a-zA-Z0-9_-]{20,50})/i);
+      return res.json({
+        success: true,
+        placeId: pIdMatch ? pIdMatch[1] : undefined,
+        reviewUrl: rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`,
+        originalUrl: rawUrl,
+        message: 'Link já está no formato oficial do Google Reviews.'
+      });
+    }
+
+    // 3. Check if g.page profile link
+    if (rawUrl.includes('g.page/')) {
+      let gPage = rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`;
+      if (!gPage.endsWith('/review') && !gPage.includes('/review?')) {
+        gPage = gPage.replace(/\/+$/, '') + '/review';
+      }
+      return res.json({
+        success: true,
+        reviewUrl: gPage,
+        originalUrl: rawUrl,
+        message: 'Link de perfil Google Business (g.page) otimizado para avaliação!'
+      });
+    }
+
+    // 4. Check if Place ID or CID is directly inside the input
+    const embeddedPlaceId = rawUrl.match(/(?:placeid|place_id|query_place_id)[=:](ChIJ[a-zA-Z0-9_-]{20,50})/i) ||
+                            rawUrl.match(/\b(ChIJ[a-zA-Z0-9_-]{20,50})\b/);
+    if (embeddedPlaceId) {
+      const placeId = embeddedPlaceId[1];
+      return res.json({
+        success: true,
+        placeId,
+        reviewUrl: `https://search.google.com/local/writereview?placeid=${placeId}`,
+        originalUrl: rawUrl,
+        message: 'Place ID extraído do link do Maps com sucesso!'
+      });
+    }
+
+    // 5. Short link or Google Maps web link: fetch and follow redirects
+    let targetFetchUrl = rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`;
+    let finalUrl = targetFetchUrl;
+    let htmlBody = '';
+
+    try {
+      const fetchRes = await fetch(targetFetchUrl, {
+        method: 'GET',
+        redirect: 'follow',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'pt-PT,pt;q=0.9,en;q=0.8'
+        }
+      });
+      finalUrl = fetchRes.url || targetFetchUrl;
+      htmlBody = await fetchRes.text();
+    } catch (fetchErr: any) {
+      console.warn('[convert-google-review-url fetch notice]:', fetchErr.message);
+    }
+
+    // Check finalUrl and htmlBody for Place ID
+    const placeIdInFinal = finalUrl.match(/(?:placeid|place_id|query_place_id)[=:](ChIJ[a-zA-Z0-9_-]{20,50})/i) ||
+                           finalUrl.match(/\b(ChIJ[a-zA-Z0-9_-]{20,50})\b/) ||
+                           htmlBody.match(/(?:placeid|place_id|query_place_id)[=:"]+(ChIJ[a-zA-Z0-9_-]{20,50})/i) ||
+                           htmlBody.match(/["'](ChIJ[a-zA-Z0-9_-]{20,50})["']/);
+
+    if (placeIdInFinal) {
+      const placeId = placeIdInFinal[1];
+      return res.json({
+        success: true,
+        placeId,
+        reviewUrl: `https://search.google.com/local/writereview?placeid=${placeId}`,
+        originalUrl: rawUrl,
+        message: 'Link do Maps expandido e Place ID oficial extraído com sucesso!'
+      });
+    }
+
+    // Check for hex CID in finalUrl or htmlBody: 1s0x...:0x([0-9a-fA-F]+)
+    const hexCidMatch = finalUrl.match(/1s0x[0-9a-fA-F]+:0x([0-9a-fA-F]+)/i) ||
+                        htmlBody.match(/1s0x[0-9a-fA-F]+:0x([0-9a-fA-F]+)/i);
+    if (hexCidMatch) {
+      try {
+        const cid = BigInt('0x' + hexCidMatch[1]).toString();
+        return res.json({
+          success: true,
+          cid,
+          reviewUrl: `https://maps.google.com/?cid=${cid}`,
+          originalUrl: rawUrl,
+          message: 'Link do Maps expandido e CID do estabelecimento localizado!'
+        });
+      } catch {}
+    }
+
+    // Check for decimal CID: cid=(\d+)
+    const decCidMatch = finalUrl.match(/[?&]cid=(\d+)/i) || htmlBody.match(/[?&]cid=(\d+)/i);
+    if (decCidMatch) {
+      const cid = decCidMatch[1];
+      return res.json({
+        success: true,
+        cid,
+        reviewUrl: `https://maps.google.com/?cid=${cid}`,
+        originalUrl: rawUrl,
+        message: 'Link do Maps expandido e CID do estabelecimento localizado!'
+      });
+    }
+
+    // If no Place ID or CID could be extracted, return the expanded/clean URL
+    return res.json({
+      success: true,
+      reviewUrl: finalUrl,
+      originalUrl: rawUrl,
+      message: 'Link do Maps expandido e verificado.'
+    });
+  } catch (error: any) {
+    console.error('Failed to convert Google review URL:', error);
+    res.status(500).json({ error: error.message || 'Erro ao converter link do Google Reviews' });
+  }
+});
+
 // GET /qr/:id - High-speed Server-side Redirect for Mobile QR / NFC Scanners
 app.get('/qr/:id', async (req, res, next) => {
   const plateId = (req.params.id || '').trim();
