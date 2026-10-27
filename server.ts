@@ -32,7 +32,7 @@ import {
   incrementNfcScanSql
 } from './src/db/nfcPlates.ts';
 import { INITIAL_NFC_PLATES, mapNfcRow } from './src/lib/nfcService.ts';
-import { extractSlugFromUrl, findBestMatchingPlate } from './src/lib/urlHelper.ts';
+import { extractSlugFromUrl, findBestMatchingPlate, isPlateAssignedAndActive } from './src/lib/urlHelper.ts';
 import { fetchGlobalCloudData } from './src/lib/cloudSync.ts';
 import { seedCloudSqlDatabase } from './src/db/seedSql.ts';
 import { db } from './src/db/index.ts';
@@ -679,37 +679,82 @@ app.post('/api/convert-google-review-url', async (req, res) => {
   }
 });
 
-// GET /qr/:code (and /qrc/:code) - 100% Server-Side Instant Redirect for QR Codes with Cache-Busting
+// GET /qr/:code (and /qrc/:code) - 100% Server-Side Instant Redirect for QR Codes
 app.get(['/qr/:code', '/qrc/:code'], async (req, res) => {
   // Prevent mobile browser / service worker caching of QR redirects
   res.header('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.header('Pragma', 'no-cache');
   res.header('Expires', '0');
 
-  const code = (req.params.code || '').trim();
-  if (!code) {
-    return res.redirect(302, `/?error=qr_nao_atribuido&_v=${Date.now()}`);
+  // PASSO 1: BUSCA FLEXÍVEL DE PLACAS (NORMALIZAÇÃO DE CÓDIGO)
+  const rawCode = (req.params.code || '').trim();
+  if (!rawCode) {
+    return res.redirect(302, '/?error=qr_nao_atribuido');
   }
 
-  const cleanCode = code.toUpperCase();
+  const cleanCode = rawCode.toUpperCase().replace(/^#+/, '');
+  const cleanNumber = rawCode.replace(/\D/g, '');
+  const shortNumber = cleanNumber.replace(/^0+/, '') || cleanNumber;
+  const pad3 = shortNumber ? shortNumber.padStart(3, '0') : '';
 
   try {
-    let tenantSlug: string | null = null;
-    let redirectUrl: string | null = null;
-    let resolvedPlateId = cleanCode;
+    const orClauses = Array.from(
+      new Set(
+        [
+          `qr_code_id.ilike.%${rawCode}%`,
+          cleanNumber ? `qr_code_id.ilike.%${cleanNumber}%` : '',
+          pad3 && pad3 !== cleanNumber ? `qr_code_id.ilike.%${pad3}%` : ''
+        ].filter(Boolean)
+      )
+    ).join(',');
+
+    // Consulta direta à tabela `qr_plates` com relação `tenants(slug)`
+    const { data: plate, error } = await supabase
+      .from('qr_plates')
+      .select('tenant_id, qr_code_id, tenants(slug)')
+      .or(orClauses)
+      .maybeSingle();
+
+    // PASSO 2: VALIDAÇÃO SEGURA DO LOJISTA VINCULADO
+    const joinedTenantSlug =
+      (plate as any)?.tenants?.slug ||
+      (Array.isArray((plate as any)?.tenants) ? (plate as any).tenants[0]?.slug : null);
+
+    if (!error && plate && joinedTenantSlug) {
+      const tenantSlug = String(joinedTenantSlug).trim();
+      incrementNfcScanSql(plate.qr_code_id || cleanCode).catch(() => {});
+      return res.redirect(302, `/r/${encodeURIComponent(tenantSlug)}`);
+    }
 
     const allBiz = await getAllBusinessesSql().catch(() => []);
 
-    // 1. Query Supabase, CloudSync, and Server SQL DB in parallel
+    // Fallback resiliente em todas as tabelas e fontes
     const supabasePromise = (async () => {
       try {
         const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500));
         const lookup = (async () => {
+          let supaBizList = [...allBiz];
+          for (const bizTable of ['businesses', 'tenants', 'establishments']) {
+            try {
+              const { data: bRows } = await supabase.from(bizTable).select('*');
+              if (Array.isArray(bRows) && bRows.length > 0) {
+                supaBizList = [...bRows, ...supaBizList] as any;
+              }
+            } catch {}
+          }
+
+          if (plate && plate.tenant_id) {
+            const mappedDirect = mapNfcRow(plate, supaBizList);
+            if (isPlateAssignedAndActive(mappedDirect)) return mappedDirect;
+          }
+
           try {
             const { data: qrRows, error: qrErr } = await supabase.from('qr_plates').select('*');
             if (!qrErr && Array.isArray(qrRows) && qrRows.length > 0) {
               const matchedQr = findBestMatchingPlate(qrRows, cleanCode);
-              if (matchedQr) return mapNfcRow(matchedQr, allBiz);
+              if (matchedQr && isPlateAssignedAndActive(matchedQr)) {
+                return mapNfcRow(matchedQr, supaBizList);
+              }
             }
           } catch {}
 
@@ -717,7 +762,9 @@ app.get(['/qr/:code', '/qrc/:code'], async (req, res) => {
             const { data: nfcRows, error: nfcErr } = await supabase.from('nfc_plates').select('*');
             if (!nfcErr && Array.isArray(nfcRows) && nfcRows.length > 0) {
               const matchedNfc = findBestMatchingPlate(nfcRows, cleanCode);
-              if (matchedNfc) return mapNfcRow(matchedNfc, allBiz);
+              if (matchedNfc && isPlateAssignedAndActive(matchedNfc)) {
+                return mapNfcRow(matchedNfc, supaBizList);
+              }
             }
           } catch {}
 
@@ -733,8 +780,11 @@ app.get(['/qr/:code', '/qrc/:code'], async (req, res) => {
       .then((cloudData) => {
         if (cloudData && Array.isArray(cloudData.nfcPlates) && cloudData.nfcPlates.length > 0) {
           const matched = findBestMatchingPlate(cloudData.nfcPlates, cleanCode);
-          if (matched) {
-            const bizList = Array.isArray(cloudData.businesses) && cloudData.businesses.length > 0 ? cloudData.businesses : allBiz;
+          if (matched && isPlateAssignedAndActive(matched)) {
+            const bizList =
+              Array.isArray(cloudData.businesses) && cloudData.businesses.length > 0
+                ? cloudData.businesses
+                : allBiz;
             return mapNfcRow(matched, bizList);
           }
         }
@@ -749,31 +799,35 @@ app.get(['/qr/:code', '/qrc/:code'], async (req, res) => {
     const initPlate = findBestMatchingPlate(INITIAL_NFC_PLATES, cleanCode);
 
     const allCandidates = [supaPlate, cloudPlate, sqlPlate, initPlate].filter(
-      (p): p is NonNullable<typeof p> => Boolean(p && String(p.status || '').toLowerCase() === 'active')
+      (p): p is NonNullable<typeof p> => Boolean(p && isPlateAssignedAndActive(p))
     );
 
     const winningPlate = findBestMatchingPlate(allCandidates, cleanCode);
 
-    if (winningPlate && String(winningPlate.status || '').toLowerCase() === 'active') {
-      tenantSlug = winningPlate.merchant_slug || extractSlugFromUrl(winningPlate.redirect_url) || null;
+    let tenantSlug: string | null = null;
+    let redirectUrl: string | null = null;
+    let resolvedPlateId = cleanCode;
+
+    if (winningPlate && isPlateAssignedAndActive(winningPlate)) {
+      tenantSlug =
+        winningPlate.merchant_slug ||
+        extractSlugFromUrl(winningPlate.redirect_url) ||
+        winningPlate.merchant_id ||
+        null;
       redirectUrl = winningPlate.redirect_url || null;
       resolvedPlateId = winningPlate.id || cleanCode;
     }
 
-    // 4. Redirecionamento 100% instantâneo no servidor com Cache-Busting (_v=Date.now())
     if (tenantSlug || redirectUrl) {
       incrementNfcScanSql(resolvedPlateId).catch(() => {});
 
-      const cacheBuster = Date.now();
       let target = '';
       if (tenantSlug && !tenantSlug.startsWith('http') && !tenantSlug.startsWith('/')) {
-        target = `/r/${encodeURIComponent(tenantSlug)}?_v=${cacheBuster}`;
+        target = `/r/${encodeURIComponent(String(tenantSlug).trim())}`;
       } else if (redirectUrl) {
         target = redirectUrl.trim();
-        target += (target.includes('?') ? '&' : '?') + `_v=${cacheBuster}`;
       } else if (tenantSlug) {
         target = tenantSlug.trim();
-        target += (target.includes('?') ? '&' : '?') + `_v=${cacheBuster}`;
       }
 
       if (target.startsWith('/')) {
@@ -788,12 +842,12 @@ app.get(['/qr/:code', '/qrc/:code'], async (req, res) => {
       return res.redirect(302, target);
     }
 
-    // Se não encontrar ou não estiver atribuído, redireciona para home com erro limpo
+    // PASSO 3: FALLBACK DE PLACA NÃO ATRIBUÍDA REAL
     console.log(`[HTTP 302 Server-Side Redirect: Não atribuído] Code ${cleanCode} -> /?error=qr_nao_atribuido`);
-    return res.redirect(302, `/?error=qr_nao_atribuido&_v=${Date.now()}`);
+    return res.redirect(302, '/?error=qr_nao_atribuido');
   } catch (error) {
     console.error('QR server-side redirect error:', error);
-    return res.redirect(302, `/?error=qr_nao_atribuido&_v=${Date.now()}`);
+    return res.redirect(302, '/?error=qr_nao_atribuido');
   }
 });
 

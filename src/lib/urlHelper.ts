@@ -403,25 +403,59 @@ export function extractSlugFromUrl(url: string | null | undefined): string | nul
 }
 
 /**
- * Compares two QR/NFC plate codes (e.g. 'QRC0004' vs '004' vs 'NFC-004').
+ * Compares two QR/NFC plate codes (e.g. 'QRC0004' vs '004' vs '#004' vs 'NFC-004' vs '4').
  */
 export function isSamePlateCode(aRaw: string | null | undefined, bRaw: string | null | undefined): boolean {
   const a = String(aRaw || '').trim().toUpperCase().replace(/^#+/, '');
   const b = String(bRaw || '').trim().toUpperCase().replace(/^#+/, '');
   if (!a || !b) return false;
   if (a === b) return true;
-  const aStrip = a.replace(/^(?:QRC|NFC|QR)-?/i, '');
-  const bStrip = b.replace(/^(?:QRC|NFC|QR)-?/i, '');
+  const aStrip = a.replace(/^(?:QRC|NFC|QR|PLATE|PLACA)[-_]?/i, '');
+  const bStrip = b.replace(/^(?:QRC|NFC|QR|PLATE|PLACA)[-_]?/i, '');
   if (aStrip && bStrip && aStrip === bStrip) return true;
-  const aNum = aStrip.replace(/^0+/, '');
-  const bNum = bStrip.replace(/^0+/, '');
-  if (aNum && bNum && /^\d+$/.test(aNum) && /^\d+$/.test(bNum) && aNum === bNum) return true;
+  const aDigits = a.replace(/\D/g, '').replace(/^0+/, '');
+  const bDigits = b.replace(/\D/g, '').replace(/^0+/, '');
+  if (aDigits && bDigits && aDigits === bDigits) return true;
   return false;
 }
 
 /**
+ * Helper to determine if a plate row has an assigned merchant/tenant target and is not inactive.
+ */
+export function isPlateAssignedAndActive(p: Record<string, any> | null | undefined): boolean {
+  if (!p) return false;
+  const joinedSlug =
+    p.tenants?.slug ||
+    (Array.isArray(p.tenants) ? p.tenants[0]?.slug : null) ||
+    p.businesses?.slug ||
+    (Array.isArray(p.businesses) ? p.businesses[0]?.slug : null) ||
+    p.establishments?.slug ||
+    (Array.isArray(p.establishments) ? p.establishments[0]?.slug : null);
+
+  const hasTarget = Boolean(
+    p.redirect_url ||
+    p.redirectUrl ||
+    p.merchant_id ||
+    p.merchantId ||
+    p.tenant_id ||
+    p.tenantId ||
+    p.business_id ||
+    p.establishment_id ||
+    p.merchant_slug ||
+    p.merchantSlug ||
+    joinedSlug
+  );
+
+  if (!hasTarget) return false;
+
+  const rawStatus = String(p.status || '').trim().toLowerCase();
+  // Active if status is 'active' OR if status column is omitted/null (like in qr_plates) and not explicitly 'inactive'
+  return rawStatus === 'active' || (rawStatus !== 'inactive' && rawStatus !== 'unlinked' && rawStatus !== 'disabled');
+}
+
+/**
  * Finds the best matching plate from a list of plates for a given code (e.g. 'QRC0004'),
- * strictly prioritizing active plates, exact code matches, custom merchant assignments, and newest timestamps.
+ * strictly prioritizing active/linked plates, custom merchant assignments, exact code matches, and newest timestamps.
  */
 export function findBestMatchingPlate<T extends Record<string, any>>(plates: T[], targetCode: string): T | null {
   const cleanTarget = String(targetCode || '').trim().toUpperCase().replace(/^#+/, '');
@@ -429,8 +463,8 @@ export function findBestMatchingPlate<T extends Record<string, any>>(plates: T[]
 
   const candidates = plates.filter((p) => {
     if (!p) return false;
-    const pId = p.id || p.qr_code_id || p.code || '';
-    const pQr = p.qr_code_id || '';
+    const pId = p.id || p.qr_code_id || p.code || p.plate_code || '';
+    const pQr = p.qr_code_id || p.code || '';
     return isSamePlateCode(pId, cleanTarget) || (pQr && isSamePlateCode(pQr, cleanTarget));
   });
 
@@ -438,22 +472,29 @@ export function findBestMatchingPlate<T extends Record<string, any>>(plates: T[]
   if (candidates.length === 1) return candidates[0];
 
   return candidates.sort((a, b) => {
-    const aStatus = String(a.status || 'active').toLowerCase() === 'active';
-    const bStatus = String(b.status || 'active').toLowerCase() === 'active';
-    const aHasTarget = Boolean(a.redirect_url || a.redirectUrl || a.merchant_id || a.merchantId || a.tenant_id || a.merchant_slug);
-    const bHasTarget = Boolean(b.redirect_url || b.redirectUrl || b.merchant_id || b.merchantId || b.tenant_id || b.merchant_slug);
-
-    const aActive = aStatus && aHasTarget ? 1 : 0;
-    const bActive = bStatus && bHasTarget ? 1 : 0;
+    const aActive = isPlateAssignedAndActive(a) ? 1 : 0;
+    const bActive = isPlateAssignedAndActive(b) ? 1 : 0;
     if (aActive !== bActive) return bActive - aActive;
 
     // Prefer custom (non-default-seed) merchant assignment if plate is not #002
     const isPlate2 = isSamePlateCode(cleanTarget, 'QRC0002');
     if (!isPlate2) {
-      const aSlug = extractSlugFromUrl(a.redirect_url || a.redirectUrl) || a.merchant_slug || '';
-      const bSlug = extractSlugFromUrl(b.redirect_url || b.redirectUrl) || b.merchant_slug || '';
-      const aCustom = (aSlug && aSlug !== 'mrnavalha') || (a.merchant_id && a.merchant_id !== 'biz_mrnavalha') ? 1 : 0;
-      const bCustom = (bSlug && bSlug !== 'mrnavalha') || (b.merchant_id && b.merchant_id !== 'biz_mrnavalha') ? 1 : 0;
+      const aSlug =
+        extractSlugFromUrl(a.redirect_url || a.redirectUrl) ||
+        a.merchant_slug ||
+        a.tenants?.slug ||
+        (Array.isArray(a.tenants) ? a.tenants[0]?.slug : '') ||
+        '';
+      const bSlug =
+        extractSlugFromUrl(b.redirect_url || b.redirectUrl) ||
+        b.merchant_slug ||
+        b.tenants?.slug ||
+        (Array.isArray(b.tenants) ? b.tenants[0]?.slug : '') ||
+        '';
+      const aMerchant = a.merchant_id || a.tenant_id || '';
+      const bMerchant = b.merchant_id || b.tenant_id || '';
+      const aCustom = (aSlug && aSlug !== 'mrnavalha') || (aMerchant && aMerchant !== 'biz_mrnavalha') ? 1 : 0;
+      const bCustom = (bSlug && bSlug !== 'mrnavalha') || (bMerchant && bMerchant !== 'biz_mrnavalha') ? 1 : 0;
       if (aCustom !== bCustom) return bCustom - aCustom;
     }
 
@@ -476,5 +517,6 @@ export function findBestMatchingPlate<T extends Record<string, any>>(plates: T[]
     return bTime - aTime;
   })[0];
 }
+
 
 

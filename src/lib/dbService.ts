@@ -465,6 +465,7 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
           (b) =>
             normalizeKey(b.slug) === normSlug ||
             normalizeKey(b.id) === normSlug ||
+            normalizeKey(b.ownerId || '') === normSlug ||
             normalizeKey(b.name) === normSlug
         );
       if (cloudMatch) {
@@ -487,6 +488,7 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
             (b) =>
               normalizeKey(b.slug) === normSlug ||
               normalizeKey(b.id) === normSlug ||
+              normalizeKey(b.ownerId || '') === normSlug ||
               normalizeKey(b.name) === normSlug
           );
         if (match) {
@@ -504,6 +506,7 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
     (b) =>
       normalizeKey(b.slug) === normSlug ||
       normalizeKey(b.id) === normSlug ||
+      normalizeKey(b.ownerId || '') === normSlug ||
       normalizeKey(b.name) === normSlug
   );
   if (localMatch) return localMatch;
