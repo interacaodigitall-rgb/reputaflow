@@ -55,27 +55,38 @@ function readDeletedBusinessKeys(): Set<string> {
     const raw = localStorage.getItem(LOCAL_DELETED_BUSINESSES_KEY);
     if (raw) {
       const arr = JSON.parse(raw);
-      if (Array.isArray(arr)) return new Set(arr.map((x) => String(x).toLowerCase().trim()));
+      if (Array.isArray(arr)) return new Set(arr.map((x) => String(x).toLowerCase().trim()).filter(Boolean));
     }
   } catch {}
   return new Set();
 }
 
-function markBusinessKeyDeleted(idOrSlug: string) {
-  if (typeof window === 'undefined' || !idOrSlug) return;
+function markBusinessKeyDeleted(idOrSlugOrName: string) {
+  if (typeof window === 'undefined' || !idOrSlugOrName) return;
   try {
     const set = readDeletedBusinessKeys();
-    set.add(idOrSlug.toLowerCase().trim());
+    const raw = idOrSlugOrName.toLowerCase().trim();
+    const norm = normalizeKey(idOrSlugOrName);
+    if (raw) set.add(raw);
+    if (norm) set.add(norm);
     localStorage.setItem(LOCAL_DELETED_BUSINESSES_KEY, JSON.stringify(Array.from(set)));
   } catch {}
 }
 
-function unmarkBusinessKeyDeleted(id: string, slug: string) {
+function unmarkBusinessKeyDeleted(id: string, slug: string, name?: string) {
   if (typeof window === 'undefined') return;
   try {
     const set = readDeletedBusinessKeys();
     set.delete(id.toLowerCase().trim());
-    if (slug) set.delete(slug.toLowerCase().trim());
+    set.delete(normalizeKey(id));
+    if (slug) {
+      set.delete(slug.toLowerCase().trim());
+      set.delete(normalizeKey(slug));
+    }
+    if (name) {
+      set.delete(name.toLowerCase().trim());
+      set.delete(normalizeKey(name));
+    }
     localStorage.setItem(LOCAL_DELETED_BUSINESSES_KEY, JSON.stringify(Array.from(set)));
   } catch {}
 }
@@ -107,47 +118,66 @@ function saveCachedBusinesses(list: Business[]) {
 
 function mergeBusinessLists(...lists: Business[][]): Business[] {
   const deleted = readDeletedBusinessKeys();
-  const byId = new Map<string, Business>();
-  const slugToId = new Map<string, string>();
+  const byCanonicalKey = new Map<string, Business>();
 
   for (const list of lists) {
     if (!Array.isArray(list)) continue;
     for (const item of list) {
       if (!item || !item.name) continue;
       const cleanId = String(item.id || '').trim();
-      const cleanSlug = String(item.slug || normalizeKey(item.name)).toLowerCase().trim();
+      const cleanSlug = String(item.slug || slugify(item.name)).toLowerCase().trim();
+      const cleanNameKey = normalizeKey(item.name);
       if (!cleanId) continue;
 
-      if (deleted.has(cleanId.toLowerCase()) || (cleanSlug && deleted.has(cleanSlug))) {
+      if (
+        deleted.has(cleanId.toLowerCase()) ||
+        deleted.has(normalizeKey(cleanId)) ||
+        (cleanSlug && (deleted.has(cleanSlug) || deleted.has(normalizeKey(cleanSlug)))) ||
+        (cleanNameKey && deleted.has(cleanNameKey))
+      ) {
         continue;
       }
 
-      const existingIdBySlug = cleanSlug ? slugToId.get(cleanSlug) : undefined;
-      const targetId = byId.has(cleanId) ? cleanId : existingIdBySlug || cleanId;
-      const existing = byId.get(targetId);
+      // Match existing entry by ID, slug, or normalized name so local & DB records never duplicate
+      let matchKey = cleanSlug || cleanNameKey || cleanId;
+      for (const [k, v] of byCanonicalKey.entries()) {
+        if (
+          v.id === cleanId ||
+          v.slug.toLowerCase() === cleanSlug ||
+          normalizeKey(v.name) === cleanNameKey
+        ) {
+          matchKey = k;
+          break;
+        }
+      }
+
+      const existing = byCanonicalKey.get(matchKey);
 
       if (!existing) {
-        byId.set(targetId, item);
-        if (cleanSlug) slugToId.set(cleanSlug, targetId);
+        byCanonicalKey.set(matchKey, { ...item, slug: cleanSlug || item.slug });
       } else {
         const existingTime = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
         const itemTime = item.updatedAt ? new Date(item.updatedAt).getTime() : 0;
-        if (itemTime >= existingTime) {
-          const merged: Business = {
-            ...existing,
-            ...item,
-            id: existing.id,
-            logoUrl: item.logoUrl || existing.logoUrl || '',
-            googleReviewUrl: item.googleReviewUrl || existing.googleReviewUrl || ''
-          };
-          byId.set(targetId, merged);
-        }
+        const winner = itemTime >= existingTime ? item : existing;
+        const loser = itemTime >= existingTime ? existing : item;
+
+        const merged: Business = {
+          ...loser,
+          ...winner,
+          id: existing.id,
+          slug: existing.slug || winner.slug,
+          logoUrl: winner.logoUrl || loser.logoUrl || '',
+          googleReviewUrl: winner.googleReviewUrl || loser.googleReviewUrl || '',
+          phone: winner.phone || loser.phone || '',
+          address: winner.address || loser.address || '',
+          email: winner.email || loser.email || ''
+        };
+        byCanonicalKey.set(matchKey, merged);
       }
     }
   }
 
-  const result = Array.from(byId.values());
-  return result.length > 0 ? result : [...INITIAL_BIZ];
+  return Array.from(byCanonicalKey.values());
 }
 
 // In-memory runtime state initialized from localStorage + baseline fallback
@@ -376,25 +406,35 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
       [...INITIAL_BIZ]
     );
 
-    // 5. If API is available and any cached/local business is missing on the server, sync it automatically
-    if (apiAvailable && cached.length > 0) {
-      const apiIds = new Set(apiBusinesses.map((b) => b.id));
-      const apiSlugs = new Set(apiBusinesses.map((b) => (b.slug || '').toLowerCase()));
-      for (const localBiz of cached) {
-        if (!apiIds.has(localBiz.id) && !apiSlugs.has((localBiz.slug || '').toLowerCase())) {
+    // 5. Auto-sync any locally saved business (such as SBK BARBERSHOP) or richer local fields into Server DB, CloudSync & Supabase
+    if (merged.length > 0) {
+      for (const biz of merged) {
+        const serverMatch = apiBusinesses.find(
+          (ab) =>
+            ab.id === biz.id ||
+            (ab.slug && ab.slug.toLowerCase() === biz.slug.toLowerCase()) ||
+            normalizeKey(ab.name) === normalizeKey(biz.name)
+        );
+        const needsServerSync =
+          apiAvailable &&
+          (!serverMatch ||
+            (biz.logoUrl && !serverMatch.logoUrl) ||
+            (biz.googleReviewUrl && !serverMatch.googleReviewUrl) ||
+            (biz.phone && !serverMatch.phone));
+
+        if (needsServerSync) {
           fetch('/api/businesses', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(localBiz)
+            body: JSON.stringify(biz)
           }).catch(() => {});
         }
       }
-    }
 
-    // 6. If any local business is missing from CloudSync, push to CloudSync for mobile QR access
-    if (cached.length > 0) {
       const cloudSlugs = new Set(cloudBusinesses.map((b) => (b.slug || '').toLowerCase()));
-      const hasMissingInCloud = cached.some((b) => !cloudSlugs.has((b.slug || '').toLowerCase()));
+      const hasMissingInCloud = merged.some(
+        (b) => !cloudSlugs.has((b.slug || '').toLowerCase())
+      );
       if (hasMissingInCloud) {
         pushGlobalCloudData({ businesses: merged }).catch(() => {});
       }
@@ -587,8 +627,16 @@ export async function addBusiness(data: Omit<Business, 'id' | 'createdAt' | 'upd
 
   // IMMEDIATELY persist to localStorage and update runtime state BEFORE async calls
   // so even if the user refreshes immediately, the business NEVER disappears!
-  unmarkBusinessKeyDeleted(id, uniqueSlug);
-  runtimeBusinesses = [newBiz, ...currentAll.filter((b) => b.id !== id)];
+  unmarkBusinessKeyDeleted(id, uniqueSlug, newBiz.name);
+  runtimeBusinesses = [
+    newBiz,
+    ...currentAll.filter(
+      (b) =>
+        b.id !== id &&
+        b.slug.toLowerCase() !== uniqueSlug.toLowerCase() &&
+        normalizeKey(b.name) !== normalizeKey(newBiz.name)
+    )
+  ];
   saveCachedBusinesses(runtimeBusinesses);
   pushGlobalCloudData({ businesses: runtimeBusinesses }).catch(() => {});
   notifyDataChanged();
@@ -596,27 +644,59 @@ export async function addBusiness(data: Omit<Business, 'id' | 'createdAt' | 'upd
     window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated'));
   }
 
-  // 5. GERAÇÃO AUTOMÁTICA DO QR CODE EXCLUSIVO DO COMÉRCIO (/qr/[slug] -> /r/[slug])
+  // 5. VINCULAÇÃO AUTOMÁTICA A UMA ÚNICA PLACA NUMERADA (Sem criar placas duplicadas por slug)
   const directRedirectUrl = `/r/${encodeURIComponent(uniqueSlug)}`;
   try {
     if (typeof window !== 'undefined') {
       const rawPlates = localStorage.getItem('reputaflow_nfc_plates_cache');
-      const localPlates = rawPlates ? JSON.parse(rawPlates) : [];
+      const localPlates: any[] = rawPlates ? JSON.parse(rawPlates) : [];
       if (Array.isArray(localPlates)) {
-        const autoPlate = {
-          id: uniqueSlug,
-          status: 'active',
-          merchant_id: id,
-          redirect_url: directRedirectUrl,
-          merchant_name: newBiz.name,
-          merchant_slug: uniqueSlug,
-          merchant_logo_url: newBiz.logoUrl || undefined,
-          scan_count: 0,
-          created_at: now,
-          updated_at: now
-        };
-        const filtered = localPlates.filter((p: any) => p && p.id !== uniqueSlug);
-        localStorage.setItem('reputaflow_nfc_plates_cache', JSON.stringify([autoPlate, ...filtered]));
+        // Keep only numbered plates and check if this business already has a plate assigned
+        const numberedOnly = localPlates.filter(
+          (p: any) => p && p.id && /^\d+$/.test(String(p.id).replace(/^#|^QRC/i, ''))
+        );
+        const alreadyAssigned = numberedOnly.some(
+          (p: any) =>
+            p.status === 'active' &&
+            (p.merchant_id === id ||
+              (p.merchant_slug && p.merchant_slug.toLowerCase() === uniqueSlug.toLowerCase()))
+        );
+
+        if (!alreadyAssigned) {
+          const freeIdx = numberedOnly.findIndex((p: any) => p.status !== 'active');
+          if (freeIdx >= 0) {
+            numberedOnly[freeIdx] = {
+              ...numberedOnly[freeIdx],
+              status: 'active',
+              merchant_id: id,
+              redirect_url: directRedirectUrl,
+              merchant_name: newBiz.name,
+              merchant_slug: uniqueSlug,
+              merchant_logo_url: newBiz.logoUrl || undefined,
+              updated_at: now
+            };
+          } else {
+            let maxNum = 5;
+            numberedOnly.forEach((p: any) => {
+              const n = parseInt(String(p.id).replace(/\D/g, ''), 10);
+              if (!isNaN(n) && n > maxNum) maxNum = n;
+            });
+            const nextId = String(maxNum + 1).padStart(3, '0');
+            numberedOnly.push({
+              id: nextId,
+              status: 'active',
+              merchant_id: id,
+              redirect_url: directRedirectUrl,
+              merchant_name: newBiz.name,
+              merchant_slug: uniqueSlug,
+              merchant_logo_url: newBiz.logoUrl || undefined,
+              scan_count: 0,
+              created_at: now,
+              updated_at: now
+            });
+          }
+          localStorage.setItem('reputaflow_nfc_plates_cache', JSON.stringify(numberedOnly));
+        }
       }
     }
   } catch {}
@@ -633,7 +713,9 @@ export async function addBusiness(data: Omit<Business, 'id' | 'createdAt' | 'upd
       const savedOnServer = await apiRes.json();
       if (savedOnServer && savedOnServer.id) {
         const mappedServer = mapBusinessRow(savedOnServer);
-        runtimeBusinesses = runtimeBusinesses.map((b) => (b.id === id ? { ...newBiz, ...mappedServer, id: newBiz.id } : b));
+        runtimeBusinesses = runtimeBusinesses.map((b) =>
+          b.id === id ? { ...newBiz, ...mappedServer, id: newBiz.id } : b
+        );
         saveCachedBusinesses(runtimeBusinesses);
       }
     }
@@ -641,7 +723,7 @@ export async function addBusiness(data: Omit<Business, 'id' | 'createdAt' | 'upd
     console.warn('[Server API /api/businesses network warning]:', apiErr);
   }
 
-  // 7. Secondary persistence: Adaptive Supabase insert across 'businesses', 'tenants', 'establishments', and direct QR record
+  // 7. Secondary persistence: Adaptive Supabase insert across 'businesses', 'tenants', 'establishments'
   const payload: Record<string, any> = {
     id,
     name: newBiz.name,
@@ -666,30 +748,6 @@ export async function addBusiness(data: Omit<Business, 'id' | 'createdAt' | 'upd
       await insertBusinessToSupabaseAdaptive('tenants', payload);
       await insertBusinessToSupabaseAdaptive('establishments', payload);
     }
-    // Regista também o código QR direto do comércio no Supabase (se as tabelas existirem)
-    try {
-      await supabase.from('qr_plates').upsert(
-        {
-          qr_code_id: uniqueSlug,
-          tenant_id: id,
-          status: 'active',
-          redirect_url: directRedirectUrl
-        },
-        { onConflict: 'qr_code_id' }
-      );
-    } catch {}
-    try {
-      await supabase.from('nfc_plates').upsert(
-        {
-          id: uniqueSlug,
-          status: 'active',
-          merchant_id: id,
-          redirect_url: directRedirectUrl,
-          updated_at: now
-        },
-        { onConflict: 'id' }
-      );
-    } catch {}
   } catch (err: any) {
     console.warn('[Supabase addBusiness caught]:', err);
   }
@@ -828,38 +886,109 @@ export const updateEstablishment = updateBusiness;
 
 export async function deleteBusiness(id: string): Promise<void> {
   const cleanId = String(id || '').trim();
-  const target = runtimeBusinesses.find((b) => b.id === cleanId);
+  const currentAll = mergeBusinessLists(readCachedBusinesses(), runtimeBusinesses);
+  const target = currentAll.find(
+    (b) => b.id === cleanId || b.slug.toLowerCase() === cleanId.toLowerCase()
+  );
+  const targetSlug = target?.slug ? target.slug.toLowerCase().trim() : '';
+  const targetName = target?.name ? target.name.trim() : '';
+  const targetNameKey = normalizeKey(targetName);
 
+  // 1. Mark ID, slug, and normalized name as permanently deleted
   markBusinessKeyDeleted(cleanId);
-  if (target?.slug) {
-    markBusinessKeyDeleted(target.slug);
-  }
+  if (targetSlug) markBusinessKeyDeleted(targetSlug);
+  if (targetName) markBusinessKeyDeleted(targetName);
 
-  runtimeBusinesses = runtimeBusinesses.filter((b) => b.id !== cleanId);
+  // 2. Remove from runtime and localStorage cache
+  runtimeBusinesses = currentAll.filter(
+    (b) =>
+      b.id !== cleanId &&
+      (!targetSlug || b.slug.toLowerCase() !== targetSlug) &&
+      (!targetNameKey || normalizeKey(b.name) !== targetNameKey)
+  );
   saveCachedBusinesses(runtimeBusinesses);
+
+  // 3. Unlink any QR/NFC plate pointing to the deleted business in localStorage
+  let updatedPlates: any[] | undefined = undefined;
+  try {
+    if (typeof window !== 'undefined') {
+      const rawPlates = localStorage.getItem('reputaflow_nfc_plates_cache');
+      const localPlates: any[] = rawPlates ? JSON.parse(rawPlates) : [];
+      if (Array.isArray(localPlates)) {
+        updatedPlates = localPlates.map((p: any) => {
+          if (!p) return p;
+          const pMid = String(p.merchant_id || '').trim();
+          const pSlug = String(p.merchant_slug || '').toLowerCase().trim();
+          const pNameKey = normalizeKey(p.merchant_name || '');
+          if (
+            pMid === cleanId ||
+            (targetSlug && pSlug === targetSlug) ||
+            (targetNameKey && pNameKey === targetNameKey)
+          ) {
+            return {
+              ...p,
+              status: 'inactive',
+              merchant_id: null,
+              redirect_url: null,
+              merchant_name: undefined,
+              merchant_slug: undefined,
+              merchant_logo_url: undefined,
+              updated_at: new Date().toISOString()
+            };
+          }
+          return p;
+        });
+        localStorage.setItem('reputaflow_nfc_plates_cache', JSON.stringify(updatedPlates));
+      }
+    }
+  } catch {}
+
+  // 4. Push permanent deletion to CloudSync
   pushGlobalCloudData({
     businesses: runtimeBusinesses,
+    nfcPlates: updatedPlates,
     deletedBusinessIds: Array.from(readDeletedBusinessKeys())
   }).catch(() => {});
+
   notifyDataChanged();
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated'));
+    window.dispatchEvent(new CustomEvent('reputaflow_nfc_sync'));
   }
 
+  // 5. Delete from Backend Server REST API (PostgreSQL & data/db.json)
   try {
     await fetch(`/api/businesses/${encodeURIComponent(cleanId)}`, { method: 'DELETE' });
+    if (targetSlug && targetSlug !== cleanId.toLowerCase()) {
+      await fetch(`/api/businesses/${encodeURIComponent(targetSlug)}`, { method: 'DELETE' });
+    }
   } catch (apiErr) {
     console.warn('[deleteBusiness API warning]:', apiErr);
   }
 
-  try {
-    const { error } = await supabase.from('businesses').delete().eq('id', cleanId);
-    if (error) console.error('[Supabase deleteBusiness error]:', error);
-    try { await supabase.from('tenants').delete().eq('id', cleanId); } catch (_) {}
-    try { await supabase.from('establishments').delete().eq('id', cleanId); } catch (_) {}
-  } catch (err) {
-    console.error('[Supabase deleteBusiness catch]:', err);
+  // 6. Delete from Supabase across all business & plate tables
+  for (const tbl of ['businesses', 'tenants', 'establishments']) {
+    try {
+      await supabase.from(tbl).delete().eq('id', cleanId);
+      if (targetSlug) {
+        await supabase.from(tbl).delete().eq('slug', targetSlug);
+      }
+      if (targetName) {
+        await supabase.from(tbl).delete().eq('name', targetName);
+      }
+    } catch {}
   }
+
+  try {
+    await supabase
+      .from('nfc_plates')
+      .update({ status: 'inactive', merchant_id: null, redirect_url: null })
+      .eq('merchant_id', cleanId);
+    await supabase
+      .from('qr_plates')
+      .update({ status: 'inactive', tenant_id: null, redirect_url: null })
+      .eq('tenant_id', cleanId);
+  } catch {}
 }
 
 // ==========================================

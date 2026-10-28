@@ -1,10 +1,28 @@
 {
   "businesses": [
     {
+      "id": "biz_sbk_barbershop",
+      "name": "SBK BARBERSHOP",
+      "slug": "sbk-barbershop",
+      "category": "Barbearia & Estética",
+      "logoUrl": null,
+      "phone": "",
+      "email": "contato@sbkbarbershop.com",
+      "address": "",
+      "googleReviewUrl": null,
+      "status": "active",
+      "planId": "plan_pro",
+      "ownerId": "owner_sbk_barbershop",
+      "currency": "EUR",
+      "password": "reputa123",
+      "createdAt": "2026-10-27T10:00:00.000Z",
+      "updatedAt": "2026-10-27T23:53:07.632Z"
+    },
+    {
       "id": "biz_mrnavalha",
       "name": "Mr. Navalha",
       "slug": "mrnavalha",
-      "category": "Barbearia & Cuidados",
+      "category": "Barbearia & Estética",
       "logoUrl": "https://i.postimg.cc/h4YbXjCk/MISTER-VETOR-removebg-preview.png",
       "phone": "+351 937 472 634",
       "email": "contacto@misternavalha.com",
@@ -16,7 +34,7 @@
       "currency": "EUR",
       "password": "reputa123",
       "createdAt": "2026-08-22T10:40:37.506Z",
-      "updatedAt": "2026-10-27T18:21:32.763Z"
+      "updatedAt": "2026-10-27T23:53:07.946Z"
     }
   ],
   "customers": [
@@ -152,29 +170,31 @@
   "nfcPlates": [
     {
       "id": "001",
-      "status": "inactive",
-      "merchant_id": null,
-      "merchantId": null,
-      "redirect_url": null,
-      "redirectUrl": null,
+      "status": "active",
+      "merchant_id": "biz_sbk_barbershop",
+      "merchantId": "biz_sbk_barbershop",
+      "redirect_url": "/r/sbk-barbershop",
+      "redirectUrl": "/r/sbk-barbershop",
       "scan_count": 0,
       "scanCount": 0,
       "createdAt": "2026-09-21T10:00:00.000Z",
-      "updatedAt": "2026-09-21T10:00:00.000Z"
+      "updatedAt": "2026-10-27T23:53:08.258Z",
+      "merchant_name": "SBK BARBERSHOP",
+      "merchant_slug": "sbk-barbershop"
     },
     {
       "id": "002",
       "status": "active",
       "merchant_id": "biz_mrnavalha",
       "merchantId": "biz_mrnavalha",
-      "redirect_url": "/?b=mrnavalha",
-      "redirectUrl": "/?b=mrnavalha",
+      "redirect_url": "/r/mrnavalha",
+      "redirectUrl": "/r/mrnavalha",
       "scan_count": 4,
       "scanCount": 4,
       "merchant_name": "Mr. Navalha",
       "merchant_slug": "mrnavalha",
       "createdAt": "2026-09-21T10:00:00.000Z",
-      "updatedAt": "2026-10-27T20:41:48.473Z"
+      "updatedAt": "2026-10-27T23:53:08.727Z"
     },
     {
       "id": "003",
@@ -273,5 +293,15 @@
       "updatedAt": "2026-09-21T10:00:00.000Z"
     }
   ],
-  "interactions": []
+  "interactions": [],
+  "deletedBusinessIds": [
+    "biz_persist_test",
+    "biz-persist-test",
+    "biz_mumra1yp_elhh",
+    "biz-mumra1yp-elhh",
+    "biz_muxfdcap_f1ao",
+    "biz-muxfdcap-f1ao",
+    "biz_mv5qc4u4_0yj3",
+    "biz-mv5qc4u4-0yj3"
+  ]
 }

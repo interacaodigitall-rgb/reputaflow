@@ -2,6 +2,27 @@ import { Business, Review, Feedback, Customer, RecoveryCase } from '../types';
 
 export const REGISTERED_BUSINESSES: Business[] = [
   {
+    id: 'biz_sbk_barbershop',
+    name: 'SBK BARBERSHOP',
+    slug: 'sbk-barbershop',
+    category: 'Barbearia & Estética',
+    logoUrl: '',
+    phone: '',
+    email: 'contato@sbkbarbershop.com',
+    address: '',
+    googleReviewUrl: '',
+    status: 'active',
+    planId: 'plan_pro',
+    ownerId: 'owner_sbk_barbershop',
+    currency: 'EUR',
+    password: 'reputa123',
+    minRatingForGoogle: 4,
+    qrThemeColor: '#4285F4',
+    activePlan: 'pro',
+    createdAt: '2026-10-27T10:00:00.000Z',
+    updatedAt: '2026-10-27T10:00:00.000Z'
+  },
+  {
     id: 'biz_mrnavalha',
     name: 'Mr. Navalha',
     slug: 'mrnavalha',
@@ -17,7 +38,7 @@ export const REGISTERED_BUSINESSES: Business[] = [
     currency: 'EUR',
     password: 'reputa123',
     minRatingForGoogle: 4,
-    qrThemeColor: '#4f46e5',
+    qrThemeColor: '#4285F4',
     activePlan: 'pro',
     createdAt: '2026-08-22T10:40:37.506Z',
     updatedAt: '2026-09-21T13:01:24.346Z'

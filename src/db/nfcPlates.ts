@@ -3,33 +3,14 @@ import { nfcPlates } from './schema.ts';
 import { eq, desc } from 'drizzle-orm';
 import { NfcPlate, CreateNfcBatchOptions } from '../types/nfc.ts';
 import { extractSlugFromUrl, isSamePlateCode, findBestMatchingPlate } from '../lib/urlHelper.ts';
-import { getAllBusinessesSql } from './businesses.ts';
-import fs from 'fs';
-import path from 'path';
+import { getAllBusinessesSql, readDbJson, writeDbJson } from './businesses.ts';
 
-const DB_FILE = path.join(process.cwd(), 'data', 'db.json');
-
-function readDbJson(): any {
-  try {
-    if (fs.existsSync(DB_FILE)) {
-      const raw = fs.readFileSync(DB_FILE, 'utf-8');
-      const parsed = JSON.parse(raw);
-      if (parsed) return parsed;
-    }
-  } catch (e) {
-    console.warn('[readDbJson notice]:', e);
-  }
-  return { businesses: [], customers: [], reviews: [], feedback: [], recoveryCases: [], nfcPlates: [] };
-}
-
-function writeDbJson(data: any): void {
-  try {
-    const dir = path.dirname(DB_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf-8');
-  } catch (e) {
-    console.warn('[writeDbJson notice]:', e);
-  }
+function extractNumericSerial(idOrCode: string): number {
+  if (!idOrCode) return 0;
+  const digits = String(idOrCode).replace(/\D/g, '');
+  if (!digits) return 0;
+  const num = parseInt(digits, 10);
+  return isNaN(num) || num > 100000 ? 0 : num;
 }
 
 export async function getAllNfcPlatesSql(): Promise<NfcPlate[]> {
@@ -37,38 +18,50 @@ export async function getAllNfcPlatesSql(): Promise<NfcPlate[]> {
   const jsonDb = readDbJson();
   const jsonPlates: any[] = jsonDb.nfcPlates || [];
 
-  const mapPlate = (raw: any): NfcPlate => {
+  const mapPlate = (raw: any): NfcPlate | null => {
+    const rawId = String(raw?.id || '').trim();
+    const num = extractNumericSerial(rawId);
+    // Only keep numbered physical plates (e.g. 001, 002, 003...) to prevent duplicate slug cards
+    if (num <= 0) return null;
+
+    const canonicalId = String(num).padStart(3, '0');
     const mId = raw.merchant_id || raw.merchantId || null;
     const redir = raw.redirect_url || raw.redirectUrl || null;
     const slugFromUrl = extractSlugFromUrl(redir);
 
-    const bizById = mId
-      ? allBiz.find((b) => b.id === mId || b.slug.toLowerCase() === String(mId).toLowerCase())
-      : undefined;
-    const bizBySlug = slugFromUrl
-      ? allBiz.find((b) => b.slug.toLowerCase() === slugFromUrl.toLowerCase() || b.id === slugFromUrl)
-      : undefined;
+    const matchedBiz = allBiz.find(
+      (b) =>
+        (mId && (b.id === mId || b.slug.toLowerCase() === String(mId).toLowerCase())) ||
+        (slugFromUrl && b.slug.toLowerCase() === slugFromUrl.toLowerCase())
+    );
 
-    let matchedBiz = bizById || bizBySlug;
-    if (bizById && bizById.id !== 'biz_mrnavalha') {
-      matchedBiz = bizById;
-    } else if (bizBySlug && bizBySlug.id !== 'biz_mrnavalha') {
-      matchedBiz = bizBySlug;
+    // If the plate points to a business that no longer exists (was deleted), treat it as inactive stock
+    if (!matchedBiz) {
+      return {
+        id: canonicalId,
+        status: 'inactive',
+        merchant_id: null,
+        redirect_url: null,
+        scan_count: Number(raw.scan_count ?? raw.scanCount ?? 0),
+        created_at:
+          raw.createdAt instanceof Date
+            ? raw.createdAt.toISOString()
+            : raw.createdAt || raw.created_at || new Date().toISOString(),
+        updated_at:
+          raw.updatedAt instanceof Date
+            ? raw.updatedAt.toISOString()
+            : raw.updatedAt || raw.updated_at || new Date().toISOString(),
+        merchant_name: undefined,
+        merchant_slug: undefined
+      };
     }
 
-    const resolvedSlug =
-      (bizById && bizById.id !== 'biz_mrnavalha' ? bizById.slug : null) ||
-      (slugFromUrl && slugFromUrl !== 'mrnavalha' ? slugFromUrl : null) ||
-      matchedBiz?.slug ||
-      slugFromUrl ||
-      raw.merchant_slug ||
-      raw.merchantSlug;
-
+    const isActive = String(raw.status).toLowerCase() === 'active';
     return {
-      id: String(raw.id).trim(),
-      status: String(raw.status).toLowerCase() === 'active' ? 'active' : 'inactive',
-      merchant_id: matchedBiz?.id || mId,
-      redirect_url: resolvedSlug ? `/?b=${encodeURIComponent(resolvedSlug)}` : redir,
+      id: canonicalId,
+      status: isActive ? 'active' : 'inactive',
+      merchant_id: isActive ? matchedBiz.id : null,
+      redirect_url: isActive ? `/r/${encodeURIComponent(matchedBiz.slug)}` : null,
       scan_count: Number(raw.scan_count ?? raw.scanCount ?? 0),
       created_at:
         raw.createdAt instanceof Date
@@ -78,15 +71,16 @@ export async function getAllNfcPlatesSql(): Promise<NfcPlate[]> {
         raw.updatedAt instanceof Date
           ? raw.updatedAt.toISOString()
           : raw.updatedAt || raw.updated_at || new Date().toISOString(),
-      merchant_name: matchedBiz?.name || raw.merchant_name || raw.merchantName,
-      merchant_slug: resolvedSlug
+      merchant_name: isActive ? matchedBiz.name : undefined,
+      merchant_slug: isActive ? matchedBiz.slug : undefined,
+      merchant_logo_url: isActive ? matchedBiz.logoUrl || undefined : undefined
     };
   };
 
   const plateMap = new Map<string, NfcPlate>();
   jsonPlates.forEach((p) => {
     const mapped = mapPlate(p);
-    plateMap.set(mapped.id.toUpperCase(), mapped);
+    if (mapped) plateMap.set(mapped.id, mapped);
   });
 
   try {
@@ -94,14 +88,50 @@ export async function getAllNfcPlatesSql(): Promise<NfcPlate[]> {
     if (rows && rows.length > 0) {
       rows.forEach((r) => {
         const mapped = mapPlate(r);
-        plateMap.set(mapped.id.toUpperCase(), mapped);
+        if (mapped) {
+          const existing = plateMap.get(mapped.id);
+          if (!existing || (mapped.status === 'active' && existing.status !== 'active')) {
+            plateMap.set(mapped.id, mapped);
+          }
+        }
       });
     }
-  } catch (error) {
-    // Cloud SQL table may not exist, fallback to db.json
+  } catch {}
+
+  // Enforce STRICTLY 1 plate per merchant (if a merchant is on multiple plates, keep only the most recently updated one)
+  const allPlates = Array.from(plateMap.values()).sort(
+    (a, b) => extractNumericSerial(a.id) - extractNumericSerial(b.id)
+  );
+  const merchantWinnerPlate = new Map<string, NfcPlate>();
+
+  for (const p of allPlates) {
+    if (p.status === 'active' && (p.merchant_id || p.merchant_slug)) {
+      const mKey = (p.merchant_slug || p.merchant_id || '').toLowerCase();
+      const prev = merchantWinnerPlate.get(mKey);
+      if (!prev) {
+        merchantWinnerPlate.set(mKey, p);
+      } else {
+        const prevTime = new Date(prev.updated_at || 0).getTime() || 0;
+        const currTime = new Date(p.updated_at || 0).getTime() || 0;
+        if (currTime > prevTime) {
+          prev.status = 'inactive';
+          prev.merchant_id = null;
+          prev.redirect_url = null;
+          prev.merchant_name = undefined;
+          prev.merchant_slug = undefined;
+          merchantWinnerPlate.set(mKey, p);
+        } else {
+          p.status = 'inactive';
+          p.merchant_id = null;
+          p.redirect_url = null;
+          p.merchant_name = undefined;
+          p.merchant_slug = undefined;
+        }
+      }
+    }
   }
 
-  return Array.from(plateMap.values());
+  return allPlates;
 }
 
 export async function getNfcPlateByIdSql(id: string): Promise<NfcPlate | null> {
@@ -120,24 +150,43 @@ export async function createNfcBatchSql(options: CreateNfcBatchOptions): Promise
   const jsonDb = readDbJson();
   const existingPlates: any[] = jsonDb.nfcPlates || [];
   const plateMap = new Map<string, any>();
-  existingPlates.forEach((p) => plateMap.set(String(p.id).trim(), p));
+  existingPlates.forEach((p) => {
+    const num = extractNumericSerial(p.id);
+    if (num > 0) {
+      const canonical = String(num).padStart(padDigits, '0');
+      plateMap.set(canonical, { ...p, id: canonical });
+    }
+  });
+
+  // Find highest existing plate number to avoid overlap
+  let highestNum = 5;
+  for (const k of plateMap.keys()) {
+    const n = extractNumericSerial(k);
+    if (n > highestNum) highestNum = n;
+  }
+  const safeStart = Math.max(highestNum + 1, startNumber);
 
   for (let i = 0; i < quantity; i++) {
-    const currentNum = startNumber + i;
+    const currentNum = safeStart + i;
     const padded = String(currentNum).padStart(padDigits, '0');
     const id = prefix ? `${prefix}${padded}` : padded;
 
+    if (plateMap.has(id)) continue;
+
     try {
-      await db.insert(nfcPlates).values({
-        id,
-        status: 'inactive',
-        merchantId: null,
-        redirectUrl: null,
-        scanCount: 0,
-        createdAt: now,
-        updatedAt: now
-      }).onConflictDoNothing();
-    } catch (e) {}
+      await db
+        .insert(nfcPlates)
+        .values({
+          id,
+          status: 'inactive',
+          merchantId: null,
+          redirectUrl: null,
+          scanCount: 0,
+          createdAt: now,
+          updatedAt: now
+        })
+        .onConflictDoNothing();
+    } catch {}
 
     const plateObj = {
       id,
@@ -152,10 +201,7 @@ export async function createNfcBatchSql(options: CreateNfcBatchOptions): Promise
       updatedAt: now.toISOString()
     };
 
-    if (!plateMap.has(id)) {
-      plateMap.set(id, plateObj);
-    }
-
+    plateMap.set(id, plateObj);
     created.push({
       id,
       status: 'inactive',
@@ -173,26 +219,51 @@ export async function createNfcBatchSql(options: CreateNfcBatchOptions): Promise
   return created;
 }
 
-export async function linkNfcPlateSql(id: string, merchantId: string, redirectUrl: string): Promise<boolean> {
-  const cleanId = id.trim();
-  const cleanRedirect = redirectUrl.trim();
+export async function linkNfcPlateSql(
+  id: string,
+  merchantId: string,
+  redirectUrl: string = ''
+): Promise<boolean> {
+  const num = extractNumericSerial(id);
+  const cleanId = num > 0 ? String(num).padStart(3, '0') : String(id || '').trim();
   const now = new Date();
 
   const allBiz = await getAllBusinessesSql().catch(() => []);
-  const slugFromUrl = extractSlugFromUrl(cleanRedirect);
+  const slugFromUrl = extractSlugFromUrl(redirectUrl);
+  const cleanMerchantKey = String(merchantId || '').trim().toLowerCase();
   const targetBiz = allBiz.find(
-    (b) => (merchantId && b.id === merchantId) || (slugFromUrl && b.slug.toLowerCase() === slugFromUrl.toLowerCase())
+    (b) =>
+      (merchantId && b.id === merchantId) ||
+      (cleanMerchantKey && String(b.slug || '').toLowerCase() === cleanMerchantKey) ||
+      (slugFromUrl && String(b.slug || '').toLowerCase() === slugFromUrl.toLowerCase())
   );
-  const resolvedSlug = slugFromUrl || targetBiz?.slug || undefined;
+  const resolvedMerchantId = targetBiz?.id || merchantId;
+  const resolvedSlug = targetBiz?.slug || slugFromUrl || (cleanMerchantKey && !cleanMerchantKey.startsWith('biz_') ? cleanMerchantKey : undefined);
   const resolvedName = targetBiz?.name || undefined;
+  const cleanRedirect = resolvedSlug
+    ? `/r/${encodeURIComponent(resolvedSlug)}`
+    : String(redirectUrl || '').trim();
 
+  // 1. In PostgreSQL: Unlink any other plate previously assigned to this same merchant (1 merchant = 1 plate)
   try {
+    if (resolvedMerchantId) {
+      await db
+        .update(nfcPlates)
+        .set({
+          status: 'inactive',
+          merchantId: null,
+          redirectUrl: null,
+          updatedAt: now
+        })
+        .where(eq(nfcPlates.merchantId, resolvedMerchantId));
+    }
+
     await db
       .insert(nfcPlates)
       .values({
         id: cleanId,
         status: 'active',
-        merchantId: merchantId || null,
+        merchantId: resolvedMerchantId || null,
         redirectUrl: cleanRedirect,
         scanCount: 0,
         createdAt: now,
@@ -202,32 +273,53 @@ export async function linkNfcPlateSql(id: string, merchantId: string, redirectUr
         target: nfcPlates.id,
         set: {
           status: 'active',
-          merchantId: merchantId || null,
+          merchantId: resolvedMerchantId || null,
           redirectUrl: cleanRedirect,
           updatedAt: now
         }
       });
-  } catch (error) {}
+  } catch {}
 
+  // 2. In db.json: Unlink any other plate for this merchant, then link the target plate
   const jsonDb = readDbJson();
-  const plates: any[] = jsonDb.nfcPlates || [];
+  const plates: any[] = (jsonDb.nfcPlates || []).filter((p: any) => extractNumericSerial(p.id) > 0);
   let matchedAny = false;
 
   for (let i = 0; i < plates.length; i++) {
+    const pMid = plates[i].merchant_id || plates[i].merchantId;
+    const pSlug = plates[i].merchant_slug || extractSlugFromUrl(plates[i].redirect_url);
+
     if (isSamePlateCode(plates[i].id, cleanId)) {
       matchedAny = true;
       const scanCnt = Number(plates[i].scan_count || plates[i].scanCount || 0);
       plates[i] = {
         ...plates[i],
+        id: cleanId,
         status: 'active',
-        merchant_id: merchantId || null,
-        merchantId: merchantId || null,
+        merchant_id: resolvedMerchantId || null,
+        merchantId: resolvedMerchantId || null,
         redirect_url: cleanRedirect,
         redirectUrl: cleanRedirect,
         scan_count: scanCnt,
         scanCount: scanCnt,
         merchant_name: resolvedName,
         merchant_slug: resolvedSlug,
+        updatedAt: now.toISOString()
+      };
+    } else if (
+      (resolvedMerchantId && pMid === resolvedMerchantId) ||
+      (resolvedSlug && pSlug && pSlug.toLowerCase() === resolvedSlug.toLowerCase())
+    ) {
+      // Unlink duplicate plate for the same merchant
+      plates[i] = {
+        ...plates[i],
+        status: 'inactive',
+        merchant_id: null,
+        merchantId: null,
+        redirect_url: null,
+        redirectUrl: null,
+        merchant_name: undefined,
+        merchant_slug: undefined,
         updatedAt: now.toISOString()
       };
     }
@@ -237,8 +329,8 @@ export async function linkNfcPlateSql(id: string, merchantId: string, redirectUr
     plates.push({
       id: cleanId,
       status: 'active',
-      merchant_id: merchantId || null,
-      merchantId: merchantId || null,
+      merchant_id: resolvedMerchantId || null,
+      merchantId: resolvedMerchantId || null,
       redirect_url: cleanRedirect,
       redirectUrl: cleanRedirect,
       scan_count: 0,
@@ -256,11 +348,13 @@ export async function linkNfcPlateSql(id: string, merchantId: string, redirectUr
 }
 
 export async function unlinkNfcPlateSql(id: string): Promise<boolean> {
-  const cleanId = id.trim();
+  const num = extractNumericSerial(id);
+  const cleanId = num > 0 ? String(num).padStart(3, '0') : id.trim();
   const now = new Date();
 
   try {
-    await db.update(nfcPlates)
+    await db
+      .update(nfcPlates)
       .set({
         status: 'inactive',
         merchantId: null,
@@ -268,7 +362,7 @@ export async function unlinkNfcPlateSql(id: string): Promise<boolean> {
         updatedAt: now
       })
       .where(eq(nfcPlates.id, cleanId));
-  } catch (error) {}
+  } catch {}
 
   const jsonDb = readDbJson();
   const plates: any[] = jsonDb.nfcPlates || [];
@@ -298,7 +392,7 @@ export async function deleteNfcPlateSql(id: string): Promise<boolean> {
   const cleanId = id.trim();
   try {
     await db.delete(nfcPlates).where(eq(nfcPlates.id, cleanId));
-  } catch (error) {}
+  } catch {}
 
   const jsonDb = readDbJson();
   jsonDb.nfcPlates = (jsonDb.nfcPlates || []).filter((p: any) => !isSamePlateCode(p.id, cleanId));
@@ -311,14 +405,15 @@ export async function incrementNfcScanSql(id: string): Promise<void> {
   try {
     const plate = await getNfcPlateByIdSql(cleanId);
     if (plate) {
-      await db.update(nfcPlates)
+      await db
+        .update(nfcPlates)
         .set({
           scanCount: (plate.scan_count || 0) + 1,
           updatedAt: new Date()
         })
         .where(eq(nfcPlates.id, plate.id));
     }
-  } catch (error) {}
+  } catch {}
 
   const jsonDb = readDbJson();
   const plates: any[] = jsonDb.nfcPlates || [];
