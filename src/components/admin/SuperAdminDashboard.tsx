@@ -1,4 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { supabase } from '../../lib/supabase';
+
+export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
+export const revalidate = 0;
+
 import {
   ShieldAlert,
   Building,
@@ -71,6 +77,61 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
   const [qrModalBiz, setQrModalBiz] = useState<Business | null>(null);
   const [copiedBizId, setCopiedBizId] = useState<string | null>(null);
+  const [directBusinesses, setDirectBusinesses] = useState<Business[]>([]);
+
+  useEffect(() => {
+    try {
+      localStorage.removeItem('reputaflow_deleted_businesses_v1');
+    } catch {
+      // ignore
+    }
+
+    let isMounted = true;
+    const fetchAllGlobalBusinesses = async () => {
+      try {
+        // Super Admin: leitura global irrestrita da tabela businesses sem qualquer filtro owner_id
+        const { data, error } = await supabase
+          .from('businesses')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (!error && data && isMounted) {
+          const mapped: Business[] = data.map((row: any) => ({
+            id: String(row.id),
+            name: String(row.name || 'Comércio Sem Nome'),
+            slug: String(row.slug || '').toLowerCase(),
+            category: String(row.category || 'Comércio & Serviços'),
+            phone: String(row.phone || ''),
+            email: String(row.email || ''),
+            address: String(row.address || ''),
+            status: (row.status === 'suspended' || row.status === 'pending') ? row.status : 'active',
+            planId: String(row.plan_id || row.planId || 'plan_pro'),
+            ownerId: String(row.owner_id || row.ownerId || ''),
+            googleReviewUrl: row.google_review_url || row.googleReviewUrl || undefined,
+            logoUrl: row.logo_url || row.logoUrl || undefined,
+            currency: row.currency === 'BRL' ? 'BRL' : 'EUR',
+            createdAt: row.created_at || row.createdAt || new Date().toISOString(),
+            password: row.password || 'reputa123'
+          }));
+          setDirectBusinesses(mapped);
+        }
+      } catch (err) {
+        console.error('[SuperAdmin] Erro ao buscar businesses:', err);
+      }
+    };
+
+    fetchAllGlobalBusinesses();
+    return () => {
+      isMounted = false;
+    };
+  }, [activeTab, businesses.length]);
+
+  const effectiveBusinesses = useMemo(() => {
+    if (businesses.length >= directBusinesses.length && businesses.length > 0) {
+      return businesses;
+    }
+    return directBusinesses.length > 0 ? directBusinesses : businesses;
+  }, [businesses, directBusinesses]);
 
   // Admin Change Password States
   const [newAdminPassword, setNewAdminPassword] = useState('');
@@ -267,10 +328,10 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
 
   // Global Metrics (Section 7)
   const globalStats = useMemo(() => {
-    const totalBusinesses = businesses.length;
-    const activeBusinesses = businesses.filter((b) => b.status === 'active').length;
-    const pendingBusinesses = businesses.filter((b) => b.status === 'pending').length;
-    const suspendedBusinesses = businesses.filter((b) => b.status === 'suspended').length;
+    const totalBusinesses = effectiveBusinesses.length;
+    const activeBusinesses = effectiveBusinesses.filter((b) => b.status === 'active').length;
+    const pendingBusinesses = effectiveBusinesses.filter((b) => b.status === 'pending').length;
+    const suspendedBusinesses = effectiveBusinesses.filter((b) => b.status === 'suspended').length;
     const totalReviews = allReviews.length;
     const totalCustomers = allCustomers.length;
     const totalCases = allRecoveryCases.length;
@@ -293,16 +354,16 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
       resolvedCases,
       avgGlobalRating
     };
-  }, [businesses, allReviews, allCustomers, allRecoveryCases]);
+  }, [effectiveBusinesses, allReviews, allCustomers, allRecoveryCases]);
 
   const filteredBusinesses = useMemo(() => {
-    return businesses.filter(
+    return effectiveBusinesses.filter(
       (b) =>
         b.name.toLowerCase().includes(searchBiz.toLowerCase()) ||
         (b.email || '').toLowerCase().includes(searchBiz.toLowerCase()) ||
         b.slug.toLowerCase().includes(searchBiz.toLowerCase())
     );
-  }, [businesses, searchBiz]);
+  }, [effectiveBusinesses, searchBiz]);
 
   const handleCreateBusiness = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -964,7 +1025,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
 
       {/* TAB 4: NFC PLATES MANAGEMENT */}
       {activeTab === 'nfc' && (
-        <NfcPlatesManagement businesses={businesses} />
+        <NfcPlatesManagement businesses={effectiveBusinesses} />
       )}
 
       {/* Modal: Criar Comerciante (Section 1 requirement) */}

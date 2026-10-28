@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { UserRole, Business, UserProfile } from '../types';
-import { subscribeBusinesses, updateBusiness } from '../lib/dbService';
+import { subscribeBusinesses, updateBusiness, getLocalBusinesses } from '../lib/dbService';
 
 export interface AppUser {
   uid: string;
@@ -41,9 +41,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return null;
   });
 
-  const [currentRole, setCurrentRole] = useState<UserRole>('merchant');
-  const [businesses, setBusinesses] = useState<Business[]>([]);
-  const [selectedBusiness, setSelectedBusiness] = useState<Business | null>(null);
+  const [currentRole, setCurrentRole] = useState<UserRole>(() => {
+    try {
+      const stored = localStorage.getItem(SESSION_USER_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed?.email && ADMIN_EMAILS.some((e) => e.toLowerCase() === String(parsed.email).toLowerCase().trim())) {
+          return 'super_admin';
+        }
+      }
+    } catch {}
+    return 'merchant';
+  });
+  const [businesses, setBusinesses] = useState<Business[]>(() => getLocalBusinesses());
+  const [selectedBusiness, setSelectedBusiness] = useState<Business | null>(() => {
+    const initial = getLocalBusinesses();
+    return initial.length > 0 ? initial[0] : null;
+  });
   const [loading, setLoading] = useState<boolean>(false);
 
   const saveUserSession = (user: AppUser | null) => {
@@ -95,17 +109,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  // Listen to businesses via Supabase
+  // Listen to global businesses list via Supabase (unrestricted for Super Admin)
   useEffect(() => {
     const unsubscribe = subscribeBusinesses((bizList) => {
-      if (bizList && bizList.length > 0) {
-        setBusinesses(bizList);
+      const safeList = Array.isArray(bizList) ? bizList : [];
+      setBusinesses(safeList);
+      if (safeList.length > 0) {
         setSelectedBusiness((prev) => {
           if (currentUser?.email) {
             const userEmail = currentUser.email.toLowerCase().trim();
             const isAdmin = ADMIN_EMAILS.some((e) => e.toLowerCase() === userEmail);
             if (!isAdmin) {
-              const matched = bizList.find((b) => {
+              const matched = safeList.find((b) => {
                 const bEmail = (b.email || '').toLowerCase().trim();
                 const bSlug = (b.slug || '').toLowerCase().trim();
                 const bId = (b.id || '').toLowerCase().trim();
@@ -116,14 +131,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   (bSlug && userEmail.includes(bSlug))
                 );
               });
-              return matched || prev || bizList[0];
+              return matched || prev || safeList[0];
             }
           }
-          if (!prev) return bizList[0];
-          const found = bizList.find(
+          if (!prev) return safeList[0];
+          const found = safeList.find(
             (b) => b.id === prev.id || (prev.slug && b.slug.toLowerCase() === prev.slug.toLowerCase())
           );
-          return found || prev || bizList[0];
+          return found || prev || safeList[0];
         });
       }
     });

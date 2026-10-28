@@ -415,11 +415,6 @@ export async function getHighestExistingPlateNumber(currentPlates: NfcPlate[] = 
   scanList(getLocalNfcCache());
 
   try {
-    const { data: qrRows } = await supabase.from('qr_plates').select('qr_code_id');
-    if (Array.isArray(qrRows)) scanList(qrRows);
-  } catch {}
-
-  try {
     const { data: nfcRows } = await supabase.from('nfc_plates').select('id');
     if (Array.isArray(nfcRows)) scanList(nfcRows);
   } catch {}
@@ -447,8 +442,8 @@ export async function getNfcPlateById(id: string): Promise<NfcPlate | null> {
 
 /**
  * SAFE BATCH GENERATOR:
- * 1. Queries qr_plates & nfc_plates first to find the highest existing plate number (e.g. #005 -> starts at #006).
- * 2. NEVER overwrites, modifies, or unlinks plates that already have tenant_id / merchant_id assigned.
+ * 1. Queries nfc_plates first to find the highest existing plate number (e.g. #005 -> starts at #006).
+ * 2. NEVER overwrites, modifies, or unlinks plates that already have merchant_id assigned.
  */
 export async function createNfcPlatesBatch(
   options: CreateNfcBatchOptions
@@ -480,7 +475,6 @@ export async function createNfcPlatesBatch(
   const now = new Date().toISOString();
   const newPlates: NfcPlate[] = [];
   const nfcRowsToInsert: any[] = [];
-  const qrRowsToInsert: any[] = [];
 
   let currentNum = safeStartNumber;
   while (newPlates.length < quantity) {
@@ -507,12 +501,6 @@ export async function createNfcPlatesBatch(
         scan_count: 0,
         created_at: now,
         updated_at: now
-      });
-      qrRowsToInsert.push({
-        qr_code_id: `QRC${String(currentNum).padStart(4, '0')}`,
-        tenant_id: null,
-        status: 'inactive',
-        redirect_url: null
       });
     }
     currentNum++;
@@ -546,19 +534,6 @@ export async function createNfcPlatesBatch(
       onConflict: 'id',
       ignoreDuplicates: true
     });
-  } catch {}
-
-  try {
-    const { error: qrErr } = await supabase.from('qr_plates').upsert(qrRowsToInsert, {
-      onConflict: 'qr_code_id',
-      ignoreDuplicates: true
-    });
-    if (qrErr) {
-      await supabase.from('qr_plates').upsert(
-        qrRowsToInsert.map((r) => ({ qr_code_id: r.qr_code_id, tenant_id: null })),
-        { onConflict: 'qr_code_id', ignoreDuplicates: true }
-      );
-    }
   } catch {}
 
   if (typeof window !== 'undefined') {

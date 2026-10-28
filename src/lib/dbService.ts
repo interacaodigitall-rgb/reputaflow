@@ -117,7 +117,6 @@ function saveCachedBusinesses(list: Business[]) {
 }
 
 function mergeBusinessLists(...lists: Business[][]): Business[] {
-  const deleted = readDeletedBusinessKeys();
   const byCanonicalKey = new Map<string, Business>();
 
   for (const list of lists) {
@@ -128,15 +127,6 @@ function mergeBusinessLists(...lists: Business[][]): Business[] {
       const cleanSlug = String(item.slug || slugify(item.name)).toLowerCase().trim();
       const cleanNameKey = normalizeKey(item.name);
       if (!cleanId) continue;
-
-      if (
-        deleted.has(cleanId.toLowerCase()) ||
-        deleted.has(normalizeKey(cleanId)) ||
-        (cleanSlug && (deleted.has(cleanSlug) || deleted.has(normalizeKey(cleanSlug)))) ||
-        (cleanNameKey && deleted.has(cleanNameKey))
-      ) {
-        continue;
-      }
 
       // Match existing entry by ID, slug, or normalized name so local & DB records never duplicate
       let matchKey = cleanSlug || cleanNameKey || cleanId;
@@ -352,10 +342,9 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
   callback(runtimeBusinesses);
 
   const fetchMerchants = async () => {
-    const deleted = readDeletedBusinessKeys();
     const cachedLocal = readCachedBusinesses();
 
-    // 1. PRIMARY SINGLE SOURCE OF TRUTH: SUPABASE
+    // 1. PRIMARY SINGLE SOURCE OF TRUTH: SUPABASE (No owner_id filter, no local deleted filter)
     try {
       const { data: supaRows, error: supaErr } = await supabase
         .from('businesses')
@@ -365,14 +354,12 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
       if (!supaErr && Array.isArray(supaRows) && supaRows.length > 0) {
         const supaMapped = supaRows
           .map(mapBusinessRow)
-          .filter(
-            (b) =>
-              b &&
-              b.id &&
-              !deleted.has(b.id.toLowerCase()) &&
-              !deleted.has((b.slug || '').toLowerCase()) &&
-              !deleted.has(normalizeKey(b.name || ''))
-          );
+          .filter((b) => Boolean(b && b.id && b.name));
+
+        // Unmark any live Supabase business from stale local deleted keys
+        supaMapped.forEach((sb) => {
+          unmarkBusinessKeyDeleted(sb.id, sb.slug, sb.name);
+        });
 
         // If local browser had richer fields for any existing merchant in Supabase (or SBK BARBERSHOP), merge and sync up to Supabase
         const enrichedList = supaMapped.map((sb) => {
@@ -417,7 +404,6 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
           return mergedBiz;
         });
 
-        // Deduplicate by slug/name strictly from Supabase truth (never resurrect deleted local ghosts)
         const dedupedTruth = mergeBusinessLists(enrichedList);
         runtimeBusinesses = dedupedTruth;
         saveCachedBusinesses(dedupedTruth);
@@ -750,11 +736,7 @@ export async function addBusiness(data: Omit<Business, 'id' | 'createdAt' | 'upd
   };
 
   try {
-    const insertedBiz = await insertBusinessToSupabaseAdaptive('businesses', payload);
-    if (!insertedBiz) {
-      await insertBusinessToSupabaseAdaptive('tenants', payload);
-      await insertBusinessToSupabaseAdaptive('establishments', payload);
-    }
+    await insertBusinessToSupabaseAdaptive('businesses', payload);
   } catch (err: any) {
     console.warn('[Supabase addBusiness caught]:', err);
   }
@@ -857,7 +839,7 @@ export async function updateBusiness(id: string, data: Partial<Business>): Promi
     console.warn('[updateBusiness API sync warning]:', apiErr);
   }
 
-  // 3. Persistência no Supabase com remoção adaptativa de colunas inexistentes
+  // 3. Persistência no Supabase (tabela unificada `businesses`)
   try {
     let supaUpdates = { ...dbUpdates };
     for (let attempt = 0; attempt < 6; attempt++) {
@@ -877,13 +859,6 @@ export async function updateBusiness(id: string, data: Partial<Business>): Promi
       await supabase.from('businesses').update(supaUpdates).eq('slug', existingSlug);
       break;
     }
-
-    try {
-      await supabase.from('tenants').update(supaUpdates).or(`id.eq.${establishmentId},slug.eq.${existingSlug}`);
-    } catch (_) {}
-    try {
-      await supabase.from('establishments').update(supaUpdates).or(`id.eq.${establishmentId},slug.eq.${existingSlug}`);
-    } catch (_) {}
   } catch (err) {
     console.error('[Supabase updateBusiness catch]:', err);
   }
@@ -973,28 +948,32 @@ export async function deleteBusiness(id: string): Promise<void> {
     console.warn('[deleteBusiness API warning]:', apiErr);
   }
 
-  // 6. Delete from Supabase across all business & plate tables
-  for (const tbl of ['businesses', 'tenants', 'establishments']) {
-    try {
-      await supabase.from(tbl).delete().eq('id', cleanId);
-      if (targetSlug) {
-        await supabase.from(tbl).delete().eq('slug', targetSlug);
-      }
-      if (targetName) {
-        await supabase.from(tbl).delete().eq('name', targetName);
-      }
-    } catch {}
-  }
+  // 6. Delete from Supabase (`businesses` and dependent tables + unlink `nfc_plates`)
+  try {
+    await supabase.from('reviews').delete().eq('business_id', cleanId);
+    await supabase.from('feedback').delete().eq('business_id', cleanId);
+    await supabase.from('recovery_cases').delete().eq('business_id', cleanId);
+    await supabase.from('customers').delete().eq('business_id', cleanId);
+    await supabase.from('businesses').delete().eq('id', cleanId);
+    if (targetSlug) {
+      await supabase.from('businesses').delete().eq('slug', targetSlug);
+    }
+    if (targetName) {
+      await supabase.from('businesses').delete().eq('name', targetName);
+    }
+  } catch {}
 
   try {
     await supabase
       .from('nfc_plates')
       .update({ status: 'inactive', merchant_id: null, redirect_url: null })
       .eq('merchant_id', cleanId);
-    await supabase
-      .from('qr_plates')
-      .update({ status: 'inactive', tenant_id: null, redirect_url: null })
-      .eq('tenant_id', cleanId);
+    if (targetSlug) {
+      await supabase
+        .from('nfc_plates')
+        .update({ status: 'inactive', merchant_id: null, redirect_url: null })
+        .eq('redirect_url', `/r/${encodeURIComponent(targetSlug)}`);
+    }
   } catch {}
 }
 

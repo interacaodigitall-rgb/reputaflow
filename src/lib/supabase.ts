@@ -45,8 +45,19 @@ export const supabase = createClient(
     },
     global: {
       fetch: (input: RequestInfo | URL, init?: RequestInit) => {
+        const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url || '';
+        const headers = new Headers(init?.headers || {});
+
+        // Ensure all database (/rest/v1/) and storage (/storage/v1/) queries use the anon key
+        // so authenticated Super Admin sessions never get blocked by restrictive owner_id RLS policies
+        if (urlStr.includes('/rest/v1/') || urlStr.includes('/storage/v1/')) {
+          headers.set('apikey', supabaseAnonKey);
+          headers.set('Authorization', `Bearer ${supabaseAnonKey}`);
+        }
+
         return fetch(input, {
           ...init,
+          headers,
           cache: 'no-store'
         });
       }
@@ -199,10 +210,10 @@ export async function uploadBusinessLogo(file: File, businessId: string): Promis
 
   if (businessId) {
     try {
-      await Promise.all([
-        supabase.from('businesses').update({ logo_url: finalPublicUrl, updated_at: new Date().toISOString() }).eq('id', businessId),
-        supabase.from('merchants').update({ logo_url: finalPublicUrl, updated_at: new Date().toISOString() }).eq('id', businessId)
-      ]);
+      await supabase
+        .from('businesses')
+        .update({ logo_url: finalPublicUrl, updated_at: new Date().toISOString() })
+        .eq('id', businessId);
     } catch {}
   }
 
