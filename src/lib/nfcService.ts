@@ -355,63 +355,42 @@ export function mapNfcRow(row: any, businesses: Business[] = []): NfcPlate {
  */
 export async function getNfcPlates(businesses: Business[] = []): Promise<NfcPlate[]> {
   const allBiz = businesses.length > 0 ? businesses : getLocalBusinesses();
+
+  // 1. PRIMARY SINGLE SOURCE OF TRUTH: SUPABASE
+  try {
+    const { data, error } = await supabase.from('nfc_plates').select('*').order('id');
+    if (!error && Array.isArray(data) && data.length > 0) {
+      const supabasePlates = data.map((r) => mapNfcRow(r, allBiz));
+      const sanitized = deduplicateAndSanitizePlates(supabasePlates, allBiz);
+      saveLocalNfcCache(sanitized);
+      return sanitized;
+    }
+  } catch {}
+
+  // 2. Fallback if Supabase is unreachable: Server API + CloudSync + Local Cache
   const localCache = getLocalNfcCache();
   let serverPlates: NfcPlate[] = [];
   let cloudPlates: NfcPlate[] = [];
-  let supabasePlates: NfcPlate[] = [];
-  let supabaseQrPlates: NfcPlate[] = [];
 
-  // 1. Try Server REST API
-  const serverPromise = (async () => {
-    try {
-      const res = await fetch('/api/nfc', { cache: 'no-store' }).catch(() => null);
-      const contentType = res?.headers?.get('content-type') || '';
-      if (res && res.ok && contentType.includes('application/json')) {
-        const data = await res.json();
-        if (Array.isArray(data)) {
-          serverPlates = data.map((r) => mapNfcRow(r, allBiz));
-        }
+  try {
+    const res = await fetch('/api/nfc', { cache: 'no-store' }).catch(() => null);
+    const contentType = res?.headers?.get('content-type') || '';
+    if (res && res.ok && contentType.includes('application/json')) {
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        serverPlates = data.map((r) => mapNfcRow(r, allBiz));
       }
-    } catch {}
-  })();
+    }
+  } catch {}
 
-  // 2. Try Global Cloud Sync
-  const cloudPromise = (async () => {
-    try {
-      const cloudData = await fetchGlobalCloudData();
-      if (cloudData && Array.isArray(cloudData.nfcPlates) && cloudData.nfcPlates.length > 0) {
-        cloudPlates = cloudData.nfcPlates.map((r) => mapNfcRow(r, allBiz));
-      }
-    } catch {}
-  })();
+  try {
+    const cloudData = await fetchGlobalCloudData();
+    if (cloudData && Array.isArray(cloudData.nfcPlates) && cloudData.nfcPlates.length > 0) {
+      cloudPlates = cloudData.nfcPlates.map((r) => mapNfcRow(r, allBiz));
+    }
+  } catch {}
 
-  // 3. Try Supabase (both nfc_plates and qr_plates)
-  const supabasePromise = (async () => {
-    try {
-      const { data, error } = await supabase.from('nfc_plates').select('*');
-      if (!error && Array.isArray(data) && data.length > 0) {
-        supabasePlates = data.map((r) => mapNfcRow(r, allBiz));
-      }
-    } catch {}
-    try {
-      const { data: qrData, error: qrErr } = await supabase.from('qr_plates').select('*');
-      if (!qrErr && Array.isArray(qrData) && qrData.length > 0) {
-        supabaseQrPlates = qrData.map((r) => mapNfcRow(r, allBiz));
-      }
-    } catch {}
-  })();
-
-  await Promise.all([serverPromise, cloudPromise, supabasePromise]);
-
-  const combined = [
-    ...INITIAL_NFC_PLATES,
-    ...supabaseQrPlates,
-    ...supabasePlates,
-    ...cloudPlates,
-    ...serverPlates,
-    ...localCache
-  ];
-
+  const combined = [...INITIAL_NFC_PLATES, ...cloudPlates, ...serverPlates, ...localCache];
   const merged = deduplicateAndSanitizePlates(combined, allBiz);
   saveLocalNfcCache(merged);
   return merged;
@@ -695,17 +674,9 @@ export async function linkNfcPlate(
     });
   } catch {}
 
-  // 4. Persist to Supabase (unlinking any old plate for this merchant first, then upserting the new one)
+  // 4. Persist to Supabase (unlinking any old plate for this merchant first, then upserting the single canonical plate ID)
   const digits = canonicalId.replace(/\D/g, '').replace(/^0+/, '');
-  const codeVariations = Array.from(
-    new Set(
-      [
-        canonicalId,
-        digits ? digits.padStart(3, '0') : '',
-        digits ? `QRC${digits.padStart(4, '0')}` : ''
-      ].filter(Boolean)
-    )
-  );
+  const legacyQrcId = digits ? `QRC${digits.padStart(4, '0')}` : '';
   const targetTenantId = resolvedMerchantId || resolvedSlug || null;
 
   if (targetTenantId) {
@@ -715,56 +686,37 @@ export async function linkNfcPlate(
         .update({ status: 'inactive', merchant_id: null, redirect_url: null, updated_at: now })
         .eq('merchant_id', targetTenantId);
     } catch {}
-    try {
-      await supabase
-        .from('qr_plates')
-        .update({ tenant_id: null, status: 'inactive', redirect_url: null })
-        .eq('tenant_id', targetTenantId);
-    } catch {}
-  }
-
-  for (const codeVar of codeVariations) {
-    try {
-      await supabase
-        .from('nfc_plates')
-        .upsert(
-          {
-            id: codeVar,
-            status: 'active',
-            merchant_id: targetTenantId,
-            redirect_url: cleanRedirect,
-            updated_at: now
-          },
-          { onConflict: 'id' }
-        );
-    } catch {}
-
-    try {
-      const { error: qrErr } = await supabase
-        .from('qr_plates')
-        .upsert(
-          {
-            qr_code_id: codeVar.toUpperCase(),
-            tenant_id: targetTenantId,
-            status: 'active',
-            redirect_url: cleanRedirect
-          },
-          { onConflict: 'qr_code_id' }
-        );
-
-      if (qrErr) {
+    if (resolvedSlug) {
+      try {
         await supabase
-          .from('qr_plates')
-          .upsert(
-            {
-              qr_code_id: codeVar.toUpperCase(),
-              tenant_id: targetTenantId
-            },
-            { onConflict: 'qr_code_id' }
-          );
-      }
+          .from('nfc_plates')
+          .update({ status: 'inactive', merchant_id: null, redirect_url: null, updated_at: now })
+          .eq('redirect_url', cleanRedirect);
+      } catch {}
+    }
+  }
+
+  // Delete any legacy QRC000X duplicate entry so only canonical 3-digit ID (001, 002...) exists
+  if (legacyQrcId && legacyQrcId !== canonicalId) {
+    try {
+      await supabase.from('nfc_plates').delete().eq('id', legacyQrcId);
     } catch {}
   }
+
+  try {
+    await supabase
+      .from('nfc_plates')
+      .upsert(
+        {
+          id: canonicalId,
+          status: 'active',
+          merchant_id: targetTenantId,
+          redirect_url: cleanRedirect,
+          updated_at: now
+        },
+        { onConflict: 'id' }
+      );
+  } catch {}
 
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('reputaflow_nfc_sync'));

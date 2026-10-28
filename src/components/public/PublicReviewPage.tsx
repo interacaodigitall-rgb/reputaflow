@@ -27,6 +27,10 @@ import {
 import { extractReviewSlug } from '../../lib/urlHelper';
 import { BusinessLogo } from '../common/BusinessLogo';
 
+export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
+export const revalidate = 0;
+
 interface PublicReviewPageProps {
   slug?: string;
   businessOverride?: Business | null;

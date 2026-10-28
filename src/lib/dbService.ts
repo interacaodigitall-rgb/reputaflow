@@ -346,33 +346,106 @@ function createSafeTableSubscription(tableName: string, onUpdate: () => void): (
 export function subscribeBusinesses(callback: (businesses: Business[]) => void) {
   let isSubscribed = true;
 
-  // Immediately emit current merged state (localStorage + baseline) so UI never flashes empty
+  // Emit initial state while live Supabase fetch runs
   const initialMerged = mergeBusinessLists(readCachedBusinesses(), runtimeBusinesses, [...INITIAL_BIZ]);
   runtimeBusinesses = initialMerged;
   callback(runtimeBusinesses);
 
   const fetchMerchants = async () => {
+    const deleted = readDeletedBusinessKeys();
+    const cachedLocal = readCachedBusinesses();
+
+    // 1. PRIMARY SINGLE SOURCE OF TRUTH: SUPABASE
+    try {
+      const { data: supaRows, error: supaErr } = await supabase
+        .from('businesses')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!supaErr && Array.isArray(supaRows) && supaRows.length > 0) {
+        const supaMapped = supaRows
+          .map(mapBusinessRow)
+          .filter(
+            (b) =>
+              b &&
+              b.id &&
+              !deleted.has(b.id.toLowerCase()) &&
+              !deleted.has((b.slug || '').toLowerCase()) &&
+              !deleted.has(normalizeKey(b.name || ''))
+          );
+
+        // If local browser had richer fields for any existing merchant in Supabase (or SBK BARBERSHOP), merge and sync up to Supabase
+        const enrichedList = supaMapped.map((sb) => {
+          const localMatch = cachedLocal.find(
+            (lb) =>
+              lb.id === sb.id ||
+              (lb.slug && lb.slug.toLowerCase() === sb.slug.toLowerCase()) ||
+              normalizeKey(lb.name) === normalizeKey(sb.name)
+          );
+          if (!localMatch) return sb;
+
+          const needsPatch =
+            (localMatch.googleReviewUrl && !sb.googleReviewUrl) ||
+            (localMatch.phone && !sb.phone) ||
+            (localMatch.address && !sb.address) ||
+            (localMatch.logoUrl && !sb.logoUrl);
+
+          const mergedBiz: Business = {
+            ...sb,
+            logoUrl: sb.logoUrl || localMatch.logoUrl || '',
+            googleReviewUrl: sb.googleReviewUrl || localMatch.googleReviewUrl || '',
+            phone: sb.phone || localMatch.phone || '',
+            address: sb.address || localMatch.address || '',
+            email: sb.email || localMatch.email || ''
+          };
+
+          if (needsPatch) {
+            supabase
+              .from('businesses')
+              .update({
+                logo_url: mergedBiz.logoUrl || null,
+                google_review_url: mergedBiz.googleReviewUrl || null,
+                phone: mergedBiz.phone || '',
+                address: mergedBiz.address || '',
+                email: mergedBiz.email || '',
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', sb.id)
+              .then(() => {});
+          }
+
+          return mergedBiz;
+        });
+
+        // Deduplicate by slug/name strictly from Supabase truth (never resurrect deleted local ghosts)
+        const dedupedTruth = mergeBusinessLists(enrichedList);
+        runtimeBusinesses = dedupedTruth;
+        saveCachedBusinesses(dedupedTruth);
+
+        if (isSubscribed) {
+          callback(runtimeBusinesses);
+        }
+        return;
+      }
+    } catch (supaErr) {
+      console.warn('[subscribeBusinesses Supabase primary check]:', supaErr);
+    }
+
+    // 2. FALLBACK IF SUPABASE IS OFFLINE: Server API + CloudSync
     let apiBusinesses: Business[] = [];
     let cloudBusinesses: Business[] = [];
-    let supabaseBusinesses: Business[] = [];
-    let apiAvailable = false;
 
-    // 1. Try Server REST API (/api/businesses) safely checking content-type for JSON
     try {
       const apiRes = await fetch('/api/businesses', { cache: 'no-store' }).catch(() => null);
       const contentType = apiRes?.headers?.get('content-type') || '';
       if (apiRes && apiRes.ok && contentType.includes('application/json')) {
         const apiData = await apiRes.json();
         if (Array.isArray(apiData)) {
-          apiAvailable = true;
           apiBusinesses = apiData.map(mapBusinessRow);
         }
       }
-    } catch (apiErr) {
-      console.warn('[subscribeBusinesses API check]:', apiErr);
-    }
+    } catch {}
 
-    // 2. Try Global Cloud Sync (works across Vercel, mobile & desktop)
     try {
       const cloudData = await fetchGlobalCloudData();
       if (cloudData && Array.isArray(cloudData.businesses) && cloudData.businesses.length > 0) {
@@ -380,68 +453,14 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
       }
     } catch {}
 
-    // 3. Try Supabase ('businesses' and fallback 'tenants' / 'establishments')
-    try {
-      const { data, error } = await supabase.from('businesses').select('*');
-      if (!error && Array.isArray(data) && data.length > 0) {
-        supabaseBusinesses = data.map(mapBusinessRow);
-      } else {
-        const { data: tenantData } = await supabase.from('tenants').select('*');
-        if (Array.isArray(tenantData) && tenantData.length > 0) {
-          supabaseBusinesses = tenantData.map(mapBusinessRow);
-        }
-      }
-    } catch (supaErr) {
-      console.warn('[subscribeBusinesses Supabase check]:', supaErr);
-    }
-
-    // 4. Merge all sources: localStorage cache + current memory + API + CloudSync + Supabase + INITIAL_BIZ
-    const cached = readCachedBusinesses();
-    const merged = mergeBusinessLists(
-      cached,
-      runtimeBusinesses,
+    const fallbackMerged = mergeBusinessLists(
       apiBusinesses,
       cloudBusinesses,
-      supabaseBusinesses,
+      cachedLocal,
       [...INITIAL_BIZ]
     );
-
-    // 5. Auto-sync any locally saved business (such as SBK BARBERSHOP) or richer local fields into Server DB, CloudSync & Supabase
-    if (merged.length > 0) {
-      for (const biz of merged) {
-        const serverMatch = apiBusinesses.find(
-          (ab) =>
-            ab.id === biz.id ||
-            (ab.slug && ab.slug.toLowerCase() === biz.slug.toLowerCase()) ||
-            normalizeKey(ab.name) === normalizeKey(biz.name)
-        );
-        const needsServerSync =
-          apiAvailable &&
-          (!serverMatch ||
-            (biz.logoUrl && !serverMatch.logoUrl) ||
-            (biz.googleReviewUrl && !serverMatch.googleReviewUrl) ||
-            (biz.phone && !serverMatch.phone));
-
-        if (needsServerSync) {
-          fetch('/api/businesses', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(biz)
-          }).catch(() => {});
-        }
-      }
-
-      const cloudSlugs = new Set(cloudBusinesses.map((b) => (b.slug || '').toLowerCase()));
-      const hasMissingInCloud = merged.some(
-        (b) => !cloudSlugs.has((b.slug || '').toLowerCase())
-      );
-      if (hasMissingInCloud) {
-        pushGlobalCloudData({ businesses: merged }).catch(() => {});
-      }
-    }
-
-    runtimeBusinesses = merged;
-    saveCachedBusinesses(merged);
+    runtimeBusinesses = fallbackMerged;
+    saveCachedBusinesses(fallbackMerged);
     if (isSubscribed) {
       callback(runtimeBusinesses);
     }
@@ -453,9 +472,7 @@ export function subscribeBusinesses(callback: (businesses: Business[]) => void) 
   const interval = setInterval(fetchMerchants, 4000);
 
   const handleCustomEvent = () => {
-    const merged = mergeBusinessLists(readCachedBusinesses(), runtimeBusinesses);
-    runtimeBusinesses = merged;
-    if (isSubscribed) callback(runtimeBusinesses);
+    fetchMerchants();
   };
   if (typeof window !== 'undefined') {
     window.addEventListener('reputaflow_live_sync', handleCustomEvent);
@@ -478,7 +495,27 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
   const normSlug = normalizeKey(clean);
   if (!normSlug) return null;
 
-  // 1. Check Server REST API (/api/businesses/:slug) with cache-busting for fresh multi-device resolution
+  // 1. PRIMARY SINGLE SOURCE OF TRUTH: SUPABASE (Fresh query with no-store)
+  try {
+    const { data, error } = await supabase.from('businesses').select('*');
+    if (!error && Array.isArray(data) && data.length > 0) {
+      const mappedList = data.map(mapBusinessRow);
+      const match = mappedList.find(
+        (b) =>
+          normalizeKey(b.slug) === normSlug ||
+          normalizeKey(b.id) === normSlug ||
+          normalizeKey(b.ownerId || '') === normSlug ||
+          normalizeKey(b.name) === normSlug
+      );
+      if (match) {
+        runtimeBusinesses = mergeBusinessLists(mappedList);
+        saveCachedBusinesses(runtimeBusinesses);
+        return match;
+      }
+    }
+  } catch {}
+
+  // 2. Fallback: Server REST API (/api/businesses/:slug)
   try {
     const apiRes = await fetch(`/api/businesses/${encodeURIComponent(clean)}?_v=${Date.now()}`, {
       cache: 'no-store'
@@ -488,14 +525,12 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
       const apiBiz = await apiRes.json();
       if (apiBiz && apiBiz.id) {
         const mapped = mapBusinessRow(apiBiz);
-        runtimeBusinesses = mergeBusinessLists([mapped], runtimeBusinesses, readCachedBusinesses());
-        saveCachedBusinesses(runtimeBusinesses);
         return mapped;
       }
     }
   } catch {}
 
-  // 2. Check Global Cloud Sync (works across Vercel, mobile & desktop)
+  // 3. Fallback: Global Cloud Sync
   try {
     const cloudData = await fetchGlobalCloudData(true);
     if (cloudData && Array.isArray(cloudData.businesses)) {
@@ -509,39 +544,13 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
             normalizeKey(b.name) === normSlug
         );
       if (cloudMatch) {
-        runtimeBusinesses = mergeBusinessLists([cloudMatch], runtimeBusinesses, readCachedBusinesses());
-        saveCachedBusinesses(runtimeBusinesses);
         return cloudMatch;
       }
     }
   } catch {}
 
-  // 3. Check Supabase across 'businesses', 'tenants', and 'establishments' using safe .select('*')
-  const tables = ['businesses', 'tenants', 'establishments'];
-  for (const tbl of tables) {
-    try {
-      const { data, error } = await supabase.from(tbl).select('*');
-      if (!error && Array.isArray(data) && data.length > 0) {
-        const match = data
-          .map(mapBusinessRow)
-          .find(
-            (b) =>
-              normalizeKey(b.slug) === normSlug ||
-              normalizeKey(b.id) === normSlug ||
-              normalizeKey(b.ownerId || '') === normSlug ||
-              normalizeKey(b.name) === normSlug
-          );
-        if (match) {
-          runtimeBusinesses = mergeBusinessLists([match], runtimeBusinesses, readCachedBusinesses());
-          saveCachedBusinesses(runtimeBusinesses);
-          return match;
-        }
-      }
-    } catch {}
-  }
-
-  // 4. Check merged local & runtime businesses strictly matching normSlug
-  const mergedLocal = mergeBusinessLists(readCachedBusinesses(), runtimeBusinesses, [...INITIAL_BIZ]);
+  // 4. Fallback: Local runtime state
+  const mergedLocal = mergeBusinessLists(runtimeBusinesses, readCachedBusinesses(), [...INITIAL_BIZ]);
   const localMatch = mergedLocal.find(
     (b) =>
       normalizeKey(b.slug) === normSlug ||
@@ -549,9 +558,7 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
       normalizeKey(b.ownerId || '') === normSlug ||
       normalizeKey(b.name) === normSlug
   );
-  if (localMatch) return localMatch;
-
-  return null;
+  return localMatch || null;
 }
 
 export async function getBusinessById(id: string): Promise<Business | null> {
@@ -1013,7 +1020,27 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
 
   const fetchReviews = async () => {
     try {
-      // 1. Try Server API (/api/reviews)
+      // 1. PRIMARY SINGLE SOURCE OF TRUTH: SUPABASE
+      let query = supabase.from('reviews').select('*').order('created_at', { ascending: false });
+      if (businessId) {
+        query = query.eq('business_id', businessId);
+      }
+      const { data, error } = await query;
+      if (!error && Array.isArray(data)) {
+        const mapped = data.map(mapReviewRow);
+        if (!businessId) {
+          runtimeReviews = mapped;
+        } else {
+          const others = runtimeReviews.filter((r) => !isMatchingBusiness(r.businessId, businessId));
+          runtimeReviews = [...mapped, ...others];
+        }
+        if (isSubscribed) {
+          callback(mapped);
+        }
+        return;
+      }
+
+      // 2. Fallback: Server API (/api/reviews)
       const url = '/api/reviews' + (businessId ? `?businessId=${encodeURIComponent(businessId)}` : '');
       const apiRes = await fetch(url, { cache: 'no-store' }).catch(() => null);
       const contentType = apiRes?.headers?.get('content-type') || '';
@@ -1035,27 +1062,6 @@ export function subscribeReviews(businessId: string | null, callback: (reviews: 
           }
           return;
         }
-      }
-
-      // 2. Try Supabase
-      let query = supabase.from('reviews').select('*').order('created_at', { ascending: false });
-      if (businessId) {
-        query = query.eq('business_id', businessId);
-      }
-      const { data, error } = await query;
-      if (!error && Array.isArray(data)) {
-        const mapped = data.map(mapReviewRow);
-        if (mapped.length > 0) {
-          const existingIds = new Set(mapped.map((r) => r.id));
-          runtimeReviews = [...mapped, ...runtimeReviews.filter((r) => !existingIds.has(r.id))];
-        }
-        if (isSubscribed) {
-          const filtered = businessId
-            ? runtimeReviews.filter((r) => isMatchingBusiness(r.businessId, businessId))
-            : runtimeReviews;
-          callback(filtered);
-        }
-        return;
       }
     } catch (err) {
       console.warn('[subscribeReviews notice]:', err);
@@ -1259,7 +1265,27 @@ export function subscribeRecoveryCases(businessId: string | null, callback: (cas
 
   const fetchCases = async () => {
     try {
-      // 1. Try Server API (/api/recovery-cases)
+      // 1. PRIMARY SINGLE SOURCE OF TRUTH: SUPABASE
+      let query = supabase.from('recovery_cases').select('*').order('created_at', { ascending: false });
+      if (businessId) {
+        query = query.eq('business_id', businessId);
+      }
+      const { data, error } = await query;
+      if (!error && Array.isArray(data)) {
+        const mapped = data.map(mapRecoveryRow);
+        if (!businessId) {
+          runtimeRecoveryCases = mapped;
+        } else {
+          const others = runtimeRecoveryCases.filter((c) => !isMatchingBusiness(c.businessId, businessId));
+          runtimeRecoveryCases = [...mapped, ...others];
+        }
+        if (isSubscribed) {
+          callback(mapped);
+        }
+        return;
+      }
+
+      // 2. Fallback: Server API (/api/recovery-cases)
       const url = '/api/recovery-cases' + (businessId ? `?businessId=${encodeURIComponent(businessId)}` : '');
       const apiRes = await fetch(url, { cache: 'no-store' }).catch(() => null);
       const contentType = apiRes?.headers?.get('content-type') || '';
@@ -1281,27 +1307,6 @@ export function subscribeRecoveryCases(businessId: string | null, callback: (cas
           }
           return;
         }
-      }
-
-      // 2. Try Supabase
-      let query = supabase.from('recovery_cases').select('*').order('created_at', { ascending: false });
-      if (businessId) {
-        query = query.eq('business_id', businessId);
-      }
-      const { data, error } = await query;
-      if (!error && Array.isArray(data)) {
-        const mapped = data.map(mapRecoveryRow);
-        if (mapped.length > 0) {
-          const existingIds = new Set(mapped.map((c) => c.id));
-          runtimeRecoveryCases = [...mapped, ...runtimeRecoveryCases.filter((c) => !existingIds.has(c.id))];
-        }
-        if (isSubscribed) {
-          const filtered = businessId
-            ? runtimeRecoveryCases.filter((c) => isMatchingBusiness(c.businessId, businessId))
-            : runtimeRecoveryCases;
-          callback(filtered);
-        }
-        return;
       }
     } catch (err) {
       console.warn('[subscribeRecoveryCases notice]:', err);
@@ -1518,7 +1523,27 @@ export function subscribeCustomers(businessId: string | null, callback: (custome
 
   const fetchCustomers = async () => {
     try {
-      // 1. Try Server API (/api/customers)
+      // 1. PRIMARY SINGLE SOURCE OF TRUTH: SUPABASE
+      let query = supabase.from('customers').select('*').order('last_review_at', { ascending: false });
+      if (businessId) {
+        query = query.eq('business_id', businessId);
+      }
+      const { data, error } = await query;
+      if (!error && Array.isArray(data)) {
+        const mapped = data.map(mapCustomerRow);
+        if (!businessId) {
+          runtimeCustomers = mapped;
+        } else {
+          const others = runtimeCustomers.filter((c) => !isMatchingBusiness(c.businessId, businessId));
+          runtimeCustomers = [...mapped, ...others];
+        }
+        if (isSubscribed) {
+          callback(mapped);
+        }
+        return;
+      }
+
+      // 2. Fallback: Server API (/api/customers)
       const url = '/api/customers' + (businessId ? `?businessId=${encodeURIComponent(businessId)}` : '');
       const apiRes = await fetch(url, { cache: 'no-store' }).catch(() => null);
       const contentType = apiRes?.headers?.get('content-type') || '';
@@ -1540,27 +1565,6 @@ export function subscribeCustomers(businessId: string | null, callback: (custome
           }
           return;
         }
-      }
-
-      // 2. Try Supabase
-      let query = supabase.from('customers').select('*').order('last_review_at', { ascending: false });
-      if (businessId) {
-        query = query.eq('business_id', businessId);
-      }
-      const { data, error } = await query;
-      if (!error && Array.isArray(data)) {
-        const mapped = data.map(mapCustomerRow);
-        if (mapped.length > 0) {
-          const existingIds = new Set(mapped.map((c) => c.id));
-          runtimeCustomers = [...mapped, ...runtimeCustomers.filter((c) => !existingIds.has(c.id))];
-        }
-        if (isSubscribed) {
-          const filtered = businessId
-            ? runtimeCustomers.filter((c) => isMatchingBusiness(c.businessId, businessId))
-            : runtimeCustomers;
-          callback(filtered);
-        }
-        return;
       }
     } catch (err) {
       console.warn('[subscribeCustomers notice]:', err);

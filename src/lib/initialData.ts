@@ -6,7 +6,7 @@ export const REGISTERED_BUSINESSES: Business[] = [
     name: 'SBK BARBERSHOP',
     slug: 'sbk-barbershop',
     category: 'Barbearia & Estética',
-    logoUrl: '',
+    logoUrl: 'https://ltpxwagdnrtuulzhfdjk.supabase.co/storage/v1/object/public/uploads/logos/biz_mvr39iv9_cpwx_1793147257194.png',
     phone: '',
     email: 'contato@sbkbarbershop.com',
     address: '',

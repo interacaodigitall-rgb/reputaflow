@@ -4,27 +4,52 @@ const SUPABASE_URL_DEFAULT = 'https://ltpxwagdnrtuulzhfdjk.supabase.co';
 const SUPABASE_ANON_KEY_DEFAULT =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx0cHh3YWdkbnJ0dXVsemhmZGprIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAzNjM3MjEsImV4cCI6MjEwNTkzOTcyMX0.BzdBFiv16a6O4g6MV4H-sWPELTss5yvL9j2V_q7YoZY';
 
-const supabaseUrl: string =
+function normalizeSupabaseUrl(raw: string): string {
+  const candidate = (raw || SUPABASE_URL_DEFAULT).trim();
+  if (!candidate) return SUPABASE_URL_DEFAULT;
+  try {
+    const parsed = new URL(candidate);
+    return parsed.origin;
+  } catch {
+    return candidate
+      .replace(/\/rest\/v1\/?.*$/i, '')
+      .replace(/\/auth\/v1\/?.*$/i, '')
+      .replace(/\/+$/, '');
+  }
+}
+
+const rawSupabaseUrl: string =
   (import.meta as any).env?.VITE_SUPABASE_URL ||
   (typeof process !== 'undefined' ? process.env?.VITE_SUPABASE_URL : '') ||
   SUPABASE_URL_DEFAULT;
 
-const supabaseAnonKey: string =
+const supabaseUrl: string = normalizeSupabaseUrl(rawSupabaseUrl);
+
+const supabaseAnonKey: string = (
   (import.meta as any).env?.VITE_SUPABASE_ANON_KEY ||
   (typeof process !== 'undefined' ? process.env?.VITE_SUPABASE_ANON_KEY : '') ||
-  SUPABASE_ANON_KEY_DEFAULT;
+  SUPABASE_ANON_KEY_DEFAULT
+).trim();
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.error("ERRO CRÍTICO: Chaves do Supabase ausentes no ficheiro .env!");
 }
 
 export const supabase = createClient(
-  supabaseUrl.trim(),
-  supabaseAnonKey.trim(),
+  supabaseUrl,
+  supabaseAnonKey,
   {
     auth: {
       persistSession: true,
       autoRefreshToken: true
+    },
+    global: {
+      fetch: (input: RequestInfo | URL, init?: RequestInit) => {
+        return fetch(input, {
+          ...init,
+          cache: 'no-store'
+        });
+      }
     },
     realtime: {
       params: {

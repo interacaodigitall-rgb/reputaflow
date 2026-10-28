@@ -36,6 +36,10 @@ import { extractReviewSlug, extractNfcPlateId, extractSlugFromUrl, getPublicRevi
 import { findFastNfcPlate } from './lib/nfcService';
 import { ArrowLeft, ShieldAlert, Store, Plus } from 'lucide-react';
 
+export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
+export const revalidate = 0;
+
 function MainAppContent() {
   const {
     currentUser,
