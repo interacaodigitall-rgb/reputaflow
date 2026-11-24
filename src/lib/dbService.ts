@@ -155,7 +155,8 @@ function mergeBusinessLists(...lists: Business[][]): Business[] {
           ...loser,
           ...winner,
           id: existing.id,
-          slug: existing.slug || winner.slug,
+          name: winner.name || loser.name,
+          slug: winner.slug || loser.slug,
           logoUrl: winner.logoUrl || loser.logoUrl || '',
           googleReviewUrl: winner.googleReviewUrl || loser.googleReviewUrl || '',
           phone: winner.phone || loser.phone || '',
@@ -752,17 +753,16 @@ export async function addBusiness(data: Omit<Business, 'id' | 'createdAt' | 'upd
 
 export const createBusiness = addBusiness;
 
-export async function updateBusiness(id: string, data: Partial<Business>): Promise<void> {
+export async function updateBusiness(id: string, data: Partial<Business>): Promise<Business | null> {
   const cleanId = String(id || '').trim();
   const currentAll = mergeBusinessLists(readCachedBusinesses(), runtimeBusinesses, [...INITIAL_BIZ]);
-  const existing = currentAll.find(
-    (b) => b.id === cleanId || (b.slug && b.slug.toLowerCase() === cleanId.toLowerCase())
-  );
+  const existing = currentAll.find((b) => b.id === cleanId);
   const establishmentId = existing?.id || cleanId;
-  const existingSlug = existing?.slug || cleanId;
+  const existingSlug = existing?.slug || '';
   const now = new Date().toISOString();
 
   // PASSO 1: BLINDAGEM DO PAYLOAD DE UPDATE
+  // Inclui explicitamente name e slug quando fornecidos e nunca altera id/created_at
   const dbUpdates: Record<string, any> = { updated_at: now };
   if (data.name !== undefined) dbUpdates.name = String(data.name).trim();
   if (data.category !== undefined) dbUpdates.category = String(data.category).trim();
@@ -776,12 +776,18 @@ export async function updateBusiness(id: string, data: Partial<Business>): Promi
   if (data.planId !== undefined) dbUpdates.plan_id = data.planId;
 
   let cleanSlug = existingSlug;
-  if (data.slug && data.slug.trim()) {
-    const candidateSlug = data.slug.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-');
+  if (data.slug !== undefined && String(data.slug).trim()) {
+    const candidateSlug = slugify(String(data.slug));
     if (candidateSlug) {
       dbUpdates.slug = candidateSlug;
       cleanSlug = candidateSlug;
     }
+  } else if (existingSlug) {
+    dbUpdates.slug = existingSlug;
+  }
+
+  if (dbUpdates.name === undefined && existing?.name) {
+    dbUpdates.name = existing.name;
   }
 
   const safeStatus = data.status || existing?.status || 'active';
@@ -792,38 +798,93 @@ export async function updateBusiness(id: string, data: Partial<Business>): Promi
   delete dbUpdates.created_at;
   delete dbUpdates.createdAt;
 
-  // 1. Atualização imediata em memória e em localStorage (garante persistência imediata no F5)
+  // 1. Persistência PRIMÁRIA no Supabase (SEMPRE por .eq('id', establishmentId) antes de disparar eventos de sync)
+  let supaUpdates = { ...dbUpdates };
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const { error: bizErr } = await supabase
+      .from('businesses')
+      .update(supaUpdates)
+      .eq('id', establishmentId);
+
+    if (!bizErr) break;
+
+    // Erro de slug duplicado no banco (unique constraint)
+    if (bizErr.code === '23505' || /duplicate key/i.test(bizErr.message || '')) {
+      throw new Error(`O slug "${cleanSlug}" já está a ser utilizado por outro estabelecimento.`);
+    }
+
+    const colMatch =
+      bizErr.message?.match(/Could not find the '([^']+)' column/i) ||
+      bizErr.message?.match(/column "([^"]+)" of relation/i);
+    if (colMatch && colMatch[1] && colMatch[1] in supaUpdates) {
+      delete supaUpdates[colMatch[1]];
+      continue;
+    }
+
+    console.error('[Supabase updateBusiness error]:', bizErr);
+    throw new Error(bizErr.message || 'Erro ao guardar alterações na base de dados.');
+  }
+
+  // Se o slug foi alterado, atualizar também eventuais placas NFC/QR ligadas a este estabelecimento
+  if (cleanSlug && existingSlug && cleanSlug !== existingSlug) {
+    try {
+      await supabase
+        .from('nfc_plates')
+        .update({
+          redirect_url: `/r/${encodeURIComponent(cleanSlug)}`,
+          updated_at: now
+        })
+        .eq('merchant_id', establishmentId);
+    } catch (plateErr) {
+      console.warn('[updateBusiness nfc_plates redirect_url sync notice]:', plateErr);
+    }
+  }
+
+  // 2. Atualizar estado em memória e localStorage (apenas após confirmação do Supabase, garantindo que não há reversão)
+  let updatedRecord: Business | null = null;
   runtimeBusinesses = currentAll.map((b) => {
-    if (b.id === establishmentId || (b.slug && b.slug.toLowerCase() === existingSlug.toLowerCase())) {
-      return {
+    if (b.id === establishmentId) {
+      updatedRecord = {
         ...b,
         ...data,
         id: b.id,
+        name: dbUpdates.name || b.name,
         slug: cleanSlug || b.slug,
         ownerId: b.ownerId,
         status: safeStatus,
         createdAt: b.createdAt,
         updatedAt: now
       };
+      return updatedRecord;
     }
     return b;
   });
-  saveCachedBusinesses(runtimeBusinesses);
-  pushGlobalCloudData({ businesses: runtimeBusinesses }).catch(() => {});
-  notifyDataChanged();
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated'));
+
+  if (!updatedRecord && existing) {
+    updatedRecord = {
+      ...existing,
+      ...data,
+      id: establishmentId,
+      name: dbUpdates.name || existing.name,
+      slug: cleanSlug || existing.slug,
+      status: safeStatus,
+      updatedAt: now
+    };
   }
 
-  // 2. Persistência no Backend REST API (/api/businesses/:id, com fallback POST /api/businesses se 404)
+  saveCachedBusinesses(runtimeBusinesses);
+  pushGlobalCloudData({ businesses: runtimeBusinesses }).catch(() => {});
+
+  // 3. Persistência secundária no Backend REST API (/api/businesses/:id)
   try {
-    const updatedRecord = runtimeBusinesses.find((b) => b.id === establishmentId);
     const putRes = await fetch(`/api/businesses/${encodeURIComponent(establishmentId)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...data,
         id: establishmentId,
+        name: dbUpdates.name,
+        slug: cleanSlug,
         status: safeStatus,
         updatedAt: now
       })
@@ -839,29 +900,14 @@ export async function updateBusiness(id: string, data: Partial<Business>): Promi
     console.warn('[updateBusiness API sync warning]:', apiErr);
   }
 
-  // 3. Persistência no Supabase (tabela unificada `businesses`)
-  try {
-    let supaUpdates = { ...dbUpdates };
-    for (let attempt = 0; attempt < 6; attempt++) {
-      const { error: bizErr } = await supabase
-        .from('businesses')
-        .update(supaUpdates)
-        .eq('id', establishmentId);
-
-      if (!bizErr) break;
-      const colMatch =
-        bizErr.message?.match(/Could not find the '([^']+)' column/i) ||
-        bizErr.message?.match(/column "([^"]+)" of relation/i);
-      if (colMatch && colMatch[1] && colMatch[1] in supaUpdates) {
-        delete supaUpdates[colMatch[1]];
-        continue;
-      }
-      await supabase.from('businesses').update(supaUpdates).eq('slug', existingSlug);
-      break;
-    }
-  } catch (err) {
-    console.error('[Supabase updateBusiness catch]:', err);
+  // 4. Notifica ouvintes globais APENAS após persistência concluída (evita race condition de rollback)
+  notifyDataChanged();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('reputaflow_businesses_updated'));
+    window.dispatchEvent(new CustomEvent('reputaflow_nfc_sync'));
   }
+
+  return updatedRecord;
 }
 
 export const updateEstablishment = updateBusiness;

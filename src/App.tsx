@@ -34,6 +34,7 @@ import {
 } from './lib/dbService';
 import { extractReviewSlug, extractNfcPlateId, extractSlugFromUrl, getPublicReviewUrl } from './lib/urlHelper';
 import { findFastNfcPlate } from './lib/nfcService';
+import { restoreDefaultDocumentMeta } from './lib/documentMeta';
 import { ArrowLeft, ShieldAlert, Store, Plus } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
@@ -45,6 +46,7 @@ function MainAppContent() {
     currentUser,
     selectedBusiness,
     setSelectedBusiness,
+    updateBusinessInState,
     businesses,
     currentRole,
     setCurrentRole,
@@ -64,6 +66,13 @@ function MainAppContent() {
       setActiveTab('super_admin');
     }
   }, [isSuperAdmin, businesses.length]);
+
+  // Restore default platform title & favicon whenever inside Admin / Merchant / Login views
+  useEffect(() => {
+    if (!isCustomerViewMode && !nfcPlateIdFromUrl) {
+      restoreDefaultDocumentMeta();
+    }
+  }, [isCustomerViewMode, nfcPlateIdFromUrl]);
 
   // Business-specific data
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -372,7 +381,7 @@ function MainAppContent() {
           {activeTab === 'settings' && selectedBusiness && (
             <MerchantSettings
               business={selectedBusiness}
-              onBusinessUpdated={(updated) => setSelectedBusiness(updated)}
+              onBusinessUpdated={(updated) => updateBusinessInState(updated)}
               onOpenReviewPreview={() => setIsCustomerViewMode(true)}
             />
           )}

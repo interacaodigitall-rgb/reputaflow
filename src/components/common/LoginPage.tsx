@@ -1,7 +1,48 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { Mail, Lock, LogIn, AlertCircle, RefreshCw, Eye, EyeOff } from 'lucide-react';
+import {
+  Mail,
+  Lock,
+  LogIn,
+  AlertCircle,
+  RefreshCw,
+  Eye,
+  EyeOff,
+  Star,
+  ShieldCheck,
+  QrCode,
+  BarChart3,
+  TrendingUp
+} from 'lucide-react';
 import { BrandLogo } from './BrandLogo';
+import { restoreDefaultDocumentMeta } from '../../lib/documentMeta';
+
+const GROWTH_BARS = [
+  { month: 'Out', height: 34 },
+  { month: 'Nov', height: 46 },
+  { month: 'Dez', height: 58 },
+  { month: 'Jan', height: 70 },
+  { month: 'Fev', height: 84 },
+  { month: 'Mar', height: 100, current: true }
+];
+
+const VALUE_PILLARS = [
+  {
+    icon: ShieldCheck,
+    title: 'Blindagem de Reputação',
+    description: 'Recupere clientes insatisfeitos antes de irem para o Google.'
+  },
+  {
+    icon: QrCode,
+    title: 'Placas NFC & QR Code',
+    description: 'Avaliação em 1 toque diretamente no balcão.'
+  },
+  {
+    icon: BarChart3,
+    title: 'Painel em Tempo Real',
+    description: 'Acompanhe feedbacks e desempenho da sua equipa.'
+  }
+];
 
 export const LoginPage: React.FC = () => {
   const { signInWithEmail, signInWithGoogle } = useAuth();
@@ -10,6 +51,10 @@ export const LoginPage: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    restoreDefaultDocumentMeta();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,9 +77,7 @@ export const LoginPage: React.FC = () => {
       } else if (err?.code === 'auth/user-disabled') {
         setError('Esta conta foi desativada pelo administrador.');
       } else {
-        setError(
-          'Erro ao autenticar. Verifique os dados introduzidos e tente novamente.'
-        );
+        setError('Erro ao autenticar. Verifique os dados introduzidos e tente novamente.');
       }
     } finally {
       setLoading(false);
@@ -42,47 +85,48 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC] py-12 px-4 sm:px-6 lg:px-8 font-sans">
-      <div className="max-w-md w-full bg-white rounded-2xl border border-gray-200/90 shadow-md overflow-hidden transition-all duration-300">
-        {/* Subtle Google 4-color top bar (#4285F4, #EA4335, #FBBC05, #34A853) */}
-        <div className="h-1.5 w-full google-color-bar" />
-
-        <div className="p-8 sm:p-10 space-y-6">
-          {/* Logo and Brand Header */}
-          <div className="text-center space-y-3">
-            <div className="flex justify-center">
-              <BrandLogo size="xl" />
+    <div className="min-h-screen w-full grid grid-cols-1 lg:grid-cols-2 bg-white font-sans">
+      {/* Coluna Esquerda (50% Desktop | 100% Mobile | Fundo Branco #FFFFFF) */}
+      <div className="flex flex-col justify-center bg-[#FFFFFF] min-h-screen relative">
+        <div className="max-w-md w-full mx-auto px-8 py-12 flex flex-col justify-center gap-8">
+          {/* Logo & Cabeçalho */}
+          <div className="space-y-4">
+            <div className="flex justify-start">
+              <BrandLogo size="lg" className="!w-24 !h-24 -ml-1" />
             </div>
             <div className="space-y-1.5">
-              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900">
+              <h1 className="text-2xl sm:text-[28px] font-bold tracking-tight text-slate-900 leading-tight">
                 Aceda à sua plataforma
               </h1>
-              <p className="text-xs sm:text-sm text-gray-500 max-w-xs mx-auto leading-relaxed">
-                Controle a reputação do seu negócio, recupere clientes insatisfeitos e gerencie as avaliações da sua empresa.
+              <p className="text-sm text-slate-500 leading-relaxed">
+                Gerencie a reputação da sua empresa, recupere clientes insatisfeitos e impulsione avaliações no Google.
               </p>
             </div>
           </div>
 
-          {/* Error / Alert Section */}
+          {/* Alerta de Erro */}
           {error && (
-            <div className="p-3.5 bg-[#EA4335]/10 border border-[#EA4335]/25 text-[#C5221F] rounded-lg text-xs font-medium flex items-start gap-2.5 animate-fade-in">
-              <AlertCircle className="w-4 h-4 text-[#EA4335] shrink-0 mt-0.5" />
+            <div
+              role="alert"
+              className="p-3.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-medium flex items-start gap-2.5"
+            >
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>
           )}
 
-          {/* Login Form */}
-          <form className="space-y-4" onSubmit={handleSubmit} autoComplete="off">
+          {/* Formulário de Autenticação */}
+          <form className="space-y-5" onSubmit={handleSubmit} autoComplete="off">
             <div className="space-y-4">
               <div>
                 <label
                   htmlFor="email-address"
-                  className="block text-xs font-semibold text-gray-700 mb-1.5"
+                  className="block text-xs font-semibold text-slate-700 mb-1.5"
                 >
                   Endereço de E-mail
                 </label>
                 <div className="relative">
-                  <Mail className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     id="email-address"
                     name="email"
@@ -91,8 +135,8 @@ export const LoginPage: React.FC = () => {
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="pl-10 pr-3.5 py-2.5 w-full text-sm text-gray-900 bg-white rounded-lg border border-gray-300 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all placeholder:text-gray-400"
-                    placeholder="Introduza o seu e-mail"
+                    className="h-12 pl-10 pr-4 w-full text-sm text-slate-900 bg-slate-50/50 rounded-xl border border-slate-200 outline-none focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15 transition-all placeholder:text-slate-400"
+                    placeholder="nome@empresa.pt"
                   />
                 </div>
               </div>
@@ -101,13 +145,13 @@ export const LoginPage: React.FC = () => {
                 <div className="flex items-center justify-between mb-1.5">
                   <label
                     htmlFor="password"
-                    className="block text-xs font-semibold text-gray-700"
+                    className="block text-xs font-semibold text-slate-700"
                   >
                     Senha
                   </label>
                 </div>
                 <div className="relative">
-                  <Lock className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     id="password"
                     name="password"
@@ -116,13 +160,13 @@ export const LoginPage: React.FC = () => {
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="pl-10 pr-10 py-2.5 w-full text-sm text-gray-900 bg-white rounded-lg border border-gray-300 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all placeholder:text-gray-400"
+                    className="h-12 pl-10 pr-11 w-full text-sm text-slate-900 bg-slate-50/50 rounded-xl border border-slate-200 outline-none focus:bg-white focus:border-amber-500/80 focus:ring-4 focus:ring-amber-400/15 transition-all placeholder:text-slate-400"
                     placeholder="Introduza a sua senha"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none cursor-pointer transition p-1 rounded-md"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer transition p-1.5 rounded-lg"
                     title={showPassword ? 'Ocultar senha' : 'Ver senha'}
                     aria-label={showPassword ? 'Ocultar senha' : 'Ver senha'}
                   >
@@ -136,40 +180,38 @@ export const LoginPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="pt-1">
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full py-2.5 px-4 bg-[#4285F4] hover:bg-[#3367D6] active:bg-[#2A56C6] text-white font-semibold rounded-lg text-sm transition-all duration-200 flex items-center justify-center gap-2 shadow-sm hover:shadow-md disabled:opacity-50 cursor-pointer"
-              >
-                {loading ? (
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                ) : (
-                  <LogIn className="w-4 h-4" />
-                )}
-                <span>{loading ? 'A autenticar...' : 'Entrar na Conta'}</span>
-              </button>
-            </div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full h-12 rounded-xl bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white font-semibold text-sm shadow-sm transition-all duration-150 flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+            >
+              {loading ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : (
+                <LogIn className="w-4 h-4" />
+              )}
+              <span>{loading ? 'A autenticar...' : 'Entrar na Conta'}</span>
+            </button>
           </form>
 
-          {/* Divider */}
-          <div className="relative py-1">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-gray-200" />
+          {/* Divisor Discreto */}
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center" aria-hidden="true">
+              <div className="w-full border-t border-slate-200" />
             </div>
             <div className="relative flex justify-center text-xs">
-              <span className="px-3 bg-white text-gray-400 font-medium">
-                Ou se preferir
+              <span className="px-3 bg-white text-slate-400 font-medium">
+                Ou continue com
               </span>
             </div>
           </div>
 
-          {/* Google SSO Button */}
+          {/* Botão Google SSO */}
           <div>
             <button
               type="button"
               onClick={signInWithGoogle}
-              className="w-full py-2.5 px-4 bg-white hover:bg-gray-50 active:bg-gray-100 text-gray-700 font-medium rounded-lg text-sm border border-gray-300 shadow-xs hover:shadow-sm transition-all duration-200 flex items-center justify-center gap-2.5 cursor-pointer"
+              className="w-full h-12 px-4 bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-700 font-semibold rounded-xl text-sm border border-slate-200 shadow-2xs transition-all duration-150 flex items-center justify-center gap-2.5 cursor-pointer"
             >
               <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
                 <path
@@ -193,14 +235,132 @@ export const LoginPage: React.FC = () => {
             </button>
           </div>
 
-          {/* Footnote branding */}
-          <div className="text-center pt-2 border-t border-gray-100">
-            <p className="text-[11px] text-gray-400 font-medium">
-              © {new Date().getFullYear()} GlowfyHub. Todos os direitos reservados.
+          {/* Rodapé Limpo */}
+          <div className="pt-4 border-t border-slate-100 text-center space-y-1">
+            <p className="text-xs text-slate-400">
+              © {new Date().getFullYear()} GlowfyHub · Todos os direitos reservados.
             </p>
-            <p className="text-[10px] text-gray-400/90 mt-0.5">
-              Operação internacional: Brasil (R$) &amp; Europa (€)
+            <p className="text-[11px] text-slate-400">
+              Operação internacional: Europa (€) · Brasil (R$)
             </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Coluna Direita (50% Desktop | Oculta em Mobile | Fundo Escuro Sofisticado #0B1120) */}
+      <div className="hidden lg:flex relative flex-col justify-center overflow-hidden bg-[#0B1120] bg-gradient-to-br from-[#0B1120] via-[#0F172A] to-[#090E1A] px-12 xl:px-16 py-12 text-white">
+        {/* Brilho Radial Suave ao Fundo */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -top-24 right-0 w-[460px] h-[460px] rounded-full bg-blue-500/15 blur-3xl"
+        />
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -bottom-28 -left-20 w-[380px] h-[380px] rounded-full bg-amber-400/10 blur-3xl"
+        />
+
+        <div className="relative z-10 max-w-lg mx-auto w-full space-y-8">
+          {/* Headline de Autoridade */}
+          <div className="space-y-3">
+            <p className="text-xs font-semibold tracking-wide text-blue-300/90">
+              Gestão de Reputação &amp; Google Reviews
+            </p>
+            <h2 className="text-3xl xl:text-[34px] font-bold tracking-tight leading-[1.18] text-white [text-wrap:balance]">
+              Transforme cada cliente satisfeito em avaliações 5 estrelas no Google.
+            </h2>
+          </div>
+
+          {/* Card Visual Flutuante (Glassmorphism) */}
+          <div className="bg-white/5 border border-white/10 backdrop-blur-md rounded-2xl p-6 space-y-5 shadow-2xl shadow-black/30">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-2.5">
+                <div className="flex items-center gap-0.5" aria-label="Avaliação 4.9 de 5 estrelas">
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <Star
+                      key={n}
+                      className="w-4 h-4 fill-[#FBBC05] text-[#FBBC05]"
+                    />
+                  ))}
+                </div>
+                <span className="text-lg font-bold text-white tabular-nums tracking-tight">
+                  4.9
+                </span>
+              </div>
+
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-300">
+                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Filtro Inteligente Ativo</span>
+              </div>
+            </div>
+
+            <p className="text-sm text-slate-300 leading-relaxed">
+              &ldquo;Atendimento impecável do início ao fim. O processo de avaliação pelo QR Code no balcão levou menos de 10 segundos.&rdquo;
+            </p>
+
+            {/* Gráfico Minimalista de Crescimento de Reputação */}
+            <div className="pt-2 space-y-3">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400 font-medium">Crescimento de avaliações 5 estrelas</span>
+                <span className="inline-flex items-center gap-1 text-emerald-300 font-semibold tabular-nums">
+                  <TrendingUp className="w-3.5 h-3.5" />
+                  +184% em 90 dias
+                </span>
+              </div>
+
+              <div className="grid grid-cols-6 items-end gap-2.5 h-20 pt-2">
+                {GROWTH_BARS.map((bar) => (
+                  <div key={bar.month} className="flex flex-col items-center gap-1.5 h-full justify-end">
+                    <div
+                      className={`w-full rounded-md transition-all ${
+                        bar.current
+                          ? 'bg-gradient-to-t from-blue-500 to-blue-400 shadow-sm shadow-blue-500/30'
+                          : 'bg-white/15'
+                      }`}
+                      style={{ height: `${bar.height}%` }}
+                    />
+                    <span className="text-[11px] text-slate-400 tabular-nums">{bar.month}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Métricas Resumo */}
+            <div className="grid grid-cols-3 divide-x divide-white/10 pt-4 border-t border-white/10 text-left">
+              <div className="pr-3">
+                <div className="text-base font-bold text-white tabular-nums">+428</div>
+                <div className="text-[11px] text-slate-400 mt-0.5">Novas 5★ no Google</div>
+              </div>
+              <div className="px-3">
+                <div className="text-base font-bold text-emerald-300 tabular-nums">92%</div>
+                <div className="text-[11px] text-slate-400 mt-0.5">Casos recuperados</div>
+              </div>
+              <div className="pl-3">
+                <div className="text-base font-bold text-amber-300 tabular-nums">12s</div>
+                <div className="text-[11px] text-slate-400 mt-0.5">Tempo por avaliação</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Lista de 3 Pilares */}
+          <div className="space-y-4 pt-1">
+            {VALUE_PILLARS.map((pillar) => {
+              const Icon = pillar.icon;
+              return (
+                <div key={pillar.title} className="flex items-start gap-3.5">
+                  <div className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-blue-300 shrink-0 mt-0.5">
+                    <Icon className="w-4 h-4" />
+                  </div>
+                  <div className="space-y-0.5">
+                    <h3 className="text-sm font-semibold text-white tracking-wide">
+                      {pillar.title}
+                    </h3>
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      {pillar.description}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>

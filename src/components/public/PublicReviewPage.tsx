@@ -25,6 +25,7 @@ import {
   normalizeKey
 } from '../../lib/dbService';
 import { extractReviewSlug } from '../../lib/urlHelper';
+import { applyBusinessDocumentMeta, restoreDefaultDocumentMeta } from '../../lib/documentMeta';
 import { BusinessLogo } from '../common/BusinessLogo';
 
 export const dynamic = 'force-dynamic';
@@ -153,6 +154,20 @@ export const PublicReviewPage: React.FC<PublicReviewPageProps> = ({
       clearInterval(interval);
     };
   }, [activeSlug, businessOverride]);
+
+  // Atualiza dinamicamente título da aba, favicon (logo_url) e meta description do estabelecimento
+  useEffect(() => {
+    if (business) {
+      applyBusinessDocumentMeta(business);
+    }
+  }, [business?.id, business?.name, business?.category, business?.logoUrl]);
+
+  // Restaura título e favicon padrão da plataforma ao sair da página pública
+  useEffect(() => {
+    return () => {
+      restoreDefaultDocumentMeta();
+    };
+  }, []);
 
   const handleSelectStar = (rating: number) => {
     setSelectedRating(rating);

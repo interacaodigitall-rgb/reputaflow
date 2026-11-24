@@ -31,13 +31,14 @@ import {
 import { Business } from '../../types';
 import { NfcPlate } from '../../types/nfc';
 import { updateBusiness, uploadImage } from '../../lib/dbService';
-import { uploadBusinessLogo } from '../../lib/supabase';
+import { supabase, uploadBusinessLogo } from '../../lib/supabase';
 import {
   getPublicReviewUrl,
   getNfcRedirectUrl,
   normalizeGoogleReviewUrl,
   convertGoogleMapsToReviewUrl,
   extractGooglePlaceId,
+  slugify,
   GoogleReviewUrlNormalization
 } from '../../lib/urlHelper';
 import { getNfcPlates } from '../../lib/nfcService';
@@ -54,7 +55,7 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
   onBusinessUpdated,
   onOpenReviewPreview
 }) => {
-  const { changePassword } = useAuth();
+  const { changePassword, businesses } = useAuth();
   const [name, setName] = useState(business.name);
   const [slug, setSlug] = useState(business.slug);
   const [category, setCategory] = useState(business.category || '');
@@ -65,17 +66,24 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
   const [googleReviewUrl, setGoogleReviewUrl] = useState(business.googleReviewUrl || '');
   const [currency, setCurrency] = useState<'EUR' | 'BRL'>(business.currency || 'EUR');
 
+  // Sincroniza os campos do formulário APENAS quando mudar o business.id (nunca em cada re-render/poll)
+  const syncedBusinessIdRef = React.useRef<string>(business.id);
   useEffect(() => {
-    setName(business.name);
-    setSlug(business.slug);
-    setCategory(business.category || '');
-    setPhone(business.phone);
-    setEmail(business.email);
-    setAddress(business.address);
-    setLogoUrl(business.logoUrl || '');
-    setGoogleReviewUrl(business.googleReviewUrl || '');
-    setCurrency(business.currency || 'EUR');
-  }, [business]);
+    if (syncedBusinessIdRef.current !== business.id) {
+      syncedBusinessIdRef.current = business.id;
+      setName(business.name);
+      setSlug(business.slug);
+      setCategory(business.category || '');
+      setPhone(business.phone);
+      setEmail(business.email);
+      setAddress(business.address);
+      setLogoUrl(business.logoUrl || '');
+      setGoogleReviewUrl(business.googleReviewUrl || '');
+      setCurrency(business.currency || 'EUR');
+      setSaveError(null);
+      setSavedSuccess(false);
+    }
+  }, [business.id]);
 
   const [saving, setSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
@@ -200,7 +208,7 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
     };
   }, [business.id, business.slug]);
 
-  const activeMerchantSlug = slug || business.slug || business.id;
+  const activeMerchantSlug = slugify(slug) || business.slug || business.id;
   const publicReviewUrl = getPublicReviewUrl(activeMerchantSlug);
   const plateQrUrl = getNfcRedirectUrl(activeMerchantSlug);
   const currentQrUrl = qrMode === 'plate' ? plateQrUrl : publicReviewUrl;
@@ -264,7 +272,52 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
     setSaveError(null);
 
     try {
-      const cleanSlug = (slug || '').toLowerCase().trim().replace(/[^a-z0-9-]/g, '-');
+      const cleanName = (name || '').trim();
+      if (!cleanName) {
+        setSaveError('Por favor, indique o nome do estabelecimento.');
+        setSaving(false);
+        return;
+      }
+
+      // Formatação limpa do slug (minúsculas, sem espaços nem acentos, com hífen '-')
+      const cleanSlug = slugify(slug || cleanName);
+      if (!cleanSlug) {
+        setSaveError('Por favor, indique um slug válido (letras ou números).');
+        setSaving(false);
+        return;
+      }
+
+      // 1. Verificar duplicidade de slug em memória
+      const localDuplicate = businesses.find(
+        (b) => b.id !== business.id && b.slug.toLowerCase().trim() === cleanSlug.toLowerCase()
+      );
+      if (localDuplicate) {
+        setSaveError(
+          `O slug "${cleanSlug}" já está a ser utilizado por "${localDuplicate.name}". Por favor, escolha outro identificador.`
+        );
+        setSaving(false);
+        return;
+      }
+
+      // 2. Verificar duplicidade de slug diretamente no Supabase (outros comércios com id diferente)
+      try {
+        const { data: existingSlugRows, error: slugCheckErr } = await supabase
+          .from('businesses')
+          .select('id, name, slug')
+          .eq('slug', cleanSlug)
+          .neq('id', business.id);
+
+        if (!slugCheckErr && Array.isArray(existingSlugRows) && existingSlugRows.length > 0) {
+          const conflictName = existingSlugRows[0]?.name ? ` ("${existingSlugRows[0].name}")` : '';
+          setSaveError(
+            `O slug "${cleanSlug}" já está em uso por outro estabelecimento${conflictName}. Por favor, escolha outro identificador.`
+          );
+          setSaving(false);
+          return;
+        }
+      } catch (dupErr) {
+        console.warn('[MerchantSettings duplicate slug check notice]:', dupErr);
+      }
 
       // Passo 2: Normalização do Link do Google Reviews antes de salvar
       let normalizedGoogleUrl = (googleReviewUrl || '').trim();
@@ -280,9 +333,10 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
       }
 
       // PASSO 1: BLINDAGEM DO PAYLOAD DE UPDATE
-      // Nunca envia id, tenant_id ou created_at no corpo do update
+      // Inclui explicitamente name e slug e nunca envia id, tenant_id ou created_at
       const updatedData: Partial<Business> = {
-        name: (name || '').trim(),
+        name: cleanName,
+        slug: cleanSlug,
         category: (category || '').trim(),
         phone: (phone || '').trim(),
         email: (email || '').trim(),
@@ -293,13 +347,11 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
         status: business.status || 'active'
       };
 
-      if (cleanSlug && cleanSlug !== business.slug) {
-        updatedData.slug = cleanSlug;
-      }
-
-      // Salva no banco de dados com ID rigorosamente preservado na cláusula .eq('id', business.id)
+      // Salva no Supabase sempre com .eq('id', business.id)
       await updateBusiness(business.id, updatedData);
 
+      setName(cleanName);
+      setSlug(cleanSlug);
       setGoogleReviewUrl(normalizedGoogleUrl);
       setSavedSuccess(true);
       setToastMessage('Alterações guardadas com sucesso!');
@@ -313,15 +365,17 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
         setTimeout(() => setGoogleToast(null), 4500);
       }
 
-      // PASSO 2: PRESERVAÇÃO DA LISTAGEM E ESTADO LOCAL
-      // Preserva estritamente o id, ownerId e createdAt do estabelecimento ativo
+      // PASSO 2: ATUALIZAÇÃO IMEDIATA DO ESTADO GLOBAL E LINKS/QR LATERAIS
       const updatedBusinessRecord: Business = {
         ...business,
         ...updatedData,
         id: business.id,
+        name: cleanName,
+        slug: cleanSlug,
         ownerId: business.ownerId,
         status: business.status || 'active',
-        createdAt: business.createdAt
+        createdAt: business.createdAt,
+        updatedAt: new Date().toISOString()
       };
 
       if (onBusinessUpdated) {
@@ -330,7 +384,9 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
       setTimeout(() => setSavedSuccess(false), 4000);
     } catch (err: any) {
       console.error('Error saving business settings:', err);
-      const errMsg = 'Erro ao guardar as alterações: ' + (err.message || 'Tente novamente.');
+      const errMsg = err?.message
+        ? err.message
+        : 'Erro ao guardar as alterações. Tente novamente.';
       setSaveError(errMsg);
     } finally {
       setSaving(false);
@@ -394,7 +450,7 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
         ctx.fillStyle = '#0F172A';
         ctx.font = 'bold 22px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(business.name, canvas.width / 2, 55);
+        ctx.fillText(name || business.name, canvas.width / 2, 55);
 
         // Subtitle or Plate Badge
         if (linkedPlate && qrMode === 'plate') {
@@ -435,8 +491,8 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
         const pngFile = canvas.toDataURL('image/png');
         const downloadLink = document.createElement('a');
         downloadLink.download = linkedPlate && qrMode === 'plate'
-          ? `placa-oficial-${business.slug}-${linkedPlate.id}.png`
-          : `qrcode-avaliacao-${business.slug}.png`;
+          ? `placa-oficial-${activeMerchantSlug}-${linkedPlate.id}.png`
+          : `qrcode-avaliacao-${activeMerchantSlug}.png`;
         downloadLink.href = pngFile;
         downloadLink.click();
       }
@@ -522,12 +578,21 @@ export const MerchantSettings: React.FC<MerchantSettingsProps> = ({
                         type="text"
                         required
                         value={slug}
-                        onChange={(e) => setSlug(e.target.value)}
-                        className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                        onChange={(e) => {
+                          setSlug(e.target.value);
+                          if (saveError) setSaveError(null);
+                        }}
+                        onBlur={() => {
+                          if (slug.trim()) {
+                            const formatted = slugify(slug);
+                            if (formatted) setSlug(formatted);
+                          }
+                        }}
+                        className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-mono"
                       />
                     </div>
                     <span className="text-[10px] text-slate-400 mt-0.5 block">
-                      Usado na URL de avaliação: ?b={slug}
+                      Usado na URL de avaliação: /r/{slugify(slug) || slug}
                     </span>
                   </div>
                 </div>

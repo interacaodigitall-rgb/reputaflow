@@ -19,6 +19,7 @@ interface AuthContextType {
   businesses: Business[];
   selectedBusiness: Business | null;
   setSelectedBusiness: (biz: Business | null) => void;
+  updateBusinessInState: (updated: Business) => void;
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<void>;
@@ -135,9 +136,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
           }
           if (!prev) return safeList[0];
-          const found = safeList.find(
-            (b) => b.id === prev.id || (prev.slug && b.slug.toLowerCase() === prev.slug.toLowerCase())
-          );
+          const found = safeList.find((b) => b.id === prev.id);
           return found || prev || safeList[0];
         });
       }
@@ -269,6 +268,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const updateBusinessInState = (updated: Business) => {
+    if (!updated || !updated.id) return;
+    setBusinesses((prev) =>
+      prev.some((b) => b.id === updated.id)
+        ? prev.map((b) => (b.id === updated.id ? { ...b, ...updated } : b))
+        : [updated, ...prev]
+    );
+    setSelectedBusiness((prev) => (prev && prev.id === updated.id ? { ...prev, ...updated } : updated));
+  };
+
   const isSuperAdmin = Boolean(
     currentUser?.email && ADMIN_EMAILS.some((e) => e.toLowerCase() === currentUser.email.toLowerCase().trim())
   );
@@ -292,6 +301,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         businesses,
         selectedBusiness,
         setSelectedBusiness,
+        updateBusinessInState,
         loading,
         signInWithGoogle,
         signInWithEmail,

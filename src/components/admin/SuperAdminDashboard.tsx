@@ -71,7 +71,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   settings,
   onImpersonateBusiness
 }) => {
-  const { changePassword, currentUser } = useAuth();
+  const { changePassword, currentUser, updateBusinessInState } = useAuth();
   const [activeTab, setActiveTab] = useState<'merchants' | 'plans' | 'settings' | 'nfc'>('merchants');
   const [searchBiz, setSearchBiz] = useState('');
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
@@ -265,8 +265,15 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     e.preventDefault();
     if (!editingBusiness) return;
 
-    if (!editBizName.trim()) {
+    const cleanName = editBizName.trim();
+    if (!cleanName) {
       setEditError('Por favor, informe o nome do estabelecimento.');
+      return;
+    }
+
+    const cleanSlug = slugify(editBizSlug || cleanName);
+    if (!cleanSlug) {
+      setEditError('Por favor, indique um slug válido (letras ou números).');
       return;
     }
 
@@ -274,16 +281,43 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     setEditError(null);
 
     try {
-      const cleanSlug = slugify(editBizSlug || editBizName);
+      // Verificar duplicidade de slug em memória
+      const localDup = effectiveBusinesses.find(
+        (b) => b.id !== editingBusiness.id && b.slug.toLowerCase().trim() === cleanSlug.toLowerCase()
+      );
+      if (localDup) {
+        setEditError(`O slug "${cleanSlug}" já está a ser utilizado por "${localDup.name}". Escolha outro identificador.`);
+        setSavingEdit(false);
+        return;
+      }
+
+      // Verificar duplicidade de slug no Supabase
+      try {
+        const { data: dupRows, error: dupErr } = await supabase
+          .from('businesses')
+          .select('id, name, slug')
+          .eq('slug', cleanSlug)
+          .neq('id', editingBusiness.id);
+        if (!dupErr && Array.isArray(dupRows) && dupRows.length > 0) {
+          const conflictName = dupRows[0]?.name ? ` ("${dupRows[0].name}")` : '';
+          setEditError(`O slug "${cleanSlug}" já está em uso por outro estabelecimento${conflictName}.`);
+          setSavingEdit(false);
+          return;
+        }
+      } catch (dupCheckErr) {
+        console.warn('[SuperAdmin slug uniqueness check notice]:', dupCheckErr);
+      }
+
       let normalizedGoogleUrl = (editBizGoogleUrl || '').trim();
       if (normalizedGoogleUrl) {
         const norm = normalizeGoogleReviewUrl(normalizedGoogleUrl);
         if (norm.url) normalizedGoogleUrl = norm.url;
       }
 
-      // PASSO 1: BLINDAGEM DO PAYLOAD DE UPDATE
+      // PASSO 1: BLINDAGEM DO PAYLOAD DE UPDATE (inclui explicitamente name e slug)
       const payload: Partial<Business> = {
-        name: editBizName.trim(),
+        name: cleanName,
+        slug: cleanSlug,
         category: editBizCategory.trim() || 'Comércio & Serviços',
         phone: editBizPhone.trim(),
         email: editBizEmail.trim(),
@@ -295,11 +329,22 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
         status: editBizStatus
       };
 
-      if (cleanSlug && cleanSlug !== editingBusiness.slug) {
-        payload.slug = cleanSlug;
-      }
-
       await updateBusiness(editingBusiness.id, payload);
+
+      const updatedRecord: Business = {
+        ...editingBusiness,
+        ...payload,
+        id: editingBusiness.id,
+        name: cleanName,
+        slug: cleanSlug,
+        updatedAt: new Date().toISOString()
+      };
+
+      updateBusinessInState(updatedRecord);
+      setDirectBusinesses((prev) =>
+        prev.map((b) => (b.id === editingBusiness.id ? { ...b, ...updatedRecord } : b))
+      );
+
       setEditingBusiness(null);
       showToast('Alterações guardadas com sucesso!', 'success');
     } catch (err: any) {
